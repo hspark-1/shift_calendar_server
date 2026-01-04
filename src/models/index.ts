@@ -18,3 +18,16 @@ export { default as Event } from "./Event";
 
 // 인증 관련
 export { default as RefreshToken } from "./RefreshToken";
+
+// 친구 관련
+export { default as FriendRequest, FriendRequestStatus } from "./FriendRequest";
+export { default as Friendship } from "./Friendship";
+export { default as FriendLevelSetting } from "./FriendLevelSetting";
+
+// 알림 관련
+export {
+  default as Notification,
+  NotificationType,
+  NotificationAction,
+  NotificationPayload,
+} from "./Notification";

@@ -1,483 +1,513 @@
 <!DOCTYPE html>
 <html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>카카오 로그인 테스트</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
-    
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    :root {
-      --kakao-yellow: #FEE500;
-      --kakao-brown: #3C1E1E;
-      --bg-dark: #1a1a2e;
-      --bg-card: #16213e;
-      --text-primary: #eaeaea;
-      --text-secondary: #a0a0a0;
-      --accent: #0f3460;
-      --success: #10b981;
-      --error: #ef4444;
-    }
-    
-    body {
-      font-family: 'Noto Sans KR', sans-serif;
-      background: linear-gradient(135deg, var(--bg-dark) 0%, #0f0f23 100%);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      color: var(--text-primary);
-      padding: 20px;
-    }
-    
-    .container {
-      background: var(--bg-card);
-      border-radius: 16px;
-      padding: 40px;
-      max-width: 480px;
-      width: 100%;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    
-    .header {
-      text-align: center;
-      margin-bottom: 32px;
-    }
-    
-    .header h1 {
-      font-size: 24px;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }
-    
-    .header p {
-      color: var(--text-secondary);
-      font-size: 14px;
-    }
-    
-    .badge {
-      display: inline-block;
-      background: var(--accent);
-      color: var(--text-primary);
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      margin-top: 8px;
-    }
-    
-    .config-section {
-      margin-bottom: 24px;
-    }
-    
-    .config-section label {
-      display: block;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      margin-bottom: 8px;
-    }
-    
-    .config-section input {
-      width: 100%;
-      padding: 12px 16px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      background: rgba(0, 0, 0, 0.2);
-      color: var(--text-primary);
-      font-size: 14px;
-      transition: border-color 0.2s;
-    }
-    
-    .config-section input:focus {
-      outline: none;
-      border-color: var(--kakao-yellow);
-    }
-    
-    .config-section input::placeholder {
-      color: var(--text-secondary);
-    }
-    
-    .kakao-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      width: 100%;
-      padding: 14px 20px;
-      background: var(--kakao-yellow);
-      color: var(--kakao-brown);
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-      margin-top: 16px;
-    }
-    
-    .kakao-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 20px rgba(254, 229, 0, 0.2);
-    }
-    
-    .kakao-btn:active {
-      transform: translateY(0);
-    }
-    
-    .kakao-btn svg {
-      width: 20px;
-      height: 20px;
-    }
-    
-    .divider {
-      display: flex;
-      align-items: center;
-      margin: 32px 0;
-      color: var(--text-secondary);
-      font-size: 12px;
-    }
-    
-    .divider::before,
-    .divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: rgba(255, 255, 255, 0.1);
-    }
-    
-    .divider span {
-      padding: 0 16px;
-    }
-    
-    .result-section {
-      display: none;
-    }
-    
-    .result-section.show {
-      display: block;
-    }
-    
-    .result-box {
-      background: rgba(0, 0, 0, 0.3);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-    
-    .result-box.success {
-      border-left: 3px solid var(--success);
-    }
-    
-    .result-box.error {
-      border-left: 3px solid var(--error);
-    }
-    
-    .result-title {
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    
-    .result-content {
-      font-size: 13px;
-      color: var(--text-secondary);
-      word-break: break-all;
-    }
-    
-    .result-content pre {
-      background: rgba(0, 0, 0, 0.3);
-      padding: 12px;
-      border-radius: 6px;
-      overflow-x: auto;
-      font-family: 'Monaco', 'Consolas', monospace;
-      font-size: 12px;
-      line-height: 1.5;
-      color: var(--text-primary);
-      margin-top: 8px;
-    }
-    
-    .user-card {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 16px;
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      border-radius: 12px;
-      margin-bottom: 16px;
-    }
-    
-    .user-avatar {
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      object-fit: cover;
-      border: 2px solid var(--success);
-    }
-    
-    .user-avatar.placeholder {
-      background: var(--accent);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-    }
-    
-    .user-info h3 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    
-    .user-info p {
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
-    
-    .token-display {
-      margin-top: 16px;
-    }
-    
-    .token-item {
-      margin-bottom: 12px;
-    }
-    
-    .token-label {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      margin-bottom: 4px;
-    }
-    
-    .token-value {
-      font-size: 11px;
-      font-family: 'Monaco', 'Consolas', monospace;
-      background: rgba(0, 0, 0, 0.3);
-      padding: 8px 12px;
-      border-radius: 6px;
-      word-break: break-all;
-      color: var(--success);
-    }
-    
-    .reset-btn {
-      width: 100%;
-      padding: 12px;
-      background: transparent;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      color: var(--text-secondary);
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-      margin-top: 16px;
-    }
-    
-    .reset-btn:hover {
-      border-color: rgba(255, 255, 255, 0.3);
-      color: var(--text-primary);
-    }
-    
-    .loading {
-      display: none;
-      text-align: center;
-      padding: 20px;
-    }
-    
-    .loading.show {
-      display: block;
-    }
-    
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(255, 255, 255, 0.1);
-      border-top-color: var(--kakao-yellow);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 12px;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    
-    .footer {
-      margin-top: 24px;
-      text-align: center;
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-    
-    .footer a {
-      color: var(--kakao-yellow);
-      text-decoration: none;
-    }
-    
-    .footer a:hover {
-      text-decoration: underline;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🔐 카카오 로그인 테스트</h1>
-      <p>Shift Calendar Server 인증 테스트 페이지</p>
-      <span class="badge">Development Only</span>
-    </div>
-    
-    <div id="loginForm">
-      <div class="config-section">
-        <label for="clientId">카카오 앱 REST API 키</label>
-        <input 
-          type="text" 
-          id="clientId" 
-          placeholder="카카오 개발자 콘솔에서 확인하세요"
-        >
-      </div>
-      
-      <div class="config-section">
-        <label for="redirectUri">Redirect URI</label>
-        <input 
-          type="text" 
-          id="redirectUri" 
-          placeholder="예: http://localhost:3000/test/callback.html"
-        >
-      </div>
-      
-      <button class="kakao-btn" onclick="startKakaoLogin()">
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 3C6.477 3 2 6.463 2 10.731c0 2.756 1.833 5.175 4.587 6.543-.155.577-.563 2.093-.645 2.417-.1.404.148.399.311.29.128-.086 2.04-1.379 2.866-1.94.612.087 1.243.132 1.881.132 5.523 0 10-3.463 10-7.442C21 6.463 17.523 3 12 3z"/>
-        </svg>
-        카카오 로그인
-      </button>
-    </div>
-    
-    <div class="loading" id="loading">
-      <div class="spinner"></div>
-      <p>로그인 처리 중...</p>
-    </div>
-    
-    <div class="result-section" id="resultSection">
-      <!-- 결과가 여기에 표시됩니다 -->
-    </div>
-    
-    <div class="footer">
-      <p>이 페이지는 개발 테스트 전용입니다.</p>
-      <p>카카오 개발자 콘솔: <a href="https://developers.kakao.com" target="_blank">developers.kakao.com</a></p>
-    </div>
-  </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>카카오 로그인 테스트</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
 
-  <script>
-    const API_BASE_URL = window.location.origin + '/api/v1';
-    
-    // 페이지 로드 시 저장된 설정 복원
-    document.addEventListener('DOMContentLoaded', () => {
-      const savedClientId = localStorage.getItem('kakao_client_id');
-      const savedRedirectUri = localStorage.getItem('kakao_redirect_uri');
-      
-      if (savedClientId) {
-        document.getElementById('clientId').value = savedClientId;
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-      
-      if (savedRedirectUri) {
-        document.getElementById('redirectUri').value = savedRedirectUri;
-      } else {
-        // 기본 redirect URI 설정
-        document.getElementById('redirectUri').value = 
-          window.location.origin + '/test/callback.html';
+
+      :root {
+        --kakao-yellow: #fee500;
+        --kakao-brown: #3c1e1e;
+        --bg-dark: #1a1a2e;
+        --bg-card: #16213e;
+        --text-primary: #eaeaea;
+        --text-secondary: #a0a0a0;
+        --accent: #0f3460;
+        --success: #10b981;
+        --error: #ef4444;
       }
-      
-      // URL에 code가 있으면 callback 처리
-      const urlParams = new URLSearchParams(window.location.search);
-      const code = urlParams.get('code');
-      const error = urlParams.get('error');
-      
-      if (code) {
-        handleCallback(code);
-      } else if (error) {
-        showError('카카오 로그인 실패', urlParams.get('error_description') || error);
+
+      body {
+        font-family: "Noto Sans KR", sans-serif;
+        background: linear-gradient(135deg, var(--bg-dark) 0%, #0f0f23 100%);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-primary);
+        padding: 20px;
       }
-    });
-    
-    function startKakaoLogin() {
-      const clientId = document.getElementById('clientId').value.trim();
-      const redirectUri = document.getElementById('redirectUri').value.trim();
-      
-      if (!clientId) {
-        alert('카카오 앱 REST API 키를 입력해주세요.');
-        return;
+
+      .container {
+        background: var(--bg-card);
+        border-radius: 16px;
+        padding: 40px;
+        max-width: 480px;
+        width: 100%;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.05);
       }
-      
-      if (!redirectUri) {
-        alert('Redirect URI를 입력해주세요.');
-        return;
+
+      .header {
+        text-align: center;
+        margin-bottom: 32px;
       }
-      
-      // 설정 저장
-      localStorage.setItem('kakao_client_id', clientId);
-      localStorage.setItem('kakao_redirect_uri', redirectUri);
-      
-      // 카카오 OAuth 인증 페이지로 이동
-      const kakaoAuthUrl = new URL('https://kauth.kakao.com/oauth/authorize');
-      kakaoAuthUrl.searchParams.set('client_id', clientId);
-      kakaoAuthUrl.searchParams.set('redirect_uri', redirectUri);
-      kakaoAuthUrl.searchParams.set('response_type', 'code');
-      kakaoAuthUrl.searchParams.set('scope', 'profile_nickname,profile_image,account_email');
-      
-      window.location.href = kakaoAuthUrl.toString();
-    }
-    
-    async function handleCallback(code) {
-      showLoading(true);
-      
-      try {
-        const response = await fetch(`${API_BASE_URL}/auth/kakao`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ code }),
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-          showSuccess(data.data);
-        } else {
-          showError('로그인 실패', data.message || '알 수 없는 오류가 발생했습니다.');
+
+      .header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .header p {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      .badge {
+        display: inline-block;
+        background: var(--accent);
+        color: var(--text-primary);
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        margin-top: 8px;
+      }
+
+      .config-section {
+        margin-bottom: 24px;
+      }
+
+      .config-section label {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .config-section input {
+        width: 100%;
+        padding: 12px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text-primary);
+        font-size: 14px;
+        transition: border-color 0.2s;
+      }
+
+      .config-section input:focus {
+        outline: none;
+        border-color: var(--kakao-yellow);
+      }
+
+      .config-section input::placeholder {
+        color: var(--text-secondary);
+      }
+
+      .kakao-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        padding: 14px 20px;
+        background: var(--kakao-yellow);
+        color: var(--kakao-brown);
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        margin-top: 16px;
+      }
+
+      .kakao-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(254, 229, 0, 0.2);
+      }
+
+      .kakao-btn:active {
+        transform: translateY(0);
+      }
+
+      .kakao-btn svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      .divider {
+        display: flex;
+        align-items: center;
+        margin: 32px 0;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+
+      .divider::before,
+      .divider::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .divider span {
+        padding: 0 16px;
+      }
+
+      .result-section {
+        display: none;
+      }
+
+      .result-section.show {
+        display: block;
+      }
+
+      .result-box {
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+
+      .result-box.success {
+        border-left: 3px solid var(--success);
+      }
+
+      .result-box.error {
+        border-left: 3px solid var(--error);
+      }
+
+      .result-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .result-content {
+        font-size: 13px;
+        color: var(--text-secondary);
+        word-break: break-all;
+      }
+
+      .result-content pre {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-family: "Monaco", "Consolas", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--text-primary);
+        margin-top: 8px;
+      }
+
+      .user-card {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 16px;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        border-radius: 12px;
+        margin-bottom: 16px;
+      }
+
+      .user-avatar {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid var(--success);
+      }
+
+      .user-avatar.placeholder {
+        background: var(--accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+      }
+
+      .user-info h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      .user-info p {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .token-display {
+        margin-top: 16px;
+      }
+
+      .token-item {
+        margin-bottom: 12px;
+      }
+
+      .token-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+
+      .token-value {
+        font-size: 11px;
+        font-family: "Monaco", "Consolas", monospace;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 8px 12px;
+        border-radius: 6px;
+        word-break: break-all;
+        color: var(--success);
+      }
+
+      .reset-btn {
+        width: 100%;
+        padding: 12px;
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s;
+        margin-top: 16px;
+      }
+
+      .reset-btn:hover {
+        border-color: rgba(255, 255, 255, 0.3);
+        color: var(--text-primary);
+      }
+
+      .loading {
+        display: none;
+        text-align: center;
+        padding: 20px;
+      }
+
+      .loading.show {
+        display: block;
+      }
+
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(255, 255, 255, 0.1);
+        border-top-color: var(--kakao-yellow);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 12px;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
         }
-      } catch (error) {
-        showError('네트워크 오류', error.message);
-      } finally {
-        showLoading(false);
-        // URL에서 code 파라미터 제거
-        window.history.replaceState({}, document.title, window.location.pathname);
       }
-    }
-    
-    function showLoading(show) {
-      document.getElementById('loginForm').style.display = show ? 'none' : 'block';
-      document.getElementById('loading').classList.toggle('show', show);
-    }
-    
-    function showSuccess(data) {
-      const resultSection = document.getElementById('resultSection');
-      const { user, access_token, refresh_token } = data;
-      
-      resultSection.innerHTML = `
+
+      .footer {
+        margin-top: 24px;
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .footer a {
+        color: var(--kakao-yellow);
+        text-decoration: none;
+      }
+
+      .footer a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🔐 카카오 로그인 테스트</h1>
+        <p>Shift Calendar Server 인증 테스트 페이지 (WebView 방식)</p>
+        <span class="badge">Development Only</span>
+      </div>
+
+      <div id="loginForm">
+        <div class="config-section">
+          <label for="clientId">카카오 앱 REST API 키</label>
+          <input
+            type="text"
+            id="clientId"
+            placeholder="카카오 개발자 콘솔에서 확인하세요"
+          />
+        </div>
+
+        <div class="config-section">
+          <label for="redirectUri">Redirect URI</label>
+          <input
+            type="text"
+            id="redirectUri"
+            placeholder="예: http://localhost:3000/test/callback.html"
+          />
+        </div>
+
+        <button class="kakao-btn" onclick="startKakaoLogin()">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M12 3C6.477 3 2 6.463 2 10.731c0 2.756 1.833 5.175 4.587 6.543-.155.577-.563 2.093-.645 2.417-.1.404.148.399.311.29.128-.086 2.04-1.379 2.866-1.94.612.087 1.243.132 1.881.132 5.523 0 10-3.463 10-7.442C21 6.463 17.523 3 12 3z"
+            />
+          </svg>
+          카카오 로그인
+        </button>
+      </div>
+
+      <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <p>로그인 처리 중...</p>
+      </div>
+
+      <div class="result-section" id="resultSection">
+        <!-- 결과가 여기에 표시됩니다 -->
+      </div>
+
+      <div class="footer">
+        <p>이 페이지는 개발 테스트 전용입니다.</p>
+        <p>
+          카카오 개발자 콘솔:
+          <a href="https://developers.kakao.com" target="_blank"
+            >developers.kakao.com</a
+          >
+        </p>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE_URL = window.location.origin + "/api/v1";
+
+      // 페이지 로드 시 저장된 설정 복원
+      document.addEventListener("DOMContentLoaded", () => {
+        const savedClientId = localStorage.getItem("kakao_client_id");
+        const savedRedirectUri = localStorage.getItem("kakao_redirect_uri");
+
+        if (savedClientId) {
+          document.getElementById("clientId").value = savedClientId;
+        }
+
+        if (savedRedirectUri) {
+          document.getElementById("redirectUri").value = savedRedirectUri;
+        } else {
+          // 기본 redirect URI 설정
+          document.getElementById("redirectUri").value =
+            window.location.origin + "/test/callback.html";
+        }
+
+        // URL에 code가 있으면 callback 처리
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get("code");
+        const error = urlParams.get("error");
+
+        if (code) {
+          handleCallback(code);
+        } else if (error) {
+          showError(
+            "카카오 로그인 실패",
+            urlParams.get("error_description") || error
+          );
+        }
+      });
+
+      function startKakaoLogin() {
+        const clientId = document.getElementById("clientId").value.trim();
+        const redirectUri = document.getElementById("redirectUri").value.trim();
+
+        if (!clientId) {
+          alert("카카오 앱 REST API 키를 입력해주세요.");
+          return;
+        }
+
+        if (!redirectUri) {
+          alert("Redirect URI를 입력해주세요.");
+          return;
+        }
+
+        // 설정 저장
+        localStorage.setItem("kakao_client_id", clientId);
+        localStorage.setItem("kakao_redirect_uri", redirectUri);
+
+        // 카카오 OAuth 인증 페이지로 이동
+        const kakaoAuthUrl = new URL("https://kauth.kakao.com/oauth/authorize");
+        kakaoAuthUrl.searchParams.set("client_id", clientId);
+        kakaoAuthUrl.searchParams.set("redirect_uri", redirectUri);
+        kakaoAuthUrl.searchParams.set("response_type", "code");
+        kakaoAuthUrl.searchParams.set(
+          "scope",
+          "profile_nickname,profile_image,account_email"
+        );
+
+        window.location.href = kakaoAuthUrl.toString();
+      }
+
+      async function handleCallback(code) {
+        showLoading(true);
+
+        try {
+          // localStorage에서 redirect_uri 가져오기
+          const redirect_uri =
+            localStorage.getItem("kakao_redirect_uri") ||
+            window.location.origin + "/test/callback.html";
+
+          const response = await fetch(`${API_BASE_URL}/auth/kakao`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ code, redirect_uri }),
+          });
+
+          const data = await response.json();
+
+          if (data.success) {
+            showSuccess(data.data);
+          } else {
+            showError(
+              "로그인 실패",
+              data.message || "알 수 없는 오류가 발생했습니다."
+            );
+          }
+        } catch (error) {
+          showError("네트워크 오류", error.message);
+        } finally {
+          showLoading(false);
+          // URL에서 code 파라미터 제거
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+          );
+        }
+      }
+
+      function showLoading(show) {
+        document.getElementById("loginForm").style.display = show
+          ? "none"
+          : "block";
+        document.getElementById("loading").classList.toggle("show", show);
+      }
+
+      function showSuccess(data) {
+        const resultSection = document.getElementById("resultSection");
+        const { user, access_token, refresh_token } = data;
+
+        resultSection.innerHTML = `
         <div class="user-card">
-          ${user.profile_image_url 
-            ? `<img src="${user.profile_image_url}" alt="프로필" class="user-avatar">`
-            : `<div class="user-avatar placeholder">👤</div>`
+          ${
+            user.profile_image_url
+              ? `<img src="${user.profile_image_url}" alt="프로필" class="user-avatar">`
+              : `<div class="user-avatar placeholder">👤</div>`
           }
           <div class="user-info">
             <h3>${user.name}</h3>
@@ -505,15 +535,15 @@
         
         <button class="reset-btn" onclick="resetPage()">다시 테스트하기</button>
       `;
-      
-      document.getElementById('loginForm').style.display = 'none';
-      resultSection.classList.add('show');
-    }
-    
-    function showError(title, message) {
-      const resultSection = document.getElementById('resultSection');
-      
-      resultSection.innerHTML = `
+
+        document.getElementById("loginForm").style.display = "none";
+        resultSection.classList.add("show");
+      }
+
+      function showError(title, message) {
+        const resultSection = document.getElementById("resultSection");
+
+        resultSection.innerHTML = `
         <div class="result-box error">
           <div class="result-title">❌ ${title}</div>
           <div class="result-content">${message}</div>
@@ -521,17 +551,16 @@
         
         <button class="reset-btn" onclick="resetPage()">다시 시도하기</button>
       `;
-      
-      document.getElementById('loginForm').style.display = 'none';
-      resultSection.classList.add('show');
-    }
-    
-    function resetPage() {
-      document.getElementById('loginForm').style.display = 'block';
-      document.getElementById('resultSection').classList.remove('show');
-      document.getElementById('resultSection').innerHTML = '';
-    }
-  </script>
-</body>
-</html>
 
+        document.getElementById("loginForm").style.display = "none";
+        resultSection.classList.add("show");
+      }
+
+      function resetPage() {
+        document.getElementById("loginForm").style.display = "block";
+        document.getElementById("resultSection").classList.remove("show");
+        document.getElementById("resultSection").innerHTML = "";
+      }
+    </script>
+  </body>
+</html>

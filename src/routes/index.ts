@@ -2,6 +2,7 @@ import { Router } from "express";
 import authRoutes from "./authRoutes";
 import scheduleRoutes from "./scheduleRoutes";
 import calendarRoutes from "./calendarRoutes";
+import friendRoutes from "./friendRoutes";
 
 const router = Router();
 
@@ -11,6 +12,7 @@ const v1_router = Router();
 v1_router.use("/auth", authRoutes);
 v1_router.use("/schedules", scheduleRoutes);
 v1_router.use("/", calendarRoutes);
+v1_router.use("/", friendRoutes); // 친구 관련 라우트
 
 // 헬스 체크
 v1_router.get("/health", (req, res) => {

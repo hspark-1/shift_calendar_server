@@ -11,6 +11,7 @@ interface UserAttributes {
   kakao_id?: string | null;
   apple_id?: string | null;
   password?: string | null;
+  phone?: string | null; // 전화번호 (E.164 형식 권장)
   created_at?: Date;
 }
 
@@ -23,6 +24,7 @@ interface UserCreationAttributes
     | "kakao_id"
     | "apple_id"
     | "password"
+    | "phone"
     | "created_at"
   > {}
 
@@ -38,6 +40,7 @@ class User
   declare kakao_id: string | null | undefined;
   declare apple_id: string | null | undefined;
   declare password: string | null | undefined;
+  declare phone: string | null | undefined;
   declare created_at: Date | undefined;
 
   // 비밀번호 검증 메서드 (패스워드 인증 추가 시 사용)
@@ -94,6 +97,11 @@ User.init(
     password: {
       type: DataTypes.TEXT,
       allowNull: true,
+    },
+    phone: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      unique: true,
     },
     created_at: {
       type: DataTypes.DATE,
