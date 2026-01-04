@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>카카오 로그인 - Callback</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --kakao-yellow: #fee500;
+        --bg-dark: #1a1a2e;
+        --bg-card: #16213e;
+        --text-primary: #eaeaea;
+        --text-secondary: #a0a0a0;
+        --success: #10b981;
+        --error: #ef4444;
+      }
+
+      body {
+        font-family: "Noto Sans KR", sans-serif;
+        background: linear-gradient(135deg, var(--bg-dark) 0%, #0f0f23 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-primary);
+        padding: 20px;
+      }
+
+      .container {
+        background: var(--bg-card);
+        border-radius: 16px;
+        padding: 40px;
+        max-width: 480px;
+        width: 100%;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        text-align: center;
+      }
+
+      .spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid rgba(255, 255, 255, 0.1);
+        border-top-color: var(--kakao-yellow);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 24px;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      h2 {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      p {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      .result-section {
+        display: none;
+      }
+
+      .result-section.show {
+        display: block;
+      }
+
+      .user-card {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 16px;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        border-radius: 12px;
+        margin-bottom: 16px;
+        text-align: left;
+      }
+
+      .user-avatar {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid var(--success);
+      }
+
+      .user-avatar.placeholder {
+        background: #0f3460;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+      }
+
+      .user-info h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      .user-info p {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .result-box {
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+        text-align: left;
+      }
+
+      .result-box.success {
+        border-left: 3px solid var(--success);
+      }
+
+      .result-box.error {
+        border-left: 3px solid var(--error);
+      }
+
+      .result-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .result-content {
+        font-size: 13px;
+        color: var(--text-secondary);
+        word-break: break-all;
+      }
+
+      .result-content pre {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-family: "Monaco", "Consolas", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--text-primary);
+        margin-top: 8px;
+      }
+
+      .token-display {
+        margin-top: 16px;
+        text-align: left;
+      }
+
+      .token-item {
+        margin-bottom: 12px;
+      }
+
+      .token-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+
+      .token-value {
+        font-size: 11px;
+        font-family: "Monaco", "Consolas", monospace;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 8px 12px;
+        border-radius: 6px;
+        word-break: break-all;
+        color: var(--success);
+      }
+
+      .btn {
+        display: inline-block;
+        padding: 12px 24px;
+        background: var(--kakao-yellow);
+        color: #3c1e1e;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        margin-top: 16px;
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(254, 229, 0, 0.2);
+      }
+
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+      }
+
+      .btn-secondary:hover {
+        border-color: rgba(255, 255, 255, 0.4);
+        box-shadow: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div id="loading">
+        <div class="spinner"></div>
+        <h2>로그인 처리 중...</h2>
+        <p>카카오 인증 정보를 확인하고 있습니다.</p>
+      </div>
+
+      <div id="result" class="result-section"></div>
+    </div>
+
+    <script>
+      const API_BASE_URL = window.location.origin + "/api/v1";
+
+      document.addEventListener("DOMContentLoaded", async () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get("code");
+        const error = urlParams.get("error");
+
+        if (error) {
+          showError(
+            "카카오 로그인 실패",
+            urlParams.get("error_description") || error
+          );
+          return;
+        }
+
+        if (!code) {
+          showError(
+            "인증 코드 없음",
+            "Authorization code가 전달되지 않았습니다."
+          );
+          return;
+        }
+
+        try {
+          // localStorage에서 redirect_uri 가져오기 (kakao-login.html에서 저장됨)
+          const redirect_uri =
+            localStorage.getItem("kakao_redirect_uri") ||
+            window.location.origin + "/test/callback.html";
+
+          const response = await fetch(`${API_BASE_URL}/auth/kakao`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ code, redirect_uri }),
+          });
+
+          const data = await response.json();
+
+          if (data.success) {
+            showSuccess(data.data, data.message);
+          } else {
+            showError(
+              "로그인 실패",
+              data.message || "알 수 없는 오류가 발생했습니다."
+            );
+          }
+        } catch (err) {
+          showError("네트워크 오류", err.message);
+        }
+      });
+
+      function showSuccess(data, message) {
+        const { user, access_token, refresh_token } = data;
+
+        document.getElementById("loading").style.display = "none";
+        const resultEl = document.getElementById("result");
+
+        resultEl.innerHTML = `
+        <div class="user-card">
+          ${
+            user.profile_image_url
+              ? `<img src="${user.profile_image_url}" alt="프로필" class="user-avatar">`
+              : `<div class="user-avatar placeholder">👤</div>`
+          }
+          <div class="user-info">
+            <h3>${user.name}</h3>
+            <p>${user.email}</p>
+          </div>
+        </div>
+        
+        <div class="result-box success">
+          <div class="result-title">✅ ${message || "로그인 성공!"}</div>
+          <div class="result-content">
+            <pre>${JSON.stringify(user, null, 2)}</pre>
+          </div>
+        </div>
+        
+        <div class="token-display">
+          <div class="token-item">
+            <div class="token-label">Access Token</div>
+            <div class="token-value">${access_token}</div>
+          </div>
+          <div class="token-item">
+            <div class="token-label">Refresh Token</div>
+            <div class="token-value">${refresh_token}</div>
+          </div>
+        </div>
+        
+        <a href="/test/kakao-login.html" class="btn btn-secondary">다시 테스트하기</a>
+      `;
+
+        resultEl.classList.add("show");
+      }
+
+      function showError(title, message) {
+        document.getElementById("loading").style.display = "none";
+        const resultEl = document.getElementById("result");
+
+        resultEl.innerHTML = `
+        <div class="result-box error">
+          <div class="result-title">❌ ${title}</div>
+          <div class="result-content">${message}</div>
+        </div>
+        
+        <a href="/test/kakao-login.html" class="btn">다시 시도하기</a>
+      `;
+
+        resultEl.classList.add("show");
+      }
+    </script>
+  </body>
+</html>

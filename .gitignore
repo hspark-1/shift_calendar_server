@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.example
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-error.log
+pnpm-debug.log
+lerna-debug.log
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Sequelize
+.sequelize
+
+# Temporary files
+*.tmp
+*.temp
+*~
+*.bak
+
+# Package manager
+.pnp.*
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+_docs/
+migrations/
+.cursor/
+AGENTS.md
+schema.drawio
+visibility_flow.drawio
