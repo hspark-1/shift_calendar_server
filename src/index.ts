@@ -21,7 +21,51 @@ app.use(
     contentSecurityPolicy: false, // 테스트 페이지를 위해 CSP 비활성화
   })
 );
-app.use(cors());
+
+// CORS 설정 (Flutter 앱 접속용)
+const corsOptions = {
+  origin: (
+    origin: string | undefined,
+    callback: (err: Error | null, allow?: boolean) => void
+  ) => {
+    // 개발 환경: localhost 허용
+    const allowedOrigins = [
+      "https://shift-calendar.co.kr",
+      "http://localhost",
+      "http://localhost:3000",
+      "http://localhost:8080",
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:8080",
+    ];
+
+    // origin이 없으면 (모바일 앱 등) 허용
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // 허용된 origin인지 확인
+    if (allowedOrigins.some((allowed) => origin.startsWith(allowed))) {
+      callback(null, true);
+    } else {
+      // 개발 환경에서는 모든 origin 허용 (필요 시 주석 해제)
+      // callback(null, true);
+      callback(new Error("CORS 정책에 의해 차단되었습니다."));
+    }
+  },
+  credentials: true, // JWT 토큰 등 인증 정보 전송 허용
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+  ],
+  exposedHeaders: ["Authorization"], // 클라이언트에서 읽을 수 있는 헤더
+  maxAge: 86400, // preflight 요청 캐시 시간 (24시간)
+};
+
+app.use(cors(corsOptions));
 app.use(morgan("dev"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
