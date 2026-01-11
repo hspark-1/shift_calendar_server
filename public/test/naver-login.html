@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>카카오 로그인 테스트</title>
+    <title>네이버 로그인 테스트</title>
     <style>
       @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap");
 
@@ -14,8 +14,8 @@
       }
 
       :root {
-        --kakao-yellow: #fee500;
-        --kakao-brown: #3c1e1e;
+        --naver-green: #03c75a;
+        --naver-dark-green: #02b350;
         --bg-dark: #1a1a2e;
         --bg-card: #16213e;
         --text-primary: #eaeaea;
@@ -98,41 +98,42 @@
 
       .config-section input:focus {
         outline: none;
-        border-color: var(--kakao-yellow);
+        border-color: var(--naver-green);
       }
 
       .config-section input::placeholder {
         color: var(--text-secondary);
       }
 
-      .kakao-btn {
+      .naver-btn {
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
         width: 100%;
         padding: 14px 20px;
-        background: var(--kakao-yellow);
-        color: var(--kakao-brown);
+        background: var(--naver-green);
+        color: white;
         border: none;
         border-radius: 8px;
         font-size: 16px;
         font-weight: 600;
         cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
+        transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
         margin-top: 16px;
       }
 
-      .kakao-btn:hover {
+      .naver-btn:hover {
         transform: translateY(-2px);
-        box-shadow: 0 10px 20px rgba(254, 229, 0, 0.2);
+        box-shadow: 0 10px 20px rgba(3, 199, 90, 0.3);
+        background: var(--naver-dark-green);
       }
 
-      .kakao-btn:active {
+      .naver-btn:active {
         transform: translateY(0);
       }
 
-      .kakao-btn svg {
+      .naver-btn svg {
         width: 20px;
         height: 20px;
       }
@@ -299,7 +300,7 @@
         width: 40px;
         height: 40px;
         border: 3px solid rgba(255, 255, 255, 0.1);
-        border-top-color: var(--kakao-yellow);
+        border-top-color: var(--naver-green);
         border-radius: 50%;
         animation: spin 1s linear infinite;
         margin: 0 auto 12px;
@@ -319,7 +320,7 @@
       }
 
       .footer a {
-        color: var(--kakao-yellow);
+        color: var(--naver-green);
         text-decoration: none;
       }
 
@@ -331,18 +332,18 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>🔐 카카오 로그인 테스트</h1>
+        <h1>🔐 네이버 로그인 테스트</h1>
         <p>Shift Calendar Server 인증 테스트 페이지 (WebView 방식)</p>
         <span class="badge">Development Only</span>
       </div>
 
       <div id="loginForm">
         <div class="config-section">
-          <label for="clientId">카카오 앱 REST API 키</label>
+          <label for="clientId">네이버 Client ID</label>
           <input
             type="text"
             id="clientId"
-            placeholder="카카오 개발자 콘솔에서 확인하세요"
+            placeholder="네이버 개발자 센터에서 확인하세요"
           />
         </div>
 
@@ -355,13 +356,13 @@
           />
         </div>
 
-        <button class="kakao-btn" onclick="startKakaoLogin()">
+        <button class="naver-btn" onclick="startNaverLogin()">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path
-              d="M12 3C6.477 3 2 6.463 2 10.731c0 2.756 1.833 5.175 4.587 6.543-.155.577-.563 2.093-.645 2.417-.1.404.148.399.311.29.128-.086 2.04-1.379 2.866-1.94.612.087 1.243.132 1.881.132 5.523 0 10-3.463 10-7.442C21 6.463 17.523 3 12 3z"
+              d="M16.273 12.845 7.376 0H0v24h7.726V11.156L16.624 24H24V0h-7.727v12.845Z"
             />
           </svg>
-          카카오 로그인
+          네이버 로그인
         </button>
       </div>
 
@@ -377,9 +378,9 @@
       <div class="footer">
         <p>이 페이지는 개발 테스트 전용입니다.</p>
         <p>
-          카카오 개발자 콘솔:
-          <a href="https://developers.kakao.com" target="_blank"
-            >developers.kakao.com</a
+          네이버 개발자 센터:
+          <a href="https://developers.naver.com" target="_blank"
+            >developers.naver.com</a
           >
         </p>
       </div>
@@ -390,8 +391,8 @@
 
       // 페이지 로드 시 저장된 설정 복원
       document.addEventListener("DOMContentLoaded", () => {
-        const savedClientId = localStorage.getItem("kakao_client_id");
-        const savedRedirectUri = localStorage.getItem("kakao_redirect_uri");
+        const savedClientId = localStorage.getItem("naver_client_id");
+        const savedRedirectUri = localStorage.getItem("naver_redirect_uri");
 
         if (savedClientId) {
           document.getElementById("clientId").value = savedClientId;
@@ -408,24 +409,25 @@
         // URL에 code가 있으면 callback 처리
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get("code");
+        const state = urlParams.get("state");
         const error = urlParams.get("error");
 
         if (code) {
-          handleCallback(code);
+          handleCallback(code, state);
         } else if (error) {
           showError(
-            "카카오 로그인 실패",
+            "네이버 로그인 실패",
             urlParams.get("error_description") || error
           );
         }
       });
 
-      function startKakaoLogin() {
+      function startNaverLogin() {
         const clientId = document.getElementById("clientId").value.trim();
         const redirectUri = document.getElementById("redirectUri").value.trim();
 
         if (!clientId) {
-          alert("카카오 앱 REST API 키를 입력해주세요.");
+          alert("네이버 Client ID를 입력해주세요.");
           return;
         }
 
@@ -435,38 +437,55 @@
         }
 
         // 설정 저장
-        localStorage.setItem("kakao_client_id", clientId);
-        localStorage.setItem("kakao_redirect_uri", redirectUri);
-        localStorage.setItem("oauth_type", "kakao");
+        localStorage.setItem("naver_client_id", clientId);
+        localStorage.setItem("naver_redirect_uri", redirectUri);
+        localStorage.setItem("oauth_type", "naver");
 
-        // 카카오 OAuth 인증 페이지로 이동
-        const kakaoAuthUrl = new URL("https://kauth.kakao.com/oauth/authorize");
-        kakaoAuthUrl.searchParams.set("client_id", clientId);
-        kakaoAuthUrl.searchParams.set("redirect_uri", redirectUri);
-        kakaoAuthUrl.searchParams.set("response_type", "code");
-        kakaoAuthUrl.searchParams.set(
-          "scope",
-          "profile_nickname,profile_image,account_email"
+        // CSRF 방지를 위한 state 생성
+        const state = Math.random().toString(36).substring(2, 15);
+        localStorage.setItem("naver_state", state);
+
+        // 네이버 OAuth 인증 페이지로 이동
+        const naverAuthUrl = new URL(
+          "https://nid.naver.com/oauth2.0/authorize"
         );
+        naverAuthUrl.searchParams.set("client_id", clientId);
+        naverAuthUrl.searchParams.set("redirect_uri", redirectUri);
+        naverAuthUrl.searchParams.set("response_type", "code");
+        naverAuthUrl.searchParams.set("state", state);
 
-        window.location.href = kakaoAuthUrl.toString();
+        window.location.href = naverAuthUrl.toString();
       }
 
-      async function handleCallback(code) {
+      async function handleCallback(code, state) {
         showLoading(true);
 
         try {
-          // localStorage에서 redirect_uri 가져오기
+          // localStorage에서 redirect_uri와 state 가져오기
           const redirect_uri =
-            localStorage.getItem("kakao_redirect_uri") ||
+            localStorage.getItem("naver_redirect_uri") ||
             window.location.origin + "/test/callback.html";
+          const savedState = localStorage.getItem("naver_state");
 
-          const response = await fetch(`${API_BASE_URL}/auth/kakao`, {
+          // State 검증 (CSRF 방지)
+          if (state && savedState && state !== savedState) {
+            throw new Error("State 값이 일치하지 않습니다. CSRF 공격 가능성이 있습니다.");
+          }
+
+          // State 사용 후 제거
+          localStorage.removeItem("naver_state");
+
+          const requestBody = { code, redirect_uri };
+          if (state) {
+            requestBody.state = state;
+          }
+
+          const response = await fetch(`${API_BASE_URL}/auth/naver`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ code, redirect_uri }),
+            body: JSON.stringify(requestBody),
           });
 
           const data = await response.json();
@@ -513,6 +532,7 @@
           <div class="user-info">
             <h3>${user.name}</h3>
             <p>${user.email}</p>
+            ${user.naver_id ? `<p style="font-size: 11px; color: var(--naver-green);">네이버 ID: ${user.naver_id}</p>` : ""}
           </div>
         </div>
         
@@ -565,3 +585,4 @@
     </script>
   </body>
 </html>
+

@@ -9,6 +9,8 @@ import {
   getProfile,
   kakaoLogin,
   kakaoLoginWithToken,
+  naverLogin,
+  naverLoginWithToken,
 } from "../controllers/authController";
 import { authMiddleware } from "../middlewares/auth";
 
@@ -28,6 +30,24 @@ router.post(
   "/kakao/token",
   [body("access_token").notEmpty().withMessage("access_token이 필요합니다.")],
   kakaoLoginWithToken
+);
+
+// 네이버 OAuth 로그인 (WebView 방식 - authorization code)
+router.post(
+  "/naver",
+  [
+    body("code").notEmpty().withMessage("Authorization code가 필요합니다."),
+    body("redirect_uri").notEmpty().withMessage("redirect_uri가 필요합니다."),
+    body("state").optional().isString(),
+  ],
+  naverLogin
+);
+
+// 네이버 OAuth 로그인 (SDK 방식 - access_token 직접 전송)
+router.post(
+  "/naver/token",
+  [body("access_token").notEmpty().withMessage("access_token이 필요합니다.")],
+  naverLoginWithToken
 );
 
 // ===== 패스워드 인증 (추후 활성화) =====

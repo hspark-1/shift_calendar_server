@@ -8,6 +8,7 @@ import {
   revokeAllUserTokens,
 } from "../services/authService";
 import { processKakaoLogin, getKakaoUserInfo } from "../services/kakaoService";
+import { processNaverLogin, getNaverUserInfo } from "../services/naverService";
 import { ensureDefaultTemplate } from "../services/shiftTemplateService";
 
 // Express Request에 user 속성 추가 타입
@@ -409,6 +410,182 @@ export async function kakaoLoginWithToken(
     res.status(500).json({
       success: false,
       message: "카카오 로그인 처리 중 오류가 발생했습니다.",
+    });
+  }
+}
+
+// 네이버 OAuth 로그인
+export async function naverLogin(req: Request, res: Response): Promise<void> {
+  try {
+    const { code, state, redirect_uri } = req.body;
+
+    if (!code) {
+      res
+        .status(400)
+        .json({ success: false, message: "Authorization code가 필요합니다." });
+      return;
+    }
+
+    if (!redirect_uri) {
+      res
+        .status(400)
+        .json({ success: false, message: "redirect_uri가 필요합니다." });
+      return;
+    }
+
+    // 네이버 OAuth 처리: code → token → 사용자 정보
+    const naver_user_info = await processNaverLogin(code, state, redirect_uri);
+
+    // 기존 사용자 조회 (naver_id 기준)
+    let user = await User.findOne({
+      where: { naver_id: naver_user_info.naver_id },
+    });
+
+    if (!user) {
+      // 이메일로 기존 사용자 확인 (다른 OAuth로 가입된 경우)
+      const existing_email_user = await User.findOne({
+        where: { email: naver_user_info.email },
+      });
+
+      if (existing_email_user) {
+        // 기존 계정에 네이버 ID 연결
+        existing_email_user.naver_id = naver_user_info.naver_id;
+        await existing_email_user.save();
+        user = existing_email_user;
+        console.log(`네이버 계정 연결: ${user.email}`);
+        // 기존 사용자도 템플릿이 없으면 생성
+        await ensureDefaultTemplate(user.user_id);
+      } else {
+        // 신규 사용자 생성
+        user = await User.create({
+          email: naver_user_info.email,
+          name: naver_user_info.name,
+          profile_image_url: naver_user_info.profile_image_url,
+          naver_id: naver_user_info.naver_id,
+          timezone: "Asia/Seoul", // 기본 타임존
+        });
+        console.log(`네이버 회원가입 성공: ${user.email}`);
+        // 신규 사용자 기본 근무 템플릿 생성
+        await ensureDefaultTemplate(user.user_id);
+      }
+    } else {
+      console.log(`네이버 로그인 성공: ${user.email}`);
+      // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
+      await ensureDefaultTemplate(user.user_id);
+    }
+
+    // JWT 토큰 생성 (DB에 refresh_token 저장)
+    const device_info = getDeviceInfo(req);
+    const tokens = await generateTokens(user, { device_info });
+
+    res.json({
+      success: true,
+      message:
+        user.created_at && Date.now() - user.created_at.getTime() < 1000
+          ? "회원가입이 완료되었습니다."
+          : "로그인 성공",
+      data: {
+        user: user.toJSON(),
+        ...tokens,
+      },
+    });
+  } catch (error) {
+    console.error("Naver login error:", error);
+
+    if (error instanceof Error) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "네이버 로그인 처리 중 오류가 발생했습니다.",
+    });
+  }
+}
+
+// 네이버 OAuth 로그인 (SDK 방식 - access_token 직접 전송)
+export async function naverLoginWithToken(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { access_token } = req.body;
+
+    if (!access_token) {
+      res
+        .status(400)
+        .json({ success: false, message: "access_token이 필요합니다." });
+      return;
+    }
+
+    // 네이버 access_token으로 사용자 정보 조회
+    const naver_user_info = await getNaverUserInfo(access_token);
+
+    // 기존 사용자 조회 (naver_id 기준)
+    let user = await User.findOne({
+      where: { naver_id: naver_user_info.naver_id },
+    });
+
+    if (!user) {
+      // 이메일로 기존 사용자 확인 (다른 OAuth로 가입된 경우)
+      const existing_email_user = await User.findOne({
+        where: { email: naver_user_info.email },
+      });
+
+      if (existing_email_user) {
+        // 기존 계정에 네이버 ID 연결
+        existing_email_user.naver_id = naver_user_info.naver_id;
+        await existing_email_user.save();
+        user = existing_email_user;
+        console.log(`네이버 계정 연결 (SDK): ${user.email}`);
+        // 기존 사용자도 템플릿이 없으면 생성
+        await ensureDefaultTemplate(user.user_id);
+      } else {
+        // 신규 사용자 생성
+        user = await User.create({
+          email: naver_user_info.email,
+          name: naver_user_info.name,
+          profile_image_url: naver_user_info.profile_image_url,
+          naver_id: naver_user_info.naver_id,
+          timezone: "Asia/Seoul", // 기본 타임존
+        });
+        console.log(`네이버 회원가입 성공 (SDK): ${user.email}`);
+        // 신규 사용자 기본 근무 템플릿 생성
+        await ensureDefaultTemplate(user.user_id);
+      }
+    } else {
+      console.log(`네이버 로그인 성공 (SDK): ${user.email}`);
+      // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
+      await ensureDefaultTemplate(user.user_id);
+    }
+
+    // JWT 토큰 생성 (DB에 refresh_token 저장)
+    const device_info = getDeviceInfo(req);
+    const tokens = await generateTokens(user, { device_info });
+
+    res.json({
+      success: true,
+      message:
+        user.created_at && Date.now() - user.created_at.getTime() < 1000
+          ? "회원가입이 완료되었습니다."
+          : "로그인 성공",
+      data: {
+        user: user.toJSON(),
+        ...tokens,
+      },
+    });
+  } catch (error) {
+    console.error("Naver login with token error:", error);
+
+    if (error instanceof Error) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "네이버 로그인 처리 중 오류가 발생했습니다.",
     });
   }
 }

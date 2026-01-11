@@ -10,6 +10,7 @@ interface UserAttributes {
   timezone?: string | null;
   kakao_id?: string | null;
   apple_id?: string | null;
+  naver_id?: string | null;
   password?: string | null;
   phone?: string | null; // 전화번호 (E.164 형식 권장)
   created_at?: Date;
@@ -23,6 +24,7 @@ interface UserCreationAttributes
     | "timezone"
     | "kakao_id"
     | "apple_id"
+    | "naver_id"
     | "password"
     | "phone"
     | "created_at"
@@ -39,6 +41,7 @@ class User
   declare timezone: string | null | undefined;
   declare kakao_id: string | null | undefined;
   declare apple_id: string | null | undefined;
+  declare naver_id: string | null | undefined;
   declare password: string | null | undefined;
   declare phone: string | null | undefined;
   declare created_at: Date | undefined;
@@ -90,6 +93,11 @@ User.init(
       unique: true,
     },
     apple_id: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      unique: true,
+    },
+    naver_id: {
       type: DataTypes.TEXT,
       allowNull: true,
       unique: true,
