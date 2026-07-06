@@ -1,6 +1,7 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { sequelize } from "../config/database";
 import bcrypt from "bcryptjs";
+import { stored_phone_pattern } from "../utils/phone";
 
 interface UserAttributes {
   user_id: string; // UUID
@@ -12,7 +13,7 @@ interface UserAttributes {
   apple_id?: string | null;
   naver_id?: string | null;
   password?: string | null;
-  phone?: string | null; // 전화번호 (E.164 형식 권장)
+  phone?: string | null; // 전화번호: 000-000-0000 또는 000-0000-0000
   created_at?: Date;
 }
 
@@ -110,6 +111,9 @@ User.init(
       type: DataTypes.TEXT,
       allowNull: true,
       unique: true,
+      validate: {
+        is: stored_phone_pattern,
+      },
     },
     created_at: {
       type: DataTypes.DATE,

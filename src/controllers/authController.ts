@@ -10,6 +10,7 @@ import {
 import { processKakaoLogin, getKakaoUserInfo } from "../services/kakaoService";
 import { processNaverLogin, getNaverUserInfo } from "../services/naverService";
 import { ensureDefaultTemplate } from "../services/shiftTemplateService";
+import { normalizePhoneNumber } from "../utils/phone";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -232,6 +233,91 @@ export async function getProfile(
     });
   } catch (error) {
     console.error("Get profile error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "서버 오류가 발생했습니다." });
+  }
+}
+
+// 내 정보 수정
+export async function updateProfile(
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "입력값 검증에 실패했습니다.",
+        },
+        errors: errors.array(),
+      });
+      return;
+    }
+
+    if (!req.user) {
+      res.status(401).json({ success: false, message: "인증이 필요합니다." });
+      return;
+    }
+
+    const { name, timezone, profile_image_url, phone } = req.body;
+
+    // 수정할 필드만 업데이트
+    if (name !== undefined) {
+      req.user.name = name;
+    }
+    if (timezone !== undefined) {
+      req.user.timezone = timezone;
+    }
+    if (profile_image_url !== undefined) {
+      req.user.profile_image_url = profile_image_url;
+    }
+    if (phone !== undefined) {
+      const normalized_phone = normalizePhoneNumber(phone);
+      if (!normalized_phone) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: "INVALID_PHONE",
+            message:
+              "전화번호는 000-000-0000 또는 000-0000-0000 형식이어야 합니다.",
+          },
+        });
+        return;
+      }
+
+      const existing_phone_user = await User.findOne({
+        where: { phone: normalized_phone },
+      });
+      if (
+        existing_phone_user &&
+        existing_phone_user.user_id !== req.user.user_id
+      ) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: "PHONE_ALREADY_EXISTS",
+            message: "이미 사용 중인 전화번호입니다.",
+          },
+        });
+        return;
+      }
+
+      req.user.phone = normalized_phone;
+    }
+
+    await req.user.save();
+
+    res.json({
+      success: true,
+      message: "프로필이 수정되었습니다.",
+      data: req.user.toJSON(),
+    });
+  } catch (error) {
+    console.error("Update profile error:", error);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });

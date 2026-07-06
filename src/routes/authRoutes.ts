@@ -7,12 +7,14 @@ import {
   logout,
   logoutAll,
   getProfile,
+  updateProfile,
   kakaoLogin,
   kakaoLoginWithToken,
   naverLogin,
   naverLoginWithToken,
 } from "../controllers/authController";
 import { authMiddleware } from "../middlewares/auth";
+import { normalizePhoneNumber } from "../utils/phone";
 
 const router = Router();
 
@@ -92,5 +94,36 @@ router.post("/logout-all", authMiddleware, logoutAll);
 
 // 내 정보 조회
 router.get("/profile", authMiddleware, getProfile);
+
+// 내 정보 수정
+router.post(
+  "/profile",
+  authMiddleware,
+  [
+    body("name")
+      .optional()
+      .isString()
+      .withMessage("이름은 문자열이어야 합니다."),
+    body("timezone")
+      .optional()
+      .isString()
+      .withMessage("타임존은 문자열이어야 합니다."),
+    body("profile_image_url")
+      .optional()
+      .isString()
+      .withMessage("프로필 이미지 URL은 문자열이어야 합니다."),
+    body("phone")
+      .optional()
+      .isString()
+      .withMessage("전화번호는 문자열이어야 합니다.")
+      .bail()
+      .custom((phone) => normalizePhoneNumber(phone) !== null)
+      .withMessage(
+        "전화번호는 10~11자리 숫자 또는 000-000-0000/000-0000-0000 형식이어야 합니다."
+      )
+      .customSanitizer((phone) => normalizePhoneNumber(phone)),
+  ],
+  updateProfile
+);
 
 export default router;
