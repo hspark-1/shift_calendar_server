@@ -9,11 +9,6 @@ const router = Router();
 // v1 API 라우터
 const v1_router = Router();
 
-v1_router.use("/auth", authRoutes);
-v1_router.use("/schedules", scheduleRoutes);
-v1_router.use("/", calendarRoutes);
-v1_router.use("/", friendRoutes); // 친구 관련 라우트
-
 // 헬스 체크
 v1_router.get("/health", (req, res) => {
   res.json({
@@ -23,6 +18,11 @@ v1_router.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+v1_router.use("/auth", authRoutes);
+v1_router.use("/schedules", scheduleRoutes);
+v1_router.use("/", calendarRoutes);
+v1_router.use("/", friendRoutes); // 친구 관련 라우트
 
 // v1 라우터 등록
 router.use("/v1", v1_router);
