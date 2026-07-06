@@ -70,6 +70,12 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Vary", "Authorization");
+  next();
+});
+
 // 정적 파일 서빙 (테스트 페이지)
 app.use("/test", express.static(path.join(__dirname, "../public/test")));
 

@@ -157,7 +157,10 @@ router.post(
       .withMessage("근무 타입 이름을 입력하세요.")
       .isString()
       .withMessage("근무 타입 이름은 문자열이어야 합니다."),
-    body("color").optional().isInt().withMessage("색상은 정수여야 합니다."),
+    body("color")
+      .optional({ nullable: true })
+      .matches(/^#[0-9A-Fa-f]{8}$/)
+      .withMessage("색상은 #AARRGGBB 형식이어야 합니다."),
     body("start_time")
       .optional({ nullable: true, checkFalsy: true })
       .custom((value) => {
@@ -199,7 +202,10 @@ router.put(
       .withMessage("근무 타입 이름을 입력하세요.")
       .isString()
       .withMessage("근무 타입 이름은 문자열이어야 합니다."),
-    body("color").optional().isInt().withMessage("색상은 정수여야 합니다."),
+    body("color")
+      .optional({ nullable: true })
+      .matches(/^#[0-9A-Fa-f]{8}$/)
+      .withMessage("색상은 #AARRGGBB 형식이어야 합니다."),
     body("start_time")
       .optional({ nullable: true, checkFalsy: true })
       .custom((value) => {

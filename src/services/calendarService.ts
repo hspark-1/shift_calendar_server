@@ -9,6 +9,130 @@ import {
 } from "../models";
 import { sequelize } from "../config/database";
 
+export interface WorkShiftApiModel {
+  work_shift_id: string;
+  work_date: string;
+  shift_type_code: string;
+  shift_type_name: string;
+  shift_type_color: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  note: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function formatDbDate(date: string | Date): string {
+  return date instanceof Date ? date.toISOString().slice(0, 10) : String(date);
+}
+
+function formatDbTime(time: string | null | undefined): string | null {
+  if (!time) {
+    return null;
+  }
+
+  const trimmed_time = String(time).trim();
+  if (/^\d{2}:\d{2}$/.test(trimmed_time)) {
+    return `${trimmed_time}:00`;
+  }
+
+  if (/^\d{2}:\d{2}:\d{2}/.test(trimmed_time)) {
+    return trimmed_time.slice(0, 8);
+  }
+
+  return trimmed_time;
+}
+
+function colorNumberToArgbString(color: number): string {
+  const unsigned_color = color >>> 0;
+  return `#${unsigned_color.toString(16).toUpperCase().padStart(8, "0")}`;
+}
+
+function formatShiftTypeColor(color: string | number | null | undefined): string | null {
+  if (color === null || color === undefined) {
+    return null;
+  }
+
+  if (typeof color === "number") {
+    return colorNumberToArgbString(color);
+  }
+
+  const trimmed_color = color.trim();
+  if (!trimmed_color) {
+    return null;
+  }
+
+  let hex_color = trimmed_color.toUpperCase();
+  if (hex_color.startsWith("#")) {
+    hex_color = hex_color.slice(1);
+  }
+
+  if (/^[0-9A-F]{6}$/.test(hex_color)) {
+    return `#FF${hex_color}`;
+  }
+
+  if (/^[0-9A-F]{8}$/.test(hex_color)) {
+    return `#${hex_color}`;
+  }
+
+  if (/^\d+$/.test(trimmed_color)) {
+    return colorNumberToArgbString(Number(trimmed_color));
+  }
+
+  return null;
+}
+
+function toWorkShiftApiModel(
+  work_shift: WorkShift & {
+    schedule?: ShiftTypeSchedule & { shift_type?: ShiftType };
+  }
+): WorkShiftApiModel {
+  const schedule = work_shift.schedule;
+  const shift_type = schedule?.shift_type;
+
+  return {
+    work_shift_id: work_shift.work_shift_id,
+    work_date: formatDbDate(work_shift.work_date),
+    shift_type_code: shift_type?.code || "",
+    shift_type_name: shift_type?.name || "",
+    shift_type_color: formatShiftTypeColor(shift_type?.color),
+    start_time: formatDbTime(schedule?.start_time),
+    end_time: formatDbTime(schedule?.end_time),
+    note: work_shift.note || null,
+    created_at: work_shift.created_at!,
+    updated_at: work_shift.updated_at!,
+  };
+}
+
+export async function getWorkShiftApiModelById(
+  user_id: string,
+  work_shift_id: string
+): Promise<WorkShiftApiModel | null> {
+  const work_shift = await WorkShift.findOne({
+    where: {
+      work_shift_id,
+      owner_user_id: user_id,
+      deleted_at: null,
+    },
+    include: [
+      {
+        model: ShiftTypeSchedule,
+        as: "schedule",
+        required: true,
+        include: [
+          {
+            model: ShiftType,
+            as: "shift_type",
+            required: true,
+          },
+        ],
+      },
+    ],
+  });
+
+  return work_shift ? toWorkShiftApiModel(work_shift as any) : null;
+}
+
 /**
  * 사용자의 활성 템플릿에 속한 근무 타입 목록과 시간표 정보 조회
  */
@@ -19,7 +143,7 @@ export async function getShiftTypes(user_id: string): Promise<{
     shift_type_id: string;
     code: string;
     name: string;
-    color: number | null;
+    color: string | null;
     sort_order: number | null;
     start_time: string | null;
     end_time: string | null;
@@ -77,10 +201,10 @@ export async function getShiftTypes(user_id: string): Promise<{
       shift_type_id: st.shift_type_id,
       code: st.code,
       name: st.name,
-      color: st.color ?? null,
+      color: formatShiftTypeColor(st.color),
       sort_order: st.sort_order ?? null,
-      start_time: schedule?.start_time || null,
-      end_time: schedule?.end_time || null,
+      start_time: formatDbTime(schedule?.start_time),
+      end_time: formatDbTime(schedule?.end_time),
       crosses_midnight: schedule?.crosses_midnight || false,
       duration_minutes: schedule?.duration_minutes || 0,
     };
@@ -100,20 +224,7 @@ export async function getWorkShifts(
   user_id: string,
   start_date: string,
   end_date: string
-): Promise<
-  Array<{
-    work_shift_id: string;
-    work_date: string;
-    shift_type_code: string;
-    shift_type_name: string;
-    shift_type_color: number | null;
-    start_time: string | null;
-    end_time: string | null;
-    note: string | null;
-    created_at: Date;
-    updated_at: Date;
-  }>
-> {
+): Promise<WorkShiftApiModel[]> {
   const work_shifts = await WorkShift.findAll({
     where: {
       owner_user_id: user_id,
@@ -139,33 +250,7 @@ export async function getWorkShifts(
     order: [["work_date", "ASC"]],
   });
 
-  return work_shifts.map((ws) => {
-    const schedule = (ws as any).schedule as
-      | (ShiftTypeSchedule & { shift_type?: ShiftType })
-      | undefined;
-    const shift_type = schedule?.shift_type;
-
-    // work_date가 Date 객체인지 확인하고, 아니면 문자열로 처리
-    const work_date_str =
-      ws.work_date instanceof Date
-        ? ws.work_date.toISOString().split("T")[0]
-        : typeof ws.work_date === "string"
-        ? ws.work_date
-        : String(ws.work_date);
-
-    return {
-      work_shift_id: ws.work_shift_id,
-      work_date: work_date_str, // YYYY-MM-DD
-      shift_type_code: shift_type?.code || "",
-      shift_type_name: shift_type?.name || "",
-      shift_type_color: shift_type?.color ?? null,
-      start_time: schedule?.start_time || null,
-      end_time: schedule?.end_time || null,
-      note: ws.note || null,
-      created_at: ws.created_at!,
-      updated_at: ws.updated_at!,
-    };
-  });
+  return work_shifts.map((work_shift) => toWorkShiftApiModel(work_shift as any));
 }
 
 /**
@@ -187,23 +272,18 @@ export async function getEvents(
     visibility_level: number;
   }>
 > {
-  // 날짜를 Date 객체로 변환 (로컬 타임존 기준)
-  // start_date의 시작 시각 (00:00:00)
-  const start_date_utc = new Date(start_date);
-  start_date_utc.setHours(0, 0, 0, 0);
+  const start_date_utc = new Date(`${start_date}T00:00:00.000Z`);
+  const end_date_exclusive = new Date(`${end_date}T00:00:00.000Z`);
+  end_date_exclusive.setUTCDate(end_date_exclusive.getUTCDate() + 1);
 
-  // end_date의 종료 시각 (23:59:59.999)
-  const end_date_utc = new Date(end_date);
-  end_date_utc.setHours(23, 59, 59, 999);
-
-  // 기간 겹침 조건: start_at <= end_date AND end_at >= start_date
+  // 기간 겹침 조건: start_at < end_date + 1일 AND end_at > start_date
   const events = await Event.findAll({
     where: {
       owner_user_id: user_id,
       deleted_at: null,
       [Op.and]: [
-        { start_at: { [Op.lte]: end_date_utc } },
-        { end_at: { [Op.gte]: start_date_utc } },
+        { start_at: { [Op.lt]: end_date_exclusive } },
+        { end_at: { [Op.gt]: start_date_utc } },
       ],
     },
     order: [["start_at", "ASC"]],
@@ -234,7 +314,7 @@ export async function getCalendarRange(
     work_date: string;
     shift_type_code: string;
     shift_type_name: string;
-    shift_type_color: number | null;
+    shift_type_color: string | null;
     start_time: string | null;
     end_time: string | null;
     note: string | null;
@@ -276,7 +356,7 @@ export async function getDaySchedule(
     work_shift_id: string;
     shift_type_code: string;
     shift_type_name: string;
-    shift_type_color: number | null;
+    shift_type_color: string | null;
     start_time: string | null;
     end_time: string | null;
     note: string | null;
@@ -343,9 +423,9 @@ export async function getDaySchedule(
             work_shift_id: work_shift.work_shift_id,
             shift_type_code: shift_type?.code || "",
             shift_type_name: shift_type?.name || "",
-            shift_type_color: shift_type?.color ?? null,
-            start_time: schedule?.start_time || null,
-            end_time: schedule?.end_time || null,
+            shift_type_color: formatShiftTypeColor(shift_type?.color),
+            start_time: formatDbTime(schedule?.start_time),
+            end_time: formatDbTime(schedule?.end_time),
             note: work_shift.note || null,
           },
         ];
@@ -624,20 +704,7 @@ export async function batchUpsertWorkShifts(
     shift_type_code: string;
     note?: string | null;
   }>
-): Promise<
-  Array<{
-    work_shift_id: string;
-    work_date: string;
-    shift_type_code: string;
-    shift_type_name: string;
-    shift_type_color: number | null;
-    start_time: string | null;
-    end_time: string | null;
-    note: string | null;
-    created_at: Date;
-    updated_at: Date;
-  }>
-> {
+): Promise<WorkShiftApiModel[]> {
   // 1. 요청 배열 내 중복 날짜 검증
   const dates = work_shifts.map((ws) => ws.work_date);
   const unique_dates = new Set(dates);
@@ -776,6 +843,8 @@ export async function batchUpsertWorkShifts(
     const work_shift_ids = saved_work_shifts.map((ws) => ws.work_shift_id);
     const work_shifts_with_details = await WorkShift.findAll({
       where: {
+        owner_user_id: user_id,
+        deleted_at: null,
         work_shift_id: {
           [Op.in]: work_shift_ids,
         },
@@ -797,33 +866,9 @@ export async function batchUpsertWorkShifts(
     });
 
     // 7. 응답 형식으로 변환
-    return work_shifts_with_details.map((ws) => {
-      const schedule = (ws as any).schedule as
-        | (ShiftTypeSchedule & { shift_type?: ShiftType })
-        | undefined;
-      const shift_type = schedule?.shift_type;
-
-      // work_date가 Date 객체인지 확인하고, 아니면 문자열로 처리
-      const work_date_str =
-        ws.work_date instanceof Date
-          ? ws.work_date.toISOString().split("T")[0]
-          : typeof ws.work_date === "string"
-          ? ws.work_date
-          : String(ws.work_date);
-
-      return {
-        work_shift_id: ws.work_shift_id,
-        work_date: work_date_str, // YYYY-MM-DD
-        shift_type_code: shift_type?.code || "",
-        shift_type_name: shift_type?.name || "",
-        shift_type_color: shift_type?.color ?? null,
-        start_time: schedule?.start_time || null,
-        end_time: schedule?.end_time || null,
-        note: ws.note || null,
-        created_at: ws.created_at!,
-        updated_at: ws.updated_at!,
-      };
-    });
+    return work_shifts_with_details.map((work_shift) =>
+      toWorkShiftApiModel(work_shift as any)
+    );
   } catch (error: any) {
     // 트랜잭션 롤백 (커밋되지 않은 경우에만)
     if (!is_committed) {

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { validationResult } from "express-validator";
-import { User, WorkShift, ShiftTypeSchedule, ShiftType } from "../models";
+import { User } from "../models";
 import * as calendarService from "../services/calendarService";
 import * as shiftTemplateService from "../services/shiftTemplateService";
 
@@ -21,7 +21,6 @@ export async function getShiftTypes(
     const user_id = req.user!.user_id;
 
     const result = await calendarService.getShiftTypes(user_id);
-
     res.json({
       success: true,
       data: result,
@@ -431,57 +430,26 @@ export async function upsertWorkShift(
       note
     );
 
-    // 응답을 위해 schedule 정보 포함하여 조회
-    const work_shift_with_details = await WorkShift.findByPk(
-      work_shift.work_shift_id,
-      {
-        include: [
-          {
-            model: ShiftTypeSchedule,
-            as: "schedule",
-            required: true,
-            include: [
-              {
-                model: ShiftType,
-                as: "shift_type",
-                required: true,
-              },
-            ],
-          },
-        ],
-      }
-    );
+    const work_shift_with_details =
+      await calendarService.getWorkShiftApiModelById(
+        user_id,
+        work_shift.work_shift_id
+      );
 
     if (!work_shift_with_details) {
-      res.status(500).json({
+      res.status(404).json({
         success: false,
         error: {
-          code: "INTERNAL_SERVER_ERROR",
-          message: "근무표 조회 중 오류가 발생했습니다.",
+          code: "NOT_FOUND",
+          message: "근무표를 찾을 수 없습니다.",
         },
       });
       return;
     }
 
-    const schedule = (work_shift_with_details as any).schedule;
-    const shift_type = schedule?.shift_type;
-
     res.json({
       success: true,
-      data: {
-        work_shift_id: work_shift_with_details.work_shift_id,
-        work_date: work_shift_with_details.work_date
-          .toISOString()
-          .split("T")[0],
-        shift_type_code: shift_type?.code || "",
-        shift_type_name: shift_type?.name || "",
-        shift_type_color: shift_type?.color || null,
-        start_time: schedule?.start_time || null,
-        end_time: schedule?.end_time || null,
-        note: work_shift_with_details.note || null,
-        created_at: work_shift_with_details.created_at,
-        updated_at: work_shift_with_details.updated_at,
-      },
+      data: work_shift_with_details,
     });
   } catch (error: any) {
     console.error("Upsert work shift error:", error);
@@ -558,57 +526,26 @@ export async function updateWorkShift(
       note
     );
 
-    // 응답을 위해 schedule 정보 포함하여 조회
-    const work_shift_with_details = await WorkShift.findByPk(
-      work_shift.work_shift_id,
-      {
-        include: [
-          {
-            model: ShiftTypeSchedule,
-            as: "schedule",
-            required: true,
-            include: [
-              {
-                model: ShiftType,
-                as: "shift_type",
-                required: true,
-              },
-            ],
-          },
-        ],
-      }
-    );
+    const work_shift_with_details =
+      await calendarService.getWorkShiftApiModelById(
+        user_id,
+        work_shift.work_shift_id
+      );
 
     if (!work_shift_with_details) {
-      res.status(500).json({
+      res.status(404).json({
         success: false,
         error: {
-          code: "INTERNAL_SERVER_ERROR",
-          message: "근무표 조회 중 오류가 발생했습니다.",
+          code: "NOT_FOUND",
+          message: "근무표를 찾을 수 없습니다.",
         },
       });
       return;
     }
 
-    const schedule = (work_shift_with_details as any).schedule;
-    const shift_type = schedule?.shift_type;
-
     res.json({
       success: true,
-      data: {
-        work_shift_id: work_shift_with_details.work_shift_id,
-        work_date: work_shift_with_details.work_date
-          .toISOString()
-          .split("T")[0],
-        shift_type_code: shift_type?.code || "",
-        shift_type_name: shift_type?.name || "",
-        shift_type_color: shift_type?.color || null,
-        start_time: schedule?.start_time || null,
-        end_time: schedule?.end_time || null,
-        note: work_shift_with_details.note || null,
-        created_at: work_shift_with_details.created_at,
-        updated_at: work_shift_with_details.updated_at,
-      },
+      data: work_shift_with_details,
     });
   } catch (error: any) {
     console.error("Update work shift error:", error);
@@ -1078,6 +1015,19 @@ export async function createShiftType(
       });
       return;
     }
+    if (
+      error.message === "INVALID_COLOR_FORMAT" ||
+      error.message === "INVALID_COLOR_TYPE"
+    ) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_COLOR_FORMAT",
+          message: "색상 형식이 올바르지 않습니다. #AARRGGBB 형식을 사용하세요.",
+        },
+      });
+      return;
+    }
     // DB unique constraint 위반 (마이그레이션 미적용 시 발생 가능)
     if (error.name === "SequelizeUniqueConstraintError") {
       res.status(400).json({
@@ -1160,6 +1110,19 @@ export async function updateShiftType(
         error: {
           code: "FORBIDDEN",
           message: "다른 사용자의 근무 타입을 수정할 수 없습니다.",
+        },
+      });
+      return;
+    }
+    if (
+      error.message === "INVALID_COLOR_FORMAT" ||
+      error.message === "INVALID_COLOR_TYPE"
+    ) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_COLOR_FORMAT",
+          message: "색상 형식이 올바르지 않습니다. #AARRGGBB 형식을 사용하세요.",
         },
       });
       return;

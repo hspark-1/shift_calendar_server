@@ -7,7 +7,7 @@ interface ShiftTypeAttributes {
   template_id: string; // UUID
   code: string; // 예: 'D', 'E', 'N', 'OFF'
   name: string; // 예: '데이'
-  color?: number | null; // 예: 0xFFF5A623
+  color?: string | null; // 예: '#FFF5A623' (16진수 색상 문자열)
   sort_order?: number | null;
   created_at?: Date;
   deleted_at?: Date | null;
@@ -27,7 +27,7 @@ class ShiftType
   declare template_id: string;
   declare code: string;
   declare name: string;
-  declare color: number | null | undefined;
+  declare color: string | null | undefined;
   declare sort_order: number | null | undefined;
   declare created_at: Date | undefined;
   declare deleted_at: Date | null | undefined;
@@ -57,7 +57,7 @@ ShiftType.init(
       allowNull: false,
     },
     color: {
-      type: DataTypes.BIGINT,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     sort_order: {

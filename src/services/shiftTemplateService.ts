@@ -68,6 +68,79 @@ const DEFAULT_TEMPLATE_NAME = "기본 3교대";
 const MAX_SHIFT_TYPES_PER_TEMPLATE = 10;
 
 /**
+ * 숫자 색상 값을 16진수 문자열로 변환
+ * @param color 숫자 색상 값 (예: 0xFFF5A623)
+ * @returns 16진수 색상 문자열 (예: "#FFF5A623")
+ */
+function colorNumberToString(color: number): string {
+  // 음수 처리: unsigned 32-bit로 변환
+  const unsigned = color >>> 0;
+  // 16진수로 변환하고 대문자로, 앞에 # 추가
+  return `#${unsigned.toString(16).toUpperCase().padStart(8, "0")}`;
+}
+
+/**
+ * 색상 값을 정규화된 16진수 문자열로 변환
+ * - 숫자(number) → "#FFF5A623" 형식으로 변환
+ * - 문자열(string) → 정규화 (# 제거 후 다시 추가, 대문자 변환, 8자리 패딩)
+ * - null/undefined → null 반환
+ * @param color 색상 값 (number | string | null | undefined)
+ * @returns 정규화된 16진수 색상 문자열 (예: "#FFF5A623") 또는 null
+ */
+export function normalizeColor(
+  color: number | string | null | undefined
+): string | null {
+  if (color === null || color === undefined) {
+    return null;
+  }
+
+  // 숫자 타입인 경우
+  if (typeof color === "number") {
+    return colorNumberToString(color);
+  }
+
+  // 문자열 타입인 경우 정규화
+  if (typeof color === "string") {
+    // 공백 제거
+    let normalized = color.trim().toUpperCase();
+
+    // # 제거 (있으면)
+    if (normalized.startsWith("#")) {
+      normalized = normalized.slice(1);
+    }
+
+    // 빈 문자열이면 null 반환
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    // 16진수 검증 (0-9, A-F만 허용)
+    if (!/^[0-9A-F]+$/.test(normalized)) {
+      throw new Error("INVALID_COLOR_FORMAT");
+    }
+
+    // 길이에 따라 처리
+    // 6자리 (RGB) → 8자리 (ARGB)로 변환 (앞에 FF 추가)
+    if (normalized.length === 6) {
+      normalized = "FF" + normalized;
+    }
+    // 8자리 (ARGB) → 그대로 사용
+    else if (normalized.length === 8) {
+      // 그대로 사용
+    }
+    // 그 외 길이는 에러
+    else {
+      throw new Error("INVALID_COLOR_FORMAT");
+    }
+
+    return `#${normalized}`;
+  }
+
+  // 예상치 못한 타입
+  throw new Error("INVALID_COLOR_TYPE");
+}
+
+/**
  * 새 사용자를 위한 기본 근무 템플릿 생성
  * @param user_id 사용자 UUID
  * @param external_transaction 외부 트랜잭션 (선택)
@@ -110,7 +183,7 @@ export async function createDefaultShiftTemplate(
           template_id: template.template_id,
           code: type_info.code,
           name: type_info.name,
-          color: type_info.color,
+          color: colorNumberToString(type_info.color),
           sort_order: type_info.sort_order,
         },
         { transaction }
@@ -330,7 +403,7 @@ export async function createShiftType(
   data: {
     code: string;
     name: string;
-    color?: number | null;
+    color?: number | string | null;
     start_time?: string | null;
     end_time?: string | null;
     sort_order?: number | null;
@@ -339,7 +412,7 @@ export async function createShiftType(
   shift_type_id: string;
   code: string;
   name: string;
-  color: number | null;
+  color: string | null;
   sort_order: number | null;
   start_time: string | null;
   end_time: string | null;
@@ -348,6 +421,11 @@ export async function createShiftType(
   created_at: Date;
 }> {
   return sequelize.transaction(async (transaction) => {
+    // 색상 값 정규화
+    let normalized_color: string | null = null;
+    if (data.color !== null && data.color !== undefined) {
+      normalized_color = normalizeColor(data.color);
+    }
     // 1. 현재 사용자의 활성 템플릿 조회
     const template = await ShiftTemplate.findOne({
       where: {
@@ -394,7 +472,7 @@ export async function createShiftType(
         template_id: template.template_id,
         code: data.code,
         name: data.name,
-        color: data.color ?? null,
+        color: normalized_color,
         sort_order: sort_order,
       },
       { transaction }
@@ -456,7 +534,7 @@ export async function updateShiftType(
   data: {
     code?: string;
     name?: string;
-    color?: number | null;
+    color?: number | string | null;
     start_time?: string | null;
     end_time?: string | null;
     sort_order?: number | null;
@@ -465,7 +543,7 @@ export async function updateShiftType(
   shift_type_id: string;
   code: string;
   name: string;
-  color: number | null;
+  color: string | null;
   sort_order: number | null;
   start_time: string | null;
   end_time: string | null;
@@ -474,6 +552,12 @@ export async function updateShiftType(
   updated_at: Date;
 }> {
   return sequelize.transaction(async (transaction) => {
+    // 색상 값 정규화 (제공된 경우에만)
+    let normalized_color: string | null | undefined = undefined;
+    if (data.color !== undefined) {
+      normalized_color =
+        data.color === null ? null : normalizeColor(data.color);
+    }
     // 1. 근무 타입 조회 및 소유권 확인
     const shift_type = await ShiftType.findOne({
       where: {
@@ -506,8 +590,8 @@ export async function updateShiftType(
     if (data.name !== undefined) {
       shift_type.name = data.name;
     }
-    if (data.color !== undefined) {
-      shift_type.color = data.color;
+    if (normalized_color !== undefined) {
+      shift_type.color = normalized_color;
     }
     if (data.sort_order !== undefined) {
       shift_type.sort_order = data.sort_order;
