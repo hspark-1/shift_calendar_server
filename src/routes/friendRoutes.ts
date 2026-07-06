@@ -32,6 +32,26 @@ router.get(
 );
 
 /**
+ * GET /api/v1/friends/:friend_user_id/calendar/range
+ * 친구 캘린더 기간 조회
+ */
+router.get(
+  "/friends/:friend_user_id/calendar/range",
+  [
+    param("friend_user_id")
+      .isUUID()
+      .withMessage("유효한 사용자 ID를 입력하세요."),
+    query("start_date")
+      .matches(/^\d{4}-\d{2}-\d{2}$/)
+      .withMessage("조회 시작일은 YYYY-MM-DD 형식이어야 합니다."),
+    query("end_date")
+      .matches(/^\d{4}-\d{2}-\d{2}$/)
+      .withMessage("조회 종료일은 YYYY-MM-DD 형식이어야 합니다."),
+  ],
+  friendController.getFriendCalendarRange
+);
+
+/**
  * PUT /api/v1/friends/:friend_user_id/settings
  * 친구 레벨 설정 변경
  */

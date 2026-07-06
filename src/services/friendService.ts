@@ -8,6 +8,7 @@ import {
   Notification,
 } from "../models";
 import { NotificationType } from "../models/Notification";
+import { normalizePhoneNumber } from "../utils/phone";
 
 // ============================================================
 // 에러 코드 상수
@@ -17,6 +18,9 @@ export const FriendErrorCodes = {
   ALREADY_FRIENDS: "ALREADY_FRIENDS",
   PENDING_REQUEST_EXISTS: "PENDING_REQUEST_EXISTS",
   USER_NOT_FOUND: "USER_NOT_FOUND",
+  FRIEND_NOT_FOUND: "FRIEND_NOT_FOUND",
+  CALENDAR_ACCESS_DENIED: "CALENDAR_ACCESS_DENIED",
+  INVALID_DATE_RANGE: "INVALID_DATE_RANGE",
   REQUEST_NOT_FOUND: "REQUEST_NOT_FOUND",
   NOT_ADDRESSEE: "NOT_ADDRESSEE",
   NOT_REQUESTER: "NOT_REQUESTER",
@@ -66,6 +70,120 @@ export interface FriendRequestInfo {
   message: string | null;
   created_at: Date;
   responded_at: Date | null;
+}
+
+export interface FriendCalendarWorkShift {
+  work_shift_id: string;
+  work_date: string;
+  shift_type_code: string;
+  shift_type_name: string;
+  shift_type_color: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  note: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface FriendCalendarEvent {
+  event_id: string;
+  title: string;
+  memo: string | null;
+  place: string | null;
+  all_day: boolean;
+  start_at: Date;
+  end_at: Date;
+  visibility_level: number;
+}
+
+export type UserSearchField = "email" | "phone";
+
+const email_search_pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const date_pattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidDateString(date: string): boolean {
+  if (!date_pattern.test(date)) {
+    return false;
+  }
+
+  const parsed_date = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed_date.getTime())) {
+    return false;
+  }
+
+  return parsed_date.toISOString().slice(0, 10) === date;
+}
+
+function formatDbDate(date: string | Date): string {
+  return date instanceof Date ? date.toISOString().slice(0, 10) : String(date);
+}
+
+function formatDbTime(time: string | null): string | null {
+  if (!time) {
+    return null;
+  }
+
+  const trimmed_time = String(time).trim();
+  if (/^\d{2}:\d{2}$/.test(trimmed_time)) {
+    return `${trimmed_time}:00`;
+  }
+
+  if (/^\d{2}:\d{2}:\d{2}/.test(trimmed_time)) {
+    return trimmed_time.slice(0, 8);
+  }
+
+  return trimmed_time;
+}
+
+function colorNumberToArgbString(color: number): string {
+  const unsigned_color = color >>> 0;
+  return `#${unsigned_color.toString(16).toUpperCase().padStart(8, "0")}`;
+}
+
+function formatShiftTypeColor(color: string | number | null): string | null {
+  if (color === null || color === undefined) {
+    return null;
+  }
+
+  if (typeof color === "number") {
+    return colorNumberToArgbString(color);
+  }
+
+  const trimmed_color = color.trim();
+  if (!trimmed_color) {
+    return null;
+  }
+
+  let hex_color = trimmed_color.toUpperCase();
+  if (hex_color.startsWith("#")) {
+    hex_color = hex_color.slice(1);
+  }
+
+  if (/^[0-9A-F]{6}$/.test(hex_color)) {
+    return `#FF${hex_color}`;
+  }
+
+  if (/^[0-9A-F]{8}$/.test(hex_color)) {
+    return `#${hex_color}`;
+  }
+
+  if (/^\d+$/.test(trimmed_color)) {
+    return colorNumberToArgbString(Number(trimmed_color));
+  }
+
+  return null;
+}
+
+export function getUserSearchField(query: string): UserSearchField | null {
+  if (email_search_pattern.test(query)) {
+    return "email";
+  }
+
+  if (normalizePhoneNumber(query)) {
+    return "phone";
+  }
+
+  return null;
 }
 
 // ============================================================
@@ -128,15 +246,133 @@ export async function getFriends(
 }
 
 // ============================================================
+// 친구 캘린더 기간 조회
+// ============================================================
+export async function getFriendCalendarRange(
+  viewer_user_id: string,
+  friend_user_id: string,
+  start_date: string,
+  end_date: string
+): Promise<{
+  work_shifts: FriendCalendarWorkShift[];
+  events: FriendCalendarEvent[];
+}> {
+  if (
+    !isValidDateString(start_date) ||
+    !isValidDateString(end_date) ||
+    start_date > end_date
+  ) {
+    throw new Error(FriendErrorCodes.INVALID_DATE_RANGE);
+  }
+
+  const { user_id_a, user_id_b } = Friendship.sortUserIds(
+    viewer_user_id,
+    friend_user_id
+  );
+  const friendship = await Friendship.findOne({
+    where: { user_id_a, user_id_b },
+  });
+
+  if (!friendship) {
+    throw new Error(FriendErrorCodes.FRIEND_NOT_FOUND);
+  }
+
+  const friend_setting = await FriendLevelSetting.findOne({
+    where: {
+      owner_user_id: friend_user_id,
+      friend_user_id: viewer_user_id,
+    },
+  });
+
+  if (!friend_setting || !friend_setting.can_view) {
+    throw new Error(FriendErrorCodes.CALENDAR_ACCESS_DENIED);
+  }
+
+  const [work_shifts, events] = await Promise.all([
+    sequelize.query<FriendCalendarWorkShift & { work_date: string | Date }>(
+      `
+      SELECT
+        ws.work_shift_id,
+        ws.work_date,
+        st.code AS shift_type_code,
+        st.name AS shift_type_name,
+        st.color AS shift_type_color,
+        sts.start_time,
+        sts.end_time,
+        ws.note,
+        ws.created_at,
+        ws.updated_at
+      FROM v_visible_work_shifts_for_friend ws
+      JOIN shift_type_schedules sts
+        ON sts.schedule_id = ws.schedule_id
+      JOIN shift_types st
+        ON st.shift_type_id = sts.shift_type_id
+      WHERE ws.owner_user_id = :friend_user_id
+        AND ws.viewer_user_id = :viewer_user_id
+        AND ws.work_date BETWEEN CAST(:start_date AS date) AND CAST(:end_date AS date)
+      ORDER BY ws.work_date ASC
+      `,
+      {
+        replacements: { friend_user_id, viewer_user_id, start_date, end_date },
+        type: QueryTypes.SELECT,
+      }
+    ),
+    sequelize.query<FriendCalendarEvent>(
+      `
+      SELECT
+        event_id,
+        title,
+        memo,
+        place,
+        all_day,
+        start_at,
+        end_at,
+        visibility_level
+      FROM v_visible_events_for_friend
+      WHERE owner_user_id = :friend_user_id
+        AND viewer_user_id = :viewer_user_id
+        AND start_at < (CAST(:end_date AS date) + interval '1 day')
+        AND end_at > CAST(:start_date AS date)
+      ORDER BY start_at ASC
+      `,
+      {
+        replacements: { friend_user_id, viewer_user_id, start_date, end_date },
+        type: QueryTypes.SELECT,
+      }
+    ),
+  ]);
+
+  return {
+    work_shifts: work_shifts.map((work_shift) => ({
+      ...work_shift,
+      work_date: formatDbDate(work_shift.work_date),
+      start_time: formatDbTime(work_shift.start_time),
+      end_time: formatDbTime(work_shift.end_time),
+      note: work_shift.note ?? null,
+      shift_type_color: formatShiftTypeColor(work_shift.shift_type_color),
+    })),
+    events,
+  };
+}
+
+// ============================================================
 // 사용자 검색 (친구 추가용)
 // ============================================================
 export async function searchUser(
   my_user_id: string,
   query: string
 ): Promise<SearchedUser | null> {
-  // 이메일 또는 전화번호로 검색
-  const is_email = query.includes("@");
-  const search_condition = is_email ? { email: query } : { phone: query };
+  const search_field = getUserSearchField(query);
+  if (!search_field) {
+    throw new Error(FriendErrorCodes.INVALID_QUERY);
+  }
+
+  const normalized_query =
+    search_field === "phone" ? normalizePhoneNumber(query)! : query;
+  const search_condition =
+    search_field === "email"
+      ? { email: normalized_query }
+      : { phone: normalized_query };
 
   const user = await User.findOne({
     where: search_condition,

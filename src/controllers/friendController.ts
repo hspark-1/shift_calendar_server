@@ -32,6 +32,18 @@ const ErrorMessages: Record<string, { status: number; message: string }> = {
     status: 404,
     message: "해당 사용자를 찾을 수 없습니다.",
   },
+  [FriendErrorCodes.FRIEND_NOT_FOUND]: {
+    status: 404,
+    message: "친구 관계를 찾을 수 없습니다.",
+  },
+  [FriendErrorCodes.CALENDAR_ACCESS_DENIED]: {
+    status: 403,
+    message: "친구 캘린더를 볼 수 없습니다.",
+  },
+  [FriendErrorCodes.INVALID_DATE_RANGE]: {
+    status: 400,
+    message: "조회 기간이 올바르지 않습니다.",
+  },
   [FriendErrorCodes.REQUEST_NOT_FOUND]: {
     status: 404,
     message: "친구 요청을 찾을 수 없습니다.",
@@ -93,6 +105,19 @@ function handleError(res: Response, error: unknown): void {
   }
 }
 
+function isValidDateString(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return false;
+  }
+
+  const parsed_date = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed_date.getTime())) {
+    return false;
+  }
+
+  return parsed_date.toISOString().slice(0, 10) === date;
+}
+
 // ============================================================
 // 친구 목록 조회
 // GET /api/v1/friends
@@ -107,6 +132,73 @@ export async function getFriends(
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
     const result = await friendService.getFriends(user_id, page, limit);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    handleError(res, error);
+  }
+}
+
+// ============================================================
+// 친구 캘린더 기간 조회
+// GET /api/v1/friends/:friend_user_id/calendar/range
+// ============================================================
+export async function getFriendCalendarRange(
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const validation_errors = errors.array();
+      const has_friend_user_id_error = validation_errors.some(
+        (error) => "path" in error && error.path === "friend_user_id"
+      );
+      const error_code = has_friend_user_id_error
+        ? FriendErrorCodes.FRIEND_NOT_FOUND
+        : FriendErrorCodes.INVALID_DATE_RANGE;
+
+      res.status(has_friend_user_id_error ? 404 : 400).json({
+        success: false,
+        error: {
+          code: error_code,
+          message: ErrorMessages[error_code].message,
+        },
+        errors: validation_errors,
+      });
+      return;
+    }
+
+    const viewer_user_id = req.user!.user_id;
+    const { friend_user_id } = req.params;
+    const { start_date, end_date } = req.query;
+
+    if (
+      typeof start_date !== "string" ||
+      typeof end_date !== "string" ||
+      !isValidDateString(start_date) ||
+      !isValidDateString(end_date) ||
+      start_date > end_date
+    ) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: FriendErrorCodes.INVALID_DATE_RANGE,
+          message: "조회 기간이 올바르지 않습니다.",
+        },
+      });
+      return;
+    }
+
+    const result = await friendService.getFriendCalendarRange(
+      viewer_user_id,
+      friend_user_id,
+      start_date,
+      end_date
+    );
 
     res.json({
       success: true,
@@ -142,11 +234,7 @@ export async function searchUser(
     const user_id = req.user!.user_id;
     const query = (req.query.query as string).trim();
 
-    // 간단한 유효성 검사
-    const is_email = query.includes("@");
-    const is_phone = /^[\+\d][\d\-\s]+$/.test(query);
-
-    if (!is_email && !is_phone) {
+    if (!friendService.getUserSearchField(query)) {
       res.status(400).json({
         success: false,
         error: {
@@ -462,4 +550,3 @@ export async function getUnreadNotificationCount(
     handleError(res, error);
   }
 }
-
