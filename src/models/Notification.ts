@@ -8,7 +8,7 @@ export type NotificationType = string;
 
 // 알림 액션 타입
 export interface NotificationAction {
-  type: string; // 액션 타입 (accept, reject, navigate, dismiss 등)
+  type: string; // 액션 타입 (accept, reject, navigate 등)
   label: string; // 버튼 라벨
   route?: string; // 네비게이션 경로 (navigate 타입일 때)
 }

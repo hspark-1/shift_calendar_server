@@ -1068,7 +1068,7 @@ async function updateFriendRequestNotificationStatus(
         request_status,
         responded_at: responded_at.toISOString(),
       },
-      actions: [{ type: "dismiss", label: "확인" }],
+      actions: [],
       is_read: true,
       read_at: notification.read_at ?? responded_at,
     },
@@ -1128,7 +1128,7 @@ async function createFriendRejectedNotification(
         user_name: rejecter_name,
         profile_image_url: rejecter_profile_image,
       },
-      actions: [{ type: "dismiss", label: "확인" }],
+      actions: [],
     },
     { transaction }
   );
