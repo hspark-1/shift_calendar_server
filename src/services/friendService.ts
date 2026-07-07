@@ -1,4 +1,4 @@
-import { Op, QueryTypes } from "sequelize";
+import { Op, QueryTypes, Transaction } from "sequelize";
 import { sequelize } from "../config/database";
 import {
   User,
@@ -7,7 +7,7 @@ import {
   FriendLevelSetting,
   Notification,
 } from "../models";
-import { NotificationType } from "../models/Notification";
+import { NotificationAction, NotificationType } from "../models/Notification";
 import { normalizePhoneNumber } from "../utils/phone";
 
 // ============================================================
@@ -70,6 +70,18 @@ export interface FriendRequestInfo {
   message: string | null;
   created_at: Date;
   responded_at: Date | null;
+}
+
+export interface NotificationInfo {
+  notification_id: string;
+  notification_type: NotificationType;
+  title: string;
+  body: string | null;
+  payload: Record<string, unknown>;
+  actions: NotificationAction[];
+  is_read: boolean;
+  read_at: Date | null;
+  created_at: Date;
 }
 
 export interface FriendCalendarWorkShift {
@@ -656,96 +668,134 @@ export async function respondToFriendRequest(
   request_id: string;
   status: string;
   responded_at: Date;
+  notification: NotificationInfo | null;
   friendship?: {
     user_id_a: string;
     user_id_b: string;
     created_at: Date;
   };
 }> {
-  // 1. 요청 조회
-  const request = await FriendRequest.findByPk(request_id, {
-    include: [
-      {
-        model: User,
-        as: "requester",
-        attributes: ["user_id", "name", "profile_image_url"],
-      },
-    ],
-  });
+  const transaction = await sequelize.transaction();
+  let is_committed = false;
 
-  if (!request) {
-    throw new Error(FriendErrorCodes.REQUEST_NOT_FOUND);
-  }
-
-  // 2. 현재 사용자가 addressee인지 확인
-  if (request.addressee_user_id !== user_id) {
-    throw new Error(FriendErrorCodes.NOT_ADDRESSEE);
-  }
-
-  // 3. 상태가 PENDING인지 확인
-  if (request.status !== "PENDING") {
-    throw new Error(FriendErrorCodes.NOT_PENDING);
-  }
-
-  // 4. 액션 유효성 검사
-  if (action !== "accept" && action !== "reject") {
-    throw new Error(FriendErrorCodes.INVALID_ACTION);
-  }
-
-  const new_status = action === "accept" ? "ACCEPTED" : "REJECTED";
-  const responded_at = new Date();
-
-  // 5. 상태 업데이트 (DB 트리거가 friendships, friend_level_settings 자동 생성)
-  await request.update({
-    status: new_status,
-    responded_at,
-  });
-
-  // 6. 수락 시 알림 생성 (요청 보낸 사람에게)
-  const addressee = await User.findByPk(user_id);
-  if (action === "accept") {
-    await createFriendAcceptedNotification(
-      request.requester_user_id,
-      addressee!.name,
-      addressee!.profile_image_url ?? null,
-      user_id
-    );
-
-    // 친구 관계 정보 조회
-    const { user_id_a, user_id_b } = Friendship.sortUserIds(
-      request.requester_user_id,
-      request.addressee_user_id
-    );
-    const friendship = await Friendship.findOne({
-      where: { user_id_a, user_id_b },
+  try {
+    // 1. 요청 조회
+    const request = await FriendRequest.findByPk(request_id, {
+      include: [
+        {
+          model: User,
+          as: "requester",
+          attributes: ["user_id", "name", "profile_image_url"],
+        },
+      ],
+      transaction,
     });
 
-    return {
-      request_id,
-      status: new_status,
-      responded_at,
-      friendship: friendship
-        ? {
-            user_id_a: friendship.user_id_a,
-            user_id_b: friendship.user_id_b,
-            created_at: friendship.created_at!,
-          }
-        : undefined,
-    };
-  } else {
-    // 거절 시 알림 생성 (요청 보낸 사람에게)
-    await createFriendRejectedNotification(
-      request.requester_user_id,
-      addressee!.name,
-      addressee!.profile_image_url ?? null,
-      user_id
+    if (!request) {
+      throw new Error(FriendErrorCodes.REQUEST_NOT_FOUND);
+    }
+
+    // 2. 현재 사용자가 addressee인지 확인
+    if (request.addressee_user_id !== user_id) {
+      throw new Error(FriendErrorCodes.NOT_ADDRESSEE);
+    }
+
+    // 3. 상태가 PENDING인지 확인
+    if (request.status !== "PENDING") {
+      throw new Error(FriendErrorCodes.NOT_PENDING);
+    }
+
+    // 4. 액션 유효성 검사
+    if (action !== "accept" && action !== "reject") {
+      throw new Error(FriendErrorCodes.INVALID_ACTION);
+    }
+
+    const new_status = action === "accept" ? "ACCEPTED" : "REJECTED";
+    const responded_at = new Date();
+
+    // 5. 상태 업데이트 (DB 트리거가 friendships, friend_level_settings 자동 생성)
+    await request.update(
+      {
+        status: new_status,
+        responded_at,
+      },
+      { transaction }
     );
 
-    return {
+    const notification = await updateFriendRequestNotificationStatus(
+      user_id,
       request_id,
-      status: new_status,
+      action,
+      request.requester!.name,
       responded_at,
-    };
+      transaction
+    );
+
+    // 6. 수락/거절 결과 알림 생성 (요청 보낸 사람에게)
+    const addressee = await User.findByPk(user_id, { transaction });
+    if (action === "accept") {
+      await createFriendAcceptedNotification(
+        request.requester_user_id,
+        addressee!.name,
+        addressee!.profile_image_url ?? null,
+        user_id,
+        transaction
+      );
+
+      // 친구 관계 정보 조회
+      const { user_id_a, user_id_b } = Friendship.sortUserIds(
+        request.requester_user_id,
+        request.addressee_user_id
+      );
+      const friendship = await Friendship.findOne({
+        where: { user_id_a, user_id_b },
+        transaction,
+      });
+
+      const result = {
+        request_id,
+        status: new_status,
+        responded_at,
+        notification,
+        friendship: friendship
+          ? {
+              user_id_a: friendship.user_id_a,
+              user_id_b: friendship.user_id_b,
+              created_at: friendship.created_at!,
+            }
+          : undefined,
+      };
+
+      await transaction.commit();
+      is_committed = true;
+
+      return result;
+    } else {
+      await createFriendRejectedNotification(
+        request.requester_user_id,
+        addressee!.name,
+        addressee!.profile_image_url ?? null,
+        user_id,
+        transaction
+      );
+
+      const result = {
+        request_id,
+        status: new_status,
+        responded_at,
+        notification,
+      };
+
+      await transaction.commit();
+      is_committed = true;
+
+      return result;
+    }
+  } catch (error) {
+    if (!is_committed) {
+      await transaction.rollback();
+    }
+    throw error;
   }
 }
 
@@ -906,6 +956,26 @@ export async function deleteFriend(
 // 알림 관련 헬퍼 함수들
 // ============================================================
 
+function serializeNotification(
+  notification: Notification,
+  read_state?: { is_read?: boolean; read_at?: Date | null }
+): NotificationInfo {
+  return {
+    notification_id: notification.notification_id,
+    notification_type: notification.notification_type,
+    title: notification.title,
+    body: notification.body ?? null,
+    payload: notification.payload as Record<string, unknown>,
+    actions: notification.actions,
+    is_read: read_state?.is_read ?? notification.is_read,
+    read_at:
+      read_state && "read_at" in read_state
+        ? read_state.read_at ?? null
+        : notification.read_at ?? null,
+    created_at: notification.created_at!,
+  };
+}
+
 /**
  * 친구 요청 알림 생성
  */
@@ -935,26 +1005,106 @@ async function createFriendRequestNotification(
 }
 
 /**
+ * 수락/거절 후 요청 수신자에게 있던 원본 친구 요청 알림을 처리 완료 상태로 변경
+ */
+async function updateFriendRequestNotificationStatus(
+  user_id: string,
+  request_id: string,
+  action: "accept" | "reject",
+  requester_name: string,
+  responded_at: Date,
+  transaction: Transaction
+): Promise<NotificationInfo | null> {
+  const [notification_ref] = await sequelize.query<{ notification_id: string }>(
+    `
+    SELECT notification_id
+    FROM notifications
+    WHERE user_id = :user_id
+      AND notification_type = 'FRIEND_REQUEST'
+      AND payload->>'request_id' = :request_id
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    {
+      replacements: { user_id, request_id },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+
+  if (!notification_ref) {
+    return null;
+  }
+
+  const notification = await Notification.findByPk(
+    notification_ref.notification_id,
+    {
+      transaction,
+    },
+  );
+
+  if (!notification) {
+    return null;
+  }
+
+  const is_accepted = action === "accept";
+  const request_status = is_accepted ? "ACCEPTED" : "REJECTED";
+  const notification_type = is_accepted
+    ? "FRIEND_REQUEST_ACCEPTED"
+    : "FRIEND_REQUEST_REJECTED";
+  const title = is_accepted ? "친구 요청 수락" : "친구 요청 거절";
+  const body = is_accepted
+    ? `${requester_name}님의 친구 요청을 수락했습니다.`
+    : `${requester_name}님의 친구 요청을 거절했습니다.`;
+
+  await notification.update(
+    {
+      notification_type,
+      title,
+      body,
+      payload: {
+        ...notification.payload,
+        request_id,
+        request_status,
+        responded_at: responded_at.toISOString(),
+      },
+      actions: [{ type: "dismiss", label: "확인" }],
+      is_read: true,
+      read_at: notification.read_at ?? responded_at,
+    },
+    { transaction }
+  );
+
+  return serializeNotification(notification);
+}
+
+/**
  * 친구 요청 수락 알림 생성
  */
 async function createFriendAcceptedNotification(
   user_id: string,
   accepter_name: string,
   accepter_profile_image: string | null,
-  accepter_user_id: string
+  accepter_user_id: string,
+  transaction?: Transaction
 ): Promise<void> {
-  await Notification.create({
-    user_id,
-    notification_type: "FRIEND_ACCEPTED",
-    title: "친구 요청 수락됨",
-    body: `${accepter_name}님이 친구 요청을 수락했습니다.`,
-    payload: {
-      related_user_id: accepter_user_id,
-      user_name: accepter_name,
-      profile_image_url: accepter_profile_image,
+  await Notification.create(
+    {
+      user_id,
+      notification_type: "FRIEND_ACCEPTED",
+      title: "친구 요청 수락됨",
+      body: `${accepter_name}님이 친구 요청을 수락했습니다.`,
+      payload: {
+        related_user_id: accepter_user_id,
+        user_name: accepter_name,
+        profile_image_url: accepter_profile_image,
+      },
+      actions: [
+        { type: "navigate", label: "친구 목록 보기", route: "/friends" },
+      ],
     },
-    actions: [{ type: "navigate", label: "친구 목록 보기", route: "/friends" }],
-  });
+    { transaction }
+  );
 }
 
 /**
@@ -964,20 +1114,24 @@ async function createFriendRejectedNotification(
   user_id: string,
   rejecter_name: string,
   rejecter_profile_image: string | null,
-  rejecter_user_id: string
+  rejecter_user_id: string,
+  transaction?: Transaction
 ): Promise<void> {
-  await Notification.create({
-    user_id,
-    notification_type: "FRIEND_REJECTED",
-    title: "친구 요청 거절됨",
-    body: `${rejecter_name}님이 친구 요청을 거절했습니다.`,
-    payload: {
-      related_user_id: rejecter_user_id,
-      user_name: rejecter_name,
-      profile_image_url: rejecter_profile_image,
+  await Notification.create(
+    {
+      user_id,
+      notification_type: "FRIEND_REJECTED",
+      title: "친구 요청 거절됨",
+      body: `${rejecter_name}님이 친구 요청을 거절했습니다.`,
+      payload: {
+        related_user_id: rejecter_user_id,
+        user_name: rejecter_name,
+        profile_image_url: rejecter_profile_image,
+      },
+      actions: [{ type: "dismiss", label: "확인" }],
     },
-    actions: [{ type: "dismiss", label: "확인" }],
-  });
+    { transaction }
+  );
 }
 
 // ============================================================
@@ -993,20 +1147,11 @@ export async function getNotifications(
   page: number = 1,
   limit: number = 20
 ): Promise<{
-  notifications: Array<{
-    notification_id: string;
-    notification_type: NotificationType;
-    title: string;
-    body: string | null;
-    payload: Record<string, unknown>;
-    actions: Array<{ type: string; label: string; route?: string }>;
-    is_read: boolean;
-    read_at: Date | null;
-    created_at: Date;
-  }>;
+  notifications: NotificationInfo[];
   pagination: PaginationInfo;
 }> {
   const offset = (page - 1) * limit;
+  const read_at = new Date();
 
   const { count, rows } = await Notification.findAndCountAll({
     where: { user_id },
@@ -1023,22 +1168,17 @@ export async function getNotifications(
   // 조회된 미읽음 알림들 읽음 처리 (비동기, 응답 블로킹 하지 않음)
   if (unread_notification_ids.length > 0) {
     Notification.update(
-      { is_read: true, read_at: new Date() },
+      { is_read: true, read_at },
       { where: { notification_id: unread_notification_ids } }
     ).catch((err) => console.error("알림 읽음 처리 실패:", err));
   }
 
-  const notifications = rows.map((row) => ({
-    notification_id: row.notification_id,
-    notification_type: row.notification_type,
-    title: row.title,
-    body: row.body ?? null,
-    payload: row.payload as Record<string, unknown>,
-    actions: row.actions,
-    is_read: true, // 조회 시점에 읽음 처리되므로 true로 반환
-    read_at: row.read_at ?? new Date(),
-    created_at: row.created_at!,
-  }));
+  const notifications = rows.map((row) =>
+    serializeNotification(row, {
+      is_read: true,
+      read_at: row.read_at ?? read_at,
+    })
+  );
 
   return {
     notifications,
