@@ -54,7 +54,6 @@ coverage/
 .yarn/build-state.yml
 .yarn/install-state.gz
 
-_docs/
 migrations/
 .cursor/
 AGENTS.md
