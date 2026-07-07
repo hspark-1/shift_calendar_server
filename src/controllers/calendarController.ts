@@ -9,6 +9,45 @@ interface AuthenticatedRequest extends Request {
   user?: User;
 }
 
+function getValidationErrorPath(error: any): string {
+  return typeof error.path === "string" ? error.path : error.param || "";
+}
+
+function getCreateEventValidationError(errors: any[]): {
+  code: string;
+  message: string;
+} {
+  const error_paths = new Set(
+    errors.map((error) => getValidationErrorPath(error))
+  );
+
+  if (error_paths.has("title")) {
+    return {
+      code: "INVALID_TITLE",
+      message: "제목을 입력해주세요.",
+    };
+  }
+
+  if (error_paths.has("start_at") || error_paths.has("end_at")) {
+    return {
+      code: "INVALID_EVENT_TIME",
+      message: "일정 시간이 올바르지 않습니다.",
+    };
+  }
+
+  if (error_paths.has("visibility_level")) {
+    return {
+      code: "INVALID_VISIBILITY_LEVEL",
+      message: "공개 레벨이 올바르지 않습니다.",
+    };
+  }
+
+  return {
+    code: "VALIDATION_ERROR",
+    message: "입력값 검증에 실패했습니다.",
+  };
+}
+
 /**
  * 근무 타입 정보 조회
  * GET /api/v1/shift-types
@@ -255,6 +294,79 @@ export async function getEvents(
     });
   } catch (error: any) {
     console.error("Get events error:", error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "서버 오류가 발생했습니다.",
+      },
+    });
+  }
+}
+
+/**
+ * 개인 일정 생성
+ * POST /api/v1/events
+ */
+export async function createEvent(
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const validation_error = getCreateEventValidationError(errors.array());
+      res.status(400).json({
+        success: false,
+        error: validation_error,
+      });
+      return;
+    }
+
+    const user_id = req.user!.user_id;
+    const event = await calendarService.createEvent(user_id, req.body);
+
+    res.status(201).json({
+      success: true,
+      data: event,
+      message: "일정이 생성되었습니다.",
+    });
+  } catch (error: any) {
+    console.error("Create event error:", error);
+
+    if (error.message === "INVALID_TITLE") {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_TITLE",
+          message: "제목을 입력해주세요.",
+        },
+      });
+      return;
+    }
+
+    if (error.message === "INVALID_EVENT_TIME") {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_EVENT_TIME",
+          message: "일정 시간이 올바르지 않습니다.",
+        },
+      });
+      return;
+    }
+
+    if (error.message === "INVALID_VISIBILITY_LEVEL") {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_VISIBILITY_LEVEL",
+          message: "공개 레벨이 올바르지 않습니다.",
+        },
+      });
+      return;
+    }
+
     res.status(500).json({
       success: false,
       error: {

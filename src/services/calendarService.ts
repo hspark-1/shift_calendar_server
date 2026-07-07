@@ -22,6 +22,33 @@ export interface WorkShiftApiModel {
   updated_at: Date;
 }
 
+export interface EventApiModel {
+  event_id: string;
+  title: string;
+  memo: string | null;
+  place: string | null;
+  all_day: boolean;
+  start_at: Date;
+  end_at: Date;
+  visibility_level: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CreateEventInput {
+  title: string;
+  memo?: string | null;
+  place?: string | null;
+  all_day: boolean;
+  start_at: string;
+  end_at: string;
+  visibility_level: number;
+}
+
+const max_event_visibility_level = 5;
+const utc_iso_datetime_pattern =
+  /^(\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d)(?:\.(\d{1,3}))?Z$/;
+
 function formatDbDate(date: string | Date): string {
   return date instanceof Date ? date.toISOString().slice(0, 10) : String(date);
 }
@@ -102,6 +129,50 @@ function toWorkShiftApiModel(
     created_at: work_shift.created_at!,
     updated_at: work_shift.updated_at!,
   };
+}
+
+function toEventApiModel(event: Event): EventApiModel {
+  return {
+    event_id: event.event_id,
+    title: event.title,
+    memo: event.memo || null,
+    place: event.place || null,
+    all_day: event.all_day,
+    start_at: event.start_at,
+    end_at: event.end_at,
+    visibility_level: event.visibility_level,
+    created_at: event.created_at!,
+    updated_at: event.updated_at!,
+  };
+}
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const trimmed_value = value.trim();
+  return trimmed_value.length > 0 ? trimmed_value : null;
+}
+
+function parseEventDate(value: string): Date {
+  const match =
+    typeof value === "string" ? value.match(utc_iso_datetime_pattern) : null;
+  if (!match) {
+    throw new Error("INVALID_EVENT_TIME");
+  }
+
+  const parsed_date = new Date(value);
+  if (Number.isNaN(parsed_date.getTime())) {
+    throw new Error("INVALID_EVENT_TIME");
+  }
+
+  const milliseconds = (match[2] ?? "000").padEnd(3, "0");
+  if (parsed_date.toISOString() !== `${match[1]}.${milliseconds}Z`) {
+    throw new Error("INVALID_EVENT_TIME");
+  }
+
+  return parsed_date;
 }
 
 export async function getWorkShiftApiModelById(
@@ -260,18 +331,7 @@ export async function getEvents(
   user_id: string,
   start_date: string,
   end_date: string
-): Promise<
-  Array<{
-    event_id: string;
-    title: string;
-    memo: string | null;
-    place: string | null;
-    all_day: boolean;
-    start_at: Date;
-    end_at: Date;
-    visibility_level: number;
-  }>
-> {
+): Promise<EventApiModel[]> {
   const start_date_utc = new Date(`${start_date}T00:00:00.000Z`);
   const end_date_exclusive = new Date(`${end_date}T00:00:00.000Z`);
   end_date_exclusive.setUTCDate(end_date_exclusive.getUTCDate() + 1);
@@ -289,16 +349,49 @@ export async function getEvents(
     order: [["start_at", "ASC"]],
   });
 
-  return events.map((e) => ({
-    event_id: e.event_id,
-    title: e.title,
-    memo: e.memo || null,
-    place: e.place || null,
-    all_day: e.all_day,
-    start_at: e.start_at,
-    end_at: e.end_at,
-    visibility_level: e.visibility_level,
-  }));
+  return events.map((event) => toEventApiModel(event));
+}
+
+/**
+ * 개인 일정 생성
+ */
+export async function createEvent(
+  user_id: string,
+  input: CreateEventInput
+): Promise<EventApiModel> {
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (!title) {
+    throw new Error("INVALID_TITLE");
+  }
+
+  const start_at = parseEventDate(input.start_at);
+  const end_at = parseEventDate(input.end_at);
+  if (start_at >= end_at) {
+    throw new Error("INVALID_EVENT_TIME");
+  }
+
+  const visibility_level = Number(input.visibility_level);
+  if (
+    !Number.isInteger(visibility_level) ||
+    visibility_level < 0 ||
+    visibility_level > max_event_visibility_level
+  ) {
+    throw new Error("INVALID_VISIBILITY_LEVEL");
+  }
+
+  const event = await Event.create({
+    owner_user_id: user_id,
+    created_by_user_id: user_id,
+    title,
+    memo: normalizeOptionalText(input.memo),
+    place: normalizeOptionalText(input.place),
+    all_day: input.all_day,
+    start_at,
+    end_at,
+    visibility_level,
+  });
+
+  return toEventApiModel(event);
 }
 
 /**
@@ -321,16 +414,7 @@ export async function getCalendarRange(
     created_at: Date;
     updated_at: Date;
   }>;
-  events: Array<{
-    event_id: string;
-    title: string;
-    memo: string | null;
-    place: string | null;
-    all_day: boolean;
-    start_at: Date;
-    end_at: Date;
-    visibility_level: number;
-  }>;
+  events: EventApiModel[];
 }> {
   // 병렬 쿼리 실행
   const [work_shifts, events] = await Promise.all([
@@ -361,16 +445,7 @@ export async function getDaySchedule(
     end_time: string | null;
     note: string | null;
   }>;
-  events: Array<{
-    event_id: string;
-    title: string;
-    memo: string | null;
-    place: string | null;
-    all_day: boolean;
-    start_at: Date;
-    end_at: Date;
-    visibility_level: number;
-  }>;
+  events: EventApiModel[];
 }> {
   // 근무표 조회
   const work_shift = await WorkShift.findOne({
@@ -432,16 +507,7 @@ export async function getDaySchedule(
       })()
     : [];
 
-  const events_result = events.map((e) => ({
-    event_id: e.event_id,
-    title: e.title,
-    memo: e.memo || null,
-    place: e.place || null,
-    all_day: e.all_day,
-    start_at: e.start_at,
-    end_at: e.end_at,
-    visibility_level: e.visibility_level,
-  }));
+  const events_result = events.map((event) => toEventApiModel(event));
 
   return {
     date,

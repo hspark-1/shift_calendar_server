@@ -12,6 +12,17 @@ interface AuthenticatedRequest extends Request {
   user?: User;
 }
 
+function sendUnauthorizedResponse(res: Response): void {
+  res.status(401).json({
+    success: false,
+    message: "로그인이 필요합니다.",
+    error: {
+      code: "UNAUTHORIZED",
+      message: "로그인이 필요합니다.",
+    },
+  });
+}
+
 export async function authMiddleware(
   req: Request,
   res: Response,
@@ -21,9 +32,7 @@ export async function authMiddleware(
     const auth_header = req.headers.authorization;
 
     if (!auth_header || !auth_header.startsWith("Bearer ")) {
-      res
-        .status(401)
-        .json({ success: false, message: "인증 토큰이 필요합니다." });
+      sendUnauthorizedResponse(res);
       return;
     }
 
@@ -35,9 +44,7 @@ export async function authMiddleware(
     const user = await User.findByPk(decoded.user_id);
 
     if (!user) {
-      res
-        .status(401)
-        .json({ success: false, message: "유효하지 않은 사용자입니다." });
+      sendUnauthorizedResponse(res);
       return;
     }
 
@@ -45,13 +52,9 @@ export async function authMiddleware(
     next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
-      res
-        .status(401)
-        .json({ success: false, message: "토큰이 만료되었습니다." });
+      sendUnauthorizedResponse(res);
       return;
     }
-    res
-      .status(401)
-      .json({ success: false, message: "유효하지 않은 토큰입니다." });
+    sendUnauthorizedResponse(res);
   }
 }

@@ -5,6 +5,7 @@ import {
   getWorkShifts,
   getDaySchedule,
   getEvents,
+  createEvent,
   deleteEvent,
   getCalendarRange,
   upsertWorkShift,
@@ -20,6 +21,28 @@ import {
 import { authMiddleware } from "../middlewares/auth";
 
 const router = Router();
+
+const utc_iso_datetime_pattern =
+  /^(\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d)(?:\.(\d{1,3}))?Z$/;
+
+function isUtcIsoDateTime(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const match = value.match(utc_iso_datetime_pattern);
+  if (!match) {
+    return false;
+  }
+
+  const parsed_date = new Date(value);
+  if (Number.isNaN(parsed_date.getTime())) {
+    return false;
+  }
+
+  const milliseconds = (match[2] ?? "000").padEnd(3, "0");
+  return parsed_date.toISOString() === `${match[1]}.${milliseconds}Z`;
+}
 
 // 모든 라우트에 인증 미들웨어 적용
 router.use(authMiddleware);
@@ -78,6 +101,39 @@ router.get(
       .withMessage("유효한 종료 날짜를 입력하세요. (YYYY-MM-DD)"),
   ],
   getEvents
+);
+
+// 개인 일정 생성
+router.post(
+  "/events",
+  [
+    body("title")
+      .custom((value) => typeof value === "string" && value.trim().length > 0)
+      .withMessage("제목을 입력해주세요."),
+    body("all_day")
+      .isBoolean()
+      .withMessage("종일 여부가 올바르지 않습니다.")
+      .toBoolean(),
+    body("start_at")
+      .custom((value) => isUtcIsoDateTime(value))
+      .withMessage("일정 시간이 올바르지 않습니다."),
+    body("end_at")
+      .custom((value, { req }) => {
+        if (!isUtcIsoDateTime(value) || !isUtcIsoDateTime(req.body.start_at)) {
+          return false;
+        }
+
+        return new Date(req.body.start_at) < new Date(value);
+      })
+      .withMessage("일정 시간이 올바르지 않습니다."),
+    body("visibility_level")
+      .isInt({ min: 0, max: 5 })
+      .withMessage("공개 레벨이 올바르지 않습니다.")
+      .toInt(),
+    body("memo").optional({ nullable: true }).isString(),
+    body("place").optional({ nullable: true }).isString(),
+  ],
+  createEvent
 );
 
 // 일정 삭제
