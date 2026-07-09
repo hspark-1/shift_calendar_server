@@ -632,3 +632,49 @@ Flutter 캘린더가 저장 직후 서버 응답의 근무 타입 이름, 색상
 ### 추후 과제(언제 다시 평가)
 
 - 친구 요청 취소 시 수신자 원본 알림도 `FRIEND_REQUEST_CANCELED`로 갱신할 요구가 생기면 같은 패턴으로 확장 검토
+
+---
+
+## ADR-0014: 근무표 삭제 후 같은 날짜 재등록은 soft-deleted row 복구
+
+### 배경(문제)
+
+`work_shifts`는 `(owner_user_id, work_date)` unique 제약을 사용하고, 삭제는 `deleted_at`, `deleted_by_user_id`를 설정하는 soft delete 방식입니다. 같은 날짜 근무표를 등록, 삭제, 재등록하면 `WorkShift.upsert()`가 unique 충돌 row를 갱신하지만 기존 `deleted_at` 값을 지우지 않아 `GET /calendar/range`, `GET /work-shifts`의 `deleted_at IS NULL` 조회 조건에서 누락될 수 있었습니다.
+
+### 선택지(대안)
+
+1. 같은 날짜 재등록 시 기존 soft-deleted row의 `deleted_at`, `deleted_by_user_id`를 `null`로 복구
+2. unique 제약을 partial unique index로 변경하고 새 row를 생성
+3. 조회 API에서 최신 row를 별도 보정해 반환
+
+### 결정(무엇을 선택)
+
+**같은 날짜 재등록은 기존 soft-deleted row를 활성 상태로 복구**합니다.
+
+### 근거(왜)
+
+- 현재 DB 스키마가 사용자별 하루 근무표 1건을 `(owner_user_id, work_date)` unique 제약으로 보장함
+- 스키마 변경 없이 단건/배치 upsert 저장 경로만 수정하면 기존 API 계약을 유지할 수 있음
+- 조회 API의 `deleted_at IS NULL` 조건은 soft delete 정책상 유지해야 하므로 저장 시점에 활성 상태를 정확히 복구하는 것이 원인 해결에 맞음
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 삭제 후 같은 날짜 재등록 데이터가 캘린더 조회에서 다시 반환됨
+- `POST /work-shifts`, `POST /work-shifts/batch` 모두 동일한 복구 동작을 사용
+- 기존 unique 제약과 soft delete 조회 정책을 유지
+
+**트레이드오프**:
+
+- 삭제 이력 row가 새 row로 분리되지 않고 기존 `work_shift_id`가 재활성화됨
+- 재등록 시 `deleted_at`, `deleted_by_user_id`는 삭제 이력 값으로 남지 않음
+
+### 구현 위치
+
+- **캘린더 서비스**: `src/services/calendarService.ts`
+- **프로젝트 컨텍스트**: `_docs/PROJECT_CONTEXT.md`
+
+### 추후 과제(언제 다시 평가)
+
+- 삭제 이력 보존이 별도 요구사항이 되면 audit table 또는 partial unique index 기반 신규 row 생성 방식으로 재평가

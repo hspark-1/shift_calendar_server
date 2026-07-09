@@ -1,6 +1,82 @@
 # 작업 일지
 
+## 2026-07-09
+
+### [DONE] 근무표 삭제 후 같은 날짜 재등록 복구
+
+- **목적**: soft delete된 근무표를 같은 날짜에 다시 등록했을 때 캘린더 조회에서 누락되지 않도록 저장 동작 보정
+- **변경**:
+  - 단건 근무표 upsert 시 `deleted_at`, `deleted_by_user_id`를 `null`로 설정해 기존 soft-deleted row를 활성 상태로 복구
+  - 배치 근무표 upsert 시에도 동일하게 삭제 필드를 초기화
+  - `PROJECT_CONTEXT.md`에 `(owner_user_id, work_date)` unique 기준 재등록 복구 정책 추가
+  - `DECISIONS.md`에 ADR-0014로 soft-deleted row 복구 결정 기록
+- **영향범위**:
+  - `POST /api/v1/work-shifts`
+  - `POST /api/v1/work-shifts/batch`
+  - `GET /api/v1/calendar/range`, `GET /api/v1/work-shifts`의 재등록 데이터 조회 결과
+- **파일**:
+  - `src/services/calendarService.ts`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - `npm run build` 성공
+- **롤백**:
+  - 이번 작업에서 추가한 `deleted_at`, `deleted_by_user_id` 초기화와 문서 변경을 이전 상태로 되돌리기
+- **다음**:
+  - 실제 계정으로 근무표 삭제 후 같은 날짜 재등록 API 호출 및 캘린더 재조회 확인
+
+### [DONE] calendarController 400 응답 원인 DebugMCP 확인
+
+- **목적**: `src/controllers/calendarController.ts` 경로에서 400 응답이 반환되는 실제 런타임 원인을 DebugMCP로 확인
+- **변경**:
+  - DebugMCP 조건부 중단점을 Express `res.status()`에 설정해 `code === 400` 응답 지점 확인
+  - 400 응답이 `calendarController.createShiftType()`의 validation 실패 분기에서 발생함을 확인
+  - 요청 정보 확인: `POST /api/v1/shift-types`, 인증 사용자 `acae546f-cc5a-4aae-9e13-4226ac2d8258`
+  - 요청 body 확인: `{ "code": "ㅂ", "name": "ㅂㅂ", "color": 4278215076 }`
+  - express-validator 컨텍스트 확인 결과 `color` 필드만 실패:
+    - `value=4278215076`
+    - `msg=색상은 #AARRGGBB 형식이어야 합니다.`
+    - `path=color`
+- **영향범위**:
+  - 캘린더/근무표/일정 API 디버깅
+- **파일**:
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - DebugMCP `Debug npm run dev` 세션으로 런타임 요청 확인
+  - `req.originalUrl`, `req.body`, `req['express-validator#contexts']` 평가로 validation 실패 원문 확인
+  - DebugMCP 세션 종료 완료
+- **롤백**:
+  - 문서 작업 항목만 되돌리기
+- **다음**:
+  - Flutter에서 `color`를 숫자 `Color.value`가 아니라 `#AARRGGBB` 문자열로 전송하도록 맞추거나, 백엔드 validation 계약을 숫자 허용으로 변경할지 결정
+
 ## 2026-07-08
+
+### [DONE] work_shifts owner_user_id 조회 조건 DebugMCP 확인
+
+- **목적**: 현재 hit된 breakpoint에서 `work_shifts` 조회가 어떤 `owner_user_id` 조건으로 실행되는지 DebugMCP 런타임 값으로 확인
+- **변경**:
+  - DebugMCP 현재 세션의 `calendarController.getCalendarRange` breakpoint에서 `req.user`, `req.query`, `originalUrl` 확인
+  - 컨트롤러가 `calendarService.getCalendarRange(user_id, start_date, end_date)`에 전달하는 인자 확인
+  - `calendarService.getWorkShifts()` 내부 `WorkShift.findAll` 직전 breakpoint에서 `user_id`, `start_date`, `end_date` 로컬 변수 확인
+  - `WorkShift.findAll` 실행 후 반환된 `work_shifts` 11건의 `owner_user_id`, `work_date`, `deleted_at`, `schedule_id`, 근무 타입 조인 결과 확인
+  - 서버 DB 연결 정보가 `localhost:5432/shift_calendar`임을 확인
+- **영향범위**:
+  - 캘린더/근무표 조회 API 디버깅
+- **파일**:
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - DebugMCP 런타임 확인:
+    - 최초 요청: `/api/v1/calendar/range?start_date=2026-06-01&end_date=2026-08-31`
+    - 인증 사용자: `acae546f-cc5a-4aae-9e13-4226ac2d8258`
+    - `WorkShift.findAll` 조건: `owner_user_id=user_id`, `work_date BETWEEN start_date AND end_date`, `deleted_at=null`
+    - 반환 결과: 11건, 모두 `owner_user_id=acae546f-cc5a-4aae-9e13-4226ac2d8258`, `deleted_at=null`
+    - 반환 날짜: `2026-07-05`~`2026-07-16`
+- **롤백**:
+  - 문서 작업 항목만 되돌리기
+- **다음**:
+  - 필요 시 Sequelize SQL logging을 일시 활성화해 실제 SQL 문자열까지 확인
 
 ### [DONE] 친구 요청 처리 완료 알림 actions 제거
 

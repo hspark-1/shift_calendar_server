@@ -523,6 +523,7 @@ const work_shifts = await WorkShift.findAll({
 
 - `GET /calendar/range`, `GET /work-shifts`, `POST /work-shifts`, `PUT /work-shifts/:work_shift_id`, `POST /work-shifts/batch`의 근무표 응답은 동일한 `WorkShiftApiModel` 필드를 반환
 - `WorkShiftApiModel`: `work_shift_id`, `work_date`, `shift_type_code`, `shift_type_name`, `shift_type_color`, `start_time`, `end_time`, `note`, `created_at`, `updated_at`
+- `POST /work-shifts`, `POST /work-shifts/batch`는 `(owner_user_id, work_date)` 기준 upsert이며, 같은 날짜의 soft-deleted 근무표가 있으면 `deleted_at`, `deleted_by_user_id`를 `null`로 되돌려 재등록 데이터가 조회되도록 복구
 - `shift_type_color` 응답 포맷은 `#AARRGGBB` 문자열 또는 값이 없을 때 `null`
 - `start_time`, `end_time` 응답 포맷은 `HH:mm:ss` 문자열 또는 값이 없을 때 `null`
 - 개인 캘린더의 `GET /events`, `POST /events`, `GET /calendar/day`, `GET /calendar/range` 이벤트 응답은 `EventApiModel` 필드를 반환
@@ -697,6 +698,7 @@ DB_SSL=true
 - `work_date` (date)
 - `schedule_id` (FK → shift_type_schedules)
 - `visibility_level` (항상 0)
+- `(owner_user_id, work_date)`는 unique이므로 같은 날짜 재등록은 신규 row 생성이 아니라 soft-deleted row의 `deleted_at`, `deleted_by_user_id`를 `null`로 복구
 
 #### Event (개인 일정)
 

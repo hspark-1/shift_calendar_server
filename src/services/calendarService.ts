@@ -599,6 +599,8 @@ export async function upsertWorkShift(
       note: note || null,
       visibility_level: 0,
       created_by_user_id: user_id,
+      deleted_at: null,
+      deleted_by_user_id: null,
     },
     {
       returning: true,
@@ -890,6 +892,8 @@ export async function batchUpsertWorkShifts(
           note: note || null,
           visibility_level: 0,
           created_by_user_id: user_id,
+          deleted_at: null,
+          deleted_by_user_id: null,
         },
         {
           returning: true,
