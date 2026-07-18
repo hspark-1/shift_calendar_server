@@ -233,6 +233,59 @@ AUTH_RATE_LIMIT_MAX=10
 
 ---
 
+## Docker 이미지 빌드 및 로컬 검증
+
+### Intel N100용 이미지 빌드
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  --load \
+  -t shiftmate-api:1.0.0 \
+  .
+```
+
+멀티 스테이지 빌드의 builder는 TypeScript와 개발 의존성을 사용해 `dist/`를 만들고, runtime 이미지는 `npm ci --omit=dev`로 운영 의존성만 설치합니다. `.env*`는 `.dockerignore`로 빌드 컨텍스트에서 제외됩니다.
+
+### 로컬 실행
+
+```bash
+docker run --rm \
+  --platform linux/amd64 \
+  --name shiftmate-test \
+  --env-file .env \
+  -e INSTANCE_NAME=local-test \
+  -p 3000:3000 \
+  shiftmate-api:1.0.0
+```
+
+`.env`의 DB 주소가 `localhost` 또는 `127.0.0.1`이고 PostgreSQL이 Docker Desktop 호스트에서 실행 중이면 다음 override를 추가합니다.
+
+```bash
+-e DB_HOST=host.docker.internal
+```
+
+운영과 같은 설정을 확인할 때는 `.env`에 `NODE_ENV=production`을 설정하거나 `-e NODE_ENV=production`을 추가합니다.
+
+### 검증
+
+```bash
+curl --fail http://127.0.0.1:3000/health
+docker inspect shiftmate-test --format '{{.Config.User}} {{.State.Health.Status}}'
+docker exec shiftmate-test id
+docker stop --timeout 15 shiftmate-test
+```
+
+기대 결과:
+
+- 이미지 플랫폼: `linux/amd64`
+- 실행 사용자: `node`, UID/GID `1000:1000`
+- 실행 명령: `node dist/index.js`
+- `/health`: `{"status":"ok","instance":"local-test"}`
+- 종료 로그: `SIGTERM 수신` 후 서버와 DB 연결 정상 종료
+
+---
+
 ## PM2를 사용한 프로세스 관리
 
 ### PM2 설치

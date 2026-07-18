@@ -911,6 +911,48 @@ npm run build
 npm start
 ```
 
+### Express Docker 이미지
+
+#### 파일 역할
+
+- **`Dockerfile`**: Node 22 Debian slim 멀티 스테이지 빌드로 TypeScript를 `dist/`에 컴파일하고, 최종 이미지에는 운영 의존성과 `dist/`만 포함
+- **`.dockerignore`**: `.env*`, Git 메타데이터, 로컬 `node_modules`, `dist`, 문서, migration, 개발 테스트 파일을 빌드 컨텍스트에서 제외
+
+#### 의존성
+
+- Docker Buildx
+- Intel N100 대상 플랫폼 `linux/amd64`
+- 런타임 환경변수 파일
+- 컨테이너에서 접근 가능한 PostgreSQL 주소
+
+#### 사용 예
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  --load \
+  -t shiftmate-api:1.0.0 \
+  .
+
+docker run --rm \
+  --platform linux/amd64 \
+  --name shiftmate-test \
+  --env-file .env \
+  -e INSTANCE_NAME=local-test \
+  -p 3000:3000 \
+  shiftmate-api:1.0.0
+
+curl --fail http://127.0.0.1:3000/health
+```
+
+- `.env`의 `DB_HOST=localhost` 또는 `127.0.0.1`은 컨테이너 자신을 가리킵니다.
+- Docker Desktop에서 호스트 PostgreSQL을 사용할 때는 `-e DB_HOST=host.docker.internal`을 추가합니다.
+- 홈서버에서는 PostgreSQL 컨테이너 서비스명 또는 실제 DB 주소를 사용합니다.
+- 운영 실행에서는 `.env`의 `NODE_ENV=production`을 확인합니다. `--env-file` 값은 이미지의 기본 `NODE_ENV=production`보다 우선합니다.
+- 최종 컨테이너는 `node` 사용자(UID/GID 1000), `node dist/index.js`, `STOPSIGNAL SIGTERM`으로 실행됩니다.
+- Docker 내장 health check는 `PORT`의 루트 `/health`를 호출합니다.
+- migration은 이미지에 포함하거나 컨테이너 시작 시 실행하지 않습니다.
+
 ### DB 변경
 
 - `migrations/` SQL은 개발자가 대상 DB와 롤백 방법을 확인한 뒤 직접 1회 실행

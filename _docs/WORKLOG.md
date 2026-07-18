@@ -2,6 +2,56 @@
 
 ## 2026-07-19
 
+### [DONE] Intel N100용 Express Docker 이미지 구성 및 검증
+
+- **목적**: TypeScript 빌드와 운영 의존성만 포함하는 `linux/amd64` 이미지를 만들고 비루트 실행, health check, graceful shutdown을 검증
+- **변경**:
+  - Node 22 Debian slim 멀티 스테이지 `Dockerfile` 추가
+  - builder에서 TypeScript를 `dist/`로 컴파일하고 runtime에는 `npm ci --omit=dev` 결과와 `dist/`만 복사
+  - runtime을 `USER node`, `CMD node dist/index.js`, `STOPSIGNAL SIGTERM`으로 구성
+  - 루트 `/health`를 사용하는 Docker `HEALTHCHECK` 추가
+  - `.dockerignore`에서 `.env*`, Git, `node_modules`, `dist`, migration, 문서/개발 자료 제외
+  - 운영 의존성 감사에서 발견한 Axios/Express/Sequelize 등 취약 패키지를 호환 패치 버전으로 갱신
+  - Sequelize 6 하위 `uuid`를 CommonJS `v1`/`v4` 호환 11.1.1로 override
+  - Docker 빌드/로컬 실행/DB loopback 주의사항을 프로젝트 컨텍스트와 배포 가이드에 기록
+  - ADR-0017에 이미지 기반·아키텍처·보안·종료 정책 기록
+- **영향범위**:
+  - Docker 이미지 빌드 및 컨테이너 실행
+  - Node 런타임 의존성 버전과 lockfile
+  - 애플리케이션 TypeScript 소스 동작은 변경하지 않음
+- **파일**:
+  - `Dockerfile`
+  - `.dockerignore`
+  - `package.json`
+  - `package-lock.json`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DEPLOYMENT_GUIDE.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - `npm run build` 성공
+  - `npm audit` 및 `npm audit --omit=dev` 취약점 0건
+  - `docker buildx build --check --platform linux/amd64 .` 경고 없음
+  - `docker buildx build --platform linux/amd64 --load -t shiftmate-api:1.0.0 .` 성공
+  - 최종 이미지 ID `sha256:2e8ce42e6e12958a10d704a8ec798c944b66d698c174e4aac63de9641e3ac9d8`
+  - 이미지 플랫폼 `amd64/linux`, 크기 251,805,497 bytes
+  - 이미지 설정 `User=node`, `WorkingDir=/app`, `Cmd=node dist/index.js`, `StopSignal=SIGTERM` 확인
+  - 컨테이너 UID/GID `1000:1000`
+  - `/app/dist/index.js` 존재, `/app/.env`·TypeScript·ts-node 미포함 확인
+  - 최초 `.env` 실행은 `DB_HOST`가 loopback이라 DB 연결 거부됨을 확인
+  - Docker Desktop 테스트에서 `DB_HOST=host.docker.internal` override 후 PostgreSQL 연결 성공
+  - `GET /health` → `{"status":"ok","instance":"local-test"}`, Docker health `healthy`
+  - `docker stop`의 SIGTERM 수신 후 HTTP 서버와 DB pool 정상 종료 확인
+  - `--rm`으로 테스트 컨테이너 자동 삭제 및 호스트 3000 포트 해제 확인
+  - `git diff --check`, `git diff --cached --check` 성공
+- **롤백**:
+  - `Dockerfile`, `.dockerignore` 제거
+  - `package.json`, `package-lock.json`의 이번 의존성 패치와 uuid override를 이전 버전으로 복원
+  - 이번 작업의 PROJECT_CONTEXT/DEPLOYMENT_GUIDE/DECISIONS/WORKLOG 변경 제거
+- **다음**:
+  - 홈서버에서 `linux/amd64` 이미지를 로드하고 DB 주소/메모리 사용량 확인
+  - 검증된 동일 이미지로 Express 컨테이너 3개 실행
+
 ### [DONE] Express 운영 보안·관측 기능 추가
 
 - **목적**: 컨테이너별 식별 가능한 루트 health check와 외부 바인딩, 요청 제한, Request ID, 민감정보 안전 로그를 운영 기준으로 적용

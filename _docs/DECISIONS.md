@@ -808,3 +808,66 @@ Nginx 뒤의 Express 인스턴스 3개를 운영하려면 컨테이너 식별, �
 
 - Nginx 설정 단계에서 전체 인스턴스 공통 `limit_req` 추가
 - 다중 홈서버로 확장하거나 프록시를 우회하는 내부 클라이언트가 생기면 Redis/PostgreSQL 기반 전역 rate limit 재평가
+
+---
+
+## ADR-0017: Node 22 멀티 스테이지 linux/amd64 운영 이미지
+
+### 배경(문제)
+
+Intel N100 홈서버에서 동일 Express 인스턴스를 3개 실행하려면 재현 가능한 `linux/amd64` 이미지, TypeScript 빌드 단계와 런타임 단계의 분리, 비밀값 제외, 비루트 실행, Docker health check와 SIGTERM 종료 계약이 필요합니다. 최초 이미지 빌드에서는 운영 의존성 취약점도 확인되었습니다.
+
+### 선택지(대안)
+
+1. Node 22 Debian slim 멀티 스테이지 이미지
+2. 단일 스테이지 이미지에 개발 의존성과 소스 전체 포함
+3. Alpine 기반 최소 이미지
+
+### 결정(무엇을 선택)
+
+**Node 22 Debian slim 멀티 스테이지 `linux/amd64` 이미지**를 사용합니다.
+
+- builder에서 `npm ci` 후 `npm run build`로 `dist/` 생성
+- runtime에서 `npm ci --omit=dev` 후 `dist/`만 복사
+- `.dockerignore`로 `.env*`, Git, 로컬 의존성/산출물, migration과 개발 자료 제외
+- `USER node`, `CMD ["node", "dist/index.js"]`, `STOPSIGNAL SIGTERM` 사용
+- 루트 `/health`를 Docker `HEALTHCHECK`로 사용
+- Axios, Express, Morgan, qs, Sequelize를 감사 결과가 해소된 패치 버전 이상으로 고정
+- Sequelize 6이 사용하는 `uuid`는 CommonJS `v1`/`v4` 호환이 확인된 11.1.1로 하위 의존성 override
+
+### 근거(왜)
+
+- 빌드 도구와 TypeScript를 최종 이미지에서 제거해 공격 표면 축소
+- Debian slim은 현재 Node/Sequelize/PostgreSQL 의존성과의 호환성을 유지하면서 full 이미지보다 작음
+- Intel N100의 네이티브 아키텍처인 amd64로 빌드
+- Node 프로세스를 PID 1로 직접 실행해 Docker SIGTERM을 애플리케이션 graceful shutdown handler로 전달
+- 비밀값은 이미지가 아니라 런타임 환경변수로만 주입
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 최종 이미지에 `.env`, TypeScript, ts-node가 없음
+- node 사용자 UID/GID 1000으로 실행
+- Docker가 컨테이너 health 상태를 직접 판단 가능
+- `npm audit` 기준 전체/운영 의존성 취약점 0건
+
+**트레이드오프**:
+
+- Debian slim 기반 최종 이미지 크기는 약 252MB
+- Apple Silicon 로컬 테스트에서는 amd64 에뮬레이션이 사용됨
+- `DB_HOST=localhost`는 컨테이너 자신을 가리키므로 환경별 DB 주소 설정 필요
+- Sequelize가 uuid 11 이상을 공식 의존성으로 채택하면 override를 제거하고 재검증해야 함
+
+### 구현 위치
+
+- **이미지 정의**: `Dockerfile`
+- **빌드 컨텍스트 제외**: `.dockerignore`
+- **의존성 보안 기준**: `package.json`, `package-lock.json`
+- **서버 health/종료 처리**: `src/index.ts`
+
+### 추후 과제(언제 다시 평가)
+
+- Sequelize 7 전환 또는 Sequelize 6의 uuid 의존성 상향 시 override 제거 검토
+- 이미지 전송 전 digest와 파일 크기 기록
+- 홈서버에서 amd64 네이티브 실행, DB 연결, 메모리 사용량 재검증
