@@ -39,7 +39,8 @@ HTTP Request
 src/
 ├── index.ts              # Express 앱 엔트리포인트
 ├── config/
-│   └── database.ts       # Sequelize 설정
+│   ├── database.ts       # Sequelize 설정
+│   └── environment.ts    # 필수 환경변수 및 숫자 설정 검증
 ├── routes/               # 라우터 정의
 │   ├── index.ts         # 라우터 통합
 │   ├── authRoutes.ts    # 인증 관련 라우트
@@ -70,6 +71,12 @@ src/
 └── types/
     └── express.d.ts     # Express Request 타입 확장
 ```
+
+#### `src/config/environment.ts`
+
+- **파일 역할**: 서버 시작 전 필수 환경변수, JWT secret 분리, 숫자/boolean 운영 설정을 검증
+- **의존성**: `dotenv`, Node.js `process.env`
+- **사용 예**: 엔트리포인트에서 `validateEnvironment()`를 DB 연결 전에 호출하고, 서비스에서는 `getRequiredEnvironmentVariable("JWT_SECRET")`로 기본값 없는 필수 설정을 조회
 
 ---
 
@@ -351,7 +358,9 @@ export async function handler(req: AuthenticatedRequest, res: Response) {
 #### Refresh Token 관리
 
 - **생성**: 로그인/회원가입 시 `authService.generateTokens()` 호출
-- **갱신**: `POST /api/v1/auth/refresh` - Token Rotation 적용 (기존 토큰 무효화 후 새 토큰 발급)
+- **고유성**: Access/Refresh Token마다 무작위 `jti`를 포함해 같은 사용자의 같은 초 발급도 서로 다른 토큰으로 생성
+- **갱신**: `POST /api/v1/auth/refresh` - 대상 `refresh_tokens` row를 `FOR UPDATE`로 잠그고 기존 토큰 무효화와 새 토큰 저장을 하나의 트랜잭션으로 처리
+- **동시 갱신**: 동일 Refresh Token에 대한 동시 요청은 정확히 한 요청만 성공
 - **무효화**: 로그아웃 시 `refresh_tokens.revoked_at` 설정
 - **저장**: `refresh_tokens` 테이블에 SHA-256 해시값 저장
 
@@ -380,10 +389,10 @@ export const sequelize = new Sequelize(db_name, db_user, db_password, {
   dialect: "postgres",
   logging: false, // 프로덕션에서는 false
   pool: {
-    max: 10,
-    min: 0,
-    acquire: 30000,
-    idle: 10000,
+    max: db_pool_max,             // DB_POOL_MAX, 기본 10
+    min: db_pool_min,             // DB_POOL_MIN, 기본 0
+    acquire: db_pool_acquire_ms,  // DB_POOL_ACQUIRE_MS, 기본 30000
+    idle: db_pool_idle_ms,        // DB_POOL_IDLE_MS, 기본 10000
   },
   define: {
     timestamps: true, // createdAt, updatedAt 자동 생성
@@ -450,9 +459,11 @@ const work_shifts = await WorkShift.findAll({
 
 #### 마이그레이션 룰
 
-- **Sequelize CLI 사용**: `npm run db:migrate`
-- **자동 동기화**: 개발 환경에서만 `DB_SYNC=true`로 활성화 (프로덕션에서는 비활성화)
-- **주의**: 뷰가 의존하는 컬럼 변경 시 `alter`가 실패할 수 있으므로 수동 DDL 실행 권장
+- `migrations/`의 SQL은 배포 자동화 파일이 아니라 개발자가 직접 실행하고 실행 내역을 `WORKLOG.md`에 기록하기 위한 자료
+- API 프로세스와 컨테이너는 migration 또는 `sequelize.sync()`를 실행하지 않음
+- `DB_SYNC=true`가 설정되면 서버 시작을 거부
+- 운영 DB 변경 순서: 백업 → 개발자 수동 SQL 1회 실행 → 결과 검증/기록 → API 인스턴스 실행
+- `migrations/final_schema.sql`은 `DROP SCHEMA`가 포함된 로컬 초기화 전용이며 운영 DB에 실행 금지
 
 #### 모델 정의 위치
 
@@ -566,12 +577,13 @@ const work_shifts = await WorkShift.findAll({
 #### 로깅 도구
 
 - **morgan**: HTTP 요청 로깅
-- **위치**: `src/index.ts`에서 `app.use(morgan("dev"))`
+- **위치**: `src/index.ts`
 
 #### 로깅 레벨
 
 - **개발 환경**: `morgan("dev")` - 상세 로그
-- **프로덕션**: 환경변수로 조정 가능
+- **프로덕션**: `morgan("combined")`
+- **인스턴스 식별**: 서버 시작 로그에 `INSTANCE_ID`, 미설정 시 컨테이너 hostname 기록
 
 #### 에러 로깅
 
@@ -616,12 +628,19 @@ catch (error) {
 
 #### 선택 환경변수
 
-| 변수명     | 설명               | 기본값        | 환경        |
-| ---------- | ------------------ | ------------- | ----------- |
-| `PORT`     | 서버 포트          | `3000`        | 모든 환경   |
-| `NODE_ENV` | 실행 환경          | `development` | 모든 환경   |
-| `DB_SSL`   | DB SSL 사용 여부   | `false`       | 프로덕션    |
-| `DB_SYNC`  | 자동 스키마 동기화 | `false`       | 개발 환경만 |
+| 변수명                   | 설명                                      | 기본값                  |
+| ------------------------ | ----------------------------------------- | ----------------------- |
+| `PORT`                   | 서버 포트                                 | `3000`                  |
+| `NODE_ENV`               | `development`/`test`/`production`         | `development`           |
+| `DB_SSL`                 | DB SSL 사용 여부 (`true`/`false`)         | `false`                 |
+| `DB_POOL_MAX`            | 인스턴스당 DB 최대 연결 수                | `10`                    |
+| `DB_POOL_MIN`            | 인스턴스당 DB 최소 연결 수                | `0`                     |
+| `DB_POOL_ACQUIRE_MS`     | DB 연결 획득 제한시간                     | `30000`                 |
+| `DB_POOL_IDLE_MS`        | 유휴 DB 연결 유지시간                     | `10000`                 |
+| `TRUST_PROXY_HOPS`       | 신뢰할 Nginx 프록시 hop 수                | 개발 `0`, 운영 `1`      |
+| `SHUTDOWN_TIMEOUT_MS`    | graceful shutdown 최대 대기시간           | `10000`                 |
+| `CORS_ALLOWED_ORIGINS`   | 쉼표로 구분한 정확한 허용 Origin 목록     | 환경별 기본 목록        |
+| `INSTANCE_ID`            | 로그에서 식별할 컨테이너/인스턴스 이름    | OS/container hostname   |
 
 #### 환경별 차이
 
@@ -629,17 +648,20 @@ catch (error) {
 
 ```env
 NODE_ENV=development
-DB_SYNC=true  # 개발 중 스키마 자동 동기화
 DB_SSL=false
+TRUST_PROXY_HOPS=0
 ```
 
 **스테이징/프로덕션**:
 
 ```env
 NODE_ENV=production
-DB_SYNC=false  # 절대 true로 설정하지 않음
 DB_SSL=true
+TRUST_PROXY_HOPS=1
+CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
 ```
+
+`JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다.
 
 ---
 
@@ -666,7 +688,8 @@ DB_SSL=true
 ### 환경변수
 
 - `.env` 파일 사용 (git에 커밋하지 않음)
-- 필수 환경변수는 서버 시작 시 검증 권장 (현재 미구현)
+- `.env.example`은 비밀값 없이 필요한 키와 안전한 예시만 기록하고 Git에 포함
+- 필수 환경변수와 운영 숫자/boolean 설정은 `src/config/environment.ts`에서 서버 시작 전에 검증
 
 ### 린트/포맷
 
@@ -853,7 +876,7 @@ KAKAO_CLIENT_ID=your-kakao-client-id
 KAKAO_CLIENT_SECRET=your-kakao-client-secret
 KAKAO_REDIRECT_URI=http://localhost:3000/test/callback.html
 NODE_ENV=development
-DB_SYNC=false
+TRUST_PROXY_HOPS=0
 ```
 
 ### 실행 커맨드
@@ -869,18 +892,12 @@ npm run build
 npm start
 ```
 
-### 시드/마이그레이션
+### DB 변경
 
-```bash
-# 마이그레이션 실행
-npm run db:migrate
-
-# 마이그레이션 롤백
-npm run db:migrate:undo
-
-# 시드 실행
-npm run db:seed
-```
+- `migrations/` SQL은 개발자가 대상 DB와 롤백 방법을 확인한 뒤 직접 1회 실행
+- 실행 전 DB 백업 필수
+- 실행 파일, 목적, 결과, 테스트, 롤백 명령을 `WORKLOG.md`에 기록
+- API 서버 시작 명령에는 DB 변경 명령을 포함하지 않음
 
 ### Swagger/Postman
 
@@ -893,7 +910,9 @@ npm run db:seed
 ### API 엔드포인트
 
 - **Base URL**: `http://localhost:3000/api/v1`
-- **Health Check**: `GET http://localhost:3000/api/v1/health`
+- **기존 호환 Health Check**: `GET /api/v1/health`
+- **Liveness**: `GET /api/v1/health/live` - Express 프로세스 생존 확인
+- **Readiness**: `GET /api/v1/health/ready` - PostgreSQL `SELECT 1`까지 성공해야 200, 실패 시 503
 - **사용자 검색**: `GET /users/search?query={email_or_phone}` (인증 필요)
   - 이메일 형식이면 `users.email`에서 검색
   - 전화번호 형식이면 `users.phone`에서 검색
@@ -908,7 +927,8 @@ npm run db:seed
 ### 1. DB 스키마 변경
 
 - **주의**: 뷰가 의존하는 컬럼 변경 시 `alter`가 실패할 수 있음
-- **해결**: 수동으로 DDL 실행 권장
+- **해결**: 백업 후 개발자가 수동 DDL을 1회 실행하고 `WORKLOG.md`에 결과 기록
+- **금지**: API 인스턴스 시작 시 migration/`sequelize.sync()` 실행
 
 ### 2. 트랜잭션 롤백
 
@@ -928,12 +948,27 @@ npm run db:seed
 ### 5. Refresh Token 관리
 
 - Refresh Token은 DB에 해시값으로 저장 (원본 저장 금지)
-- Token Rotation 적용 시 기존 토큰 무효화 필수
+- Token마다 무작위 `jti` 포함
+- Token Rotation은 row lock과 단일 트랜잭션으로 처리
 
 ### 6. 환경변수
 
 - `JWT_SECRET`과 `JWT_REFRESH_SECRET`은 반드시 다른 값 사용
-- 프로덕션에서는 `DB_SYNC=true` 절대 사용 금지
+- `DB_SYNC=true`는 모든 환경에서 시작 거부
+- 3개 인스턴스의 DB 최대 연결 수는 `3 × DB_POOL_MAX`로 계산
+
+### 7. 다중 인스턴스 동시성
+
+- 사용자 기본 템플릿 생성은 사용자별 PostgreSQL advisory transaction lock으로 직렬화
+- 반대 방향을 포함한 친구 요청 생성은 정렬된 사용자 쌍 advisory transaction lock으로 직렬화
+- 친구 요청 수락/거절은 `friend_requests` row lock으로 직렬화
+
+### 8. 프록시 및 종료
+
+- 운영 컨테이너 포트는 외부 공개하지 않고 Nginx만 접근할 수 있게 제한
+- Nginx 1단 구성은 `TRUST_PROXY_HOPS=1` 사용
+- `SIGTERM`/`SIGINT` 수신 시 HTTP 신규 연결을 중단하고 기존 요청 완료 후 Sequelize pool 종료
+- OAuth 수동 테스트 페이지와 CSP 비활성화는 개발 환경에서만 사용
 
 ---
 
@@ -951,14 +986,17 @@ npm run db:seed
 
 ### DB 변경 시
 
-- [ ] 마이그레이션 파일 생성 (`sequelize-cli migration:generate`)
-- [ ] 마이그레이션 실행 및 테스트
-- [ ] 롤백 전략 확인 (`db:migrate:undo`)
+- [ ] 실행 SQL과 대상 환경 확인
+- [ ] DB 백업
+- [ ] 개발자가 SQL을 1회 수동 실행하고 결과 기록
+- [ ] 롤백 SQL/복구 전략 확인
 - [ ] 시드 데이터 업데이트 (필요 시)
 
 ### 배포 영향 시
 
 - [ ] 환경변수 변경 사항 문서화
 - [ ] Backwards compatibility 확인
-- [ ] 마이그레이션 실행 순서 확인
+- [ ] 수동 DB 변경 실행 순서와 기록 확인
 - [ ] 롤백 계획 수립
+- [ ] `3 × DB_POOL_MAX`와 PostgreSQL 연결 한도 확인
+- [ ] liveness/readiness 및 SIGTERM 종료 확인

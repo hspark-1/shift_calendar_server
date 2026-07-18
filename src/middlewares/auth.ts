@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { User } from "../models";
+import { getRequiredEnvironmentVariable } from "../config/environment";
 
 interface JwtPayload {
   user_id: string; // UUID
@@ -37,7 +38,7 @@ export async function authMiddleware(
     }
 
     const token = auth_header.split(" ")[1];
-    const jwt_secret = process.env.JWT_SECRET || "default_secret";
+    const jwt_secret = getRequiredEnvironmentVariable("JWT_SECRET");
 
     const decoded = jwt.verify(token, jwt_secret) as JwtPayload;
 

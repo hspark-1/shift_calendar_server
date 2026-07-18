@@ -1,5 +1,78 @@
 # 작업 일지
 
+## 2026-07-19
+
+### [DONE] Express 다중 인스턴스 운영 안전성 보완
+
+- **목적**: 동일 Express 서버 3개를 로드밸런서 뒤에서 실행할 때 인증·도메인 동시성과 컨테이너 기동/종료 안전성을 확보
+- **변경**:
+  - Access/Refresh Token에 무작위 `jti`를 추가해 같은 사용자의 동시 발급 토큰도 고유하게 생성
+  - Refresh Token rotation에서 대상 row를 `FOR UPDATE`로 잠그고 기존 토큰 무효화와 신규 토큰 저장을 단일 트랜잭션으로 처리
+  - 로그아웃의 단일 Refresh Token 무효화를 조건부 원자 UPDATE로 변경
+  - 사용자 기본 템플릿 생성을 사용자 ID 기반 PostgreSQL advisory transaction lock으로 직렬화
+  - 친구 요청 생성을 정렬된 사용자 쌍 advisory transaction lock과 단일 트랜잭션으로 처리해 반대 방향 동시 요청 방지
+  - 친구 요청 수락/거절 시 `friend_requests` row lock 적용
+  - 신규 `src/config/environment.ts`에서 필수 환경변수, JWT secret 분리, 숫자/boolean 설정 검증
+  - DB pool을 `DB_POOL_MAX`, `DB_POOL_MIN`, `DB_POOL_ACQUIRE_MS`, `DB_POOL_IDLE_MS`로 환경변수화
+  - 서버 시작 경로에서 `sequelize.sync()`를 제거하고 `DB_SYNC=true`면 시작 거부
+  - `/health/live`, `/health/ready`를 분리하고 기존 `/health` 호환 유지
+  - `SIGTERM`/`SIGINT`에서 HTTP 서버 종료 후 Sequelize pool을 닫는 graceful shutdown 추가
+  - CORS Origin을 정확 일치 방식으로 변경하고 운영 `trust proxy`, production combined log, 개발 전용 `/test` 정책 적용
+  - 잘못된 자동 migration/seed package script, 미사용 `sequelize-cli` 의존성, 배포 가이드 명령 제거
+  - `migrations/` Git 제외 정책은 개발자 수동 실행·기록 목적이라는 사용자 방침에 따라 유지
+  - 비밀값이 없는 `.env.example`은 신규 운영 환경변수 예시를 공유할 수 있도록 Git 추적 대상으로 전환
+  - `PROJECT_CONTEXT.md`, `DEPLOYMENT_GUIDE.md`, ADR-0015에 다중 인스턴스 운영 계약 반영
+- **영향범위**:
+  - 서버 기동/종료
+  - JWT 발급 및 Refresh Token 갱신
+  - 로그인 시 기본 근무 템플릿 보장
+  - 친구 요청 응답
+  - 헬스 체크 및 운영 프록시 설정
+- **파일**:
+  - `src/config/environment.ts`
+  - `src/config/database.ts`
+  - `src/index.ts`
+  - `src/routes/index.ts`
+  - `src/middlewares/auth.ts`
+  - `src/services/authService.ts`
+  - `src/services/shiftTemplateService.ts`
+  - `src/services/friendService.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `.gitignore`
+  - `.env.example`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DEPLOYMENT_GUIDE.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - `npm run build` 성공
+  - `git diff --check` 성공
+  - 환경변수 실패 검증 성공:
+    - 빈 `JWT_SECRET` 시작 거부
+    - `DB_SYNC=true` 시작 거부
+    - `DB_POOL_MAX=0` 시작 거부
+  - Refresh Token 검증:
+    - 같은 사용자 연속 발급 Refresh Token이 서로 다름
+    - 동일 Refresh Token 동시 rotation 2건 중 정확히 1건만 성공
+  - 임시 사용자 동시성 검증 후 데이터 정리:
+    - 기본 템플릿 동시 보장 3건 실행 결과 활성 템플릿 1건
+    - 반대 방향 친구 요청 동시 실행 결과 1건만 성공
+    - 동일 친구 요청 수락/거절 동시 실행 결과 1건만 성공
+  - 운영 모드 3개 인스턴스 통합 검증:
+    - 13101/13102/13103 모두 `/health/ready` 200
+    - 동일 JWT 프로필 응답 SHA-256 일치
+    - 정확한 운영 Origin 200, 유사 악성 Origin CORS 헤더 없음
+    - `SIGTERM` graceful shutdown 성공
+  - 최종 `dist/index.js` 3개 동시 실행 및 DB readiness 성공
+- **롤백**:
+  - 이번 작업에서 변경한 코드/문서를 이전 상태로 되돌리고 신규 `src/config/environment.ts` 제거
+  - 운영 롤백 시 신규 선택 환경변수는 제거 가능하지만 기존 필수 DB/JWT 환경변수는 유지
+- **다음**:
+  - Dockerfile/.dockerignore 및 컨테이너 healthcheck 추가
+  - 홈서버 PostgreSQL `max_connections` 확인 후 `3 × DB_POOL_MAX` 예산 확정
+  - Nginx upstream과 3개 컨테이너 구성
+
 ## 2026-07-09
 
 ### [DONE] 근무표 삭제 후 같은 날짜 재등록 복구

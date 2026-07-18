@@ -450,67 +450,91 @@ export async function sendFriendRequest(
     throw new Error(FriendErrorCodes.SELF_REQUEST);
   }
 
-  // 2. 대상 사용자 존재 체크
-  const addressee = await User.findByPk(addressee_user_id);
-  if (!addressee) {
-    throw new Error(FriendErrorCodes.USER_NOT_FOUND);
-  }
-
-  // 3. 이미 친구인지 체크
   const { user_id_a, user_id_b } = Friendship.sortUserIds(
     requester_user_id,
     addressee_user_id
   );
-  const existing_friendship = await Friendship.findOne({
-    where: { user_id_a, user_id_b },
-  });
-  if (existing_friendship) {
-    throw new Error(FriendErrorCodes.ALREADY_FRIENDS);
-  }
 
-  // 4. 대기중인 요청 있는지 체크 (양방향)
-  const pending_request = await FriendRequest.findOne({
-    where: {
-      [Op.or]: [
-        { requester_user_id, addressee_user_id },
-        {
-          requester_user_id: addressee_user_id,
-          addressee_user_id: requester_user_id,
+  return sequelize.transaction(async (transaction) => {
+    // 방향이 반대인 동시 요청도 같은 잠금 키를 사용합니다.
+    await sequelize.query(
+      "SELECT pg_advisory_xact_lock(hashtext(:lock_key))",
+      {
+        replacements: {
+          lock_key: `shiftmate:friend-request:${user_id_a}:${user_id_b}`,
         },
-      ],
-      status: "PENDING",
-    },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
+    );
+
+    // 2. 대상 사용자 존재 체크
+    const addressee = await User.findByPk(addressee_user_id, { transaction });
+    if (!addressee) {
+      throw new Error(FriendErrorCodes.USER_NOT_FOUND);
+    }
+
+    // 3. 이미 친구인지 체크
+    const existing_friendship = await Friendship.findOne({
+      where: { user_id_a, user_id_b },
+      transaction,
+    });
+    if (existing_friendship) {
+      throw new Error(FriendErrorCodes.ALREADY_FRIENDS);
+    }
+
+    // 4. 대기중인 요청 있는지 체크 (양방향)
+    const pending_request = await FriendRequest.findOne({
+      where: {
+        [Op.or]: [
+          { requester_user_id, addressee_user_id },
+          {
+            requester_user_id: addressee_user_id,
+            addressee_user_id: requester_user_id,
+          },
+        ],
+        status: "PENDING",
+      },
+      transaction,
+    });
+    if (pending_request) {
+      throw new Error(FriendErrorCodes.PENDING_REQUEST_EXISTS);
+    }
+
+    // 5. 친구 요청 생성
+    const request = await FriendRequest.create(
+      {
+        requester_user_id,
+        addressee_user_id,
+        message: message ?? null,
+      },
+      { transaction }
+    );
+
+    // 6. 알림 생성 (요청 받은 사람에게)
+    const requester = await User.findByPk(requester_user_id, { transaction });
+    if (!requester) {
+      throw new Error(FriendErrorCodes.USER_NOT_FOUND);
+    }
+    await createFriendRequestNotification(
+      addressee_user_id,
+      request.request_id,
+      requester.name,
+      requester.profile_image_url ?? null,
+      requester_user_id,
+      transaction
+    );
+
+    return {
+      request_id: request.request_id,
+      requester_user_id: request.requester_user_id,
+      addressee_user_id: request.addressee_user_id,
+      status: request.status,
+      message: request.message ?? null,
+      created_at: request.created_at!,
+      responded_at: request.responded_at ?? null,
+    };
   });
-  if (pending_request) {
-    throw new Error(FriendErrorCodes.PENDING_REQUEST_EXISTS);
-  }
-
-  // 5. 친구 요청 생성
-  const request = await FriendRequest.create({
-    requester_user_id,
-    addressee_user_id,
-    message: message ?? null,
-  });
-
-  // 6. 알림 생성 (요청 받은 사람에게)
-  const requester = await User.findByPk(requester_user_id);
-  await createFriendRequestNotification(
-    addressee_user_id,
-    request.request_id,
-    requester!.name,
-    requester!.profile_image_url ?? null,
-    requester_user_id
-  );
-
-  return {
-    request_id: request.request_id,
-    requester_user_id: request.requester_user_id,
-    addressee_user_id: request.addressee_user_id,
-    status: request.status,
-    message: request.message ?? null,
-    created_at: request.created_at!,
-    responded_at: request.responded_at ?? null,
-  };
 }
 
 // ============================================================
@@ -681,14 +705,8 @@ export async function respondToFriendRequest(
   try {
     // 1. 요청 조회
     const request = await FriendRequest.findByPk(request_id, {
-      include: [
-        {
-          model: User,
-          as: "requester",
-          attributes: ["user_id", "name", "profile_image_url"],
-        },
-      ],
       transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!request) {
@@ -710,6 +728,13 @@ export async function respondToFriendRequest(
       throw new Error(FriendErrorCodes.INVALID_ACTION);
     }
 
+    const requester = await User.findByPk(request.requester_user_id, {
+      transaction,
+    });
+    if (!requester) {
+      throw new Error(FriendErrorCodes.USER_NOT_FOUND);
+    }
+
     const new_status = action === "accept" ? "ACCEPTED" : "REJECTED";
     const responded_at = new Date();
 
@@ -726,7 +751,7 @@ export async function respondToFriendRequest(
       user_id,
       request_id,
       action,
-      request.requester!.name,
+      requester.name,
       responded_at,
       transaction
     );
@@ -984,24 +1009,28 @@ async function createFriendRequestNotification(
   request_id: string,
   requester_name: string,
   requester_profile_image: string | null,
-  requester_user_id: string
+  requester_user_id: string,
+  transaction: Transaction
 ): Promise<void> {
-  await Notification.create({
-    user_id,
-    notification_type: "FRIEND_REQUEST",
-    title: "친구 요청",
-    body: `${requester_name}님이 친구 요청을 보냈습니다.`,
-    payload: {
-      related_user_id: requester_user_id,
-      request_id,
-      user_name: requester_name,
-      profile_image_url: requester_profile_image,
+  await Notification.create(
+    {
+      user_id,
+      notification_type: "FRIEND_REQUEST",
+      title: "친구 요청",
+      body: `${requester_name}님이 친구 요청을 보냈습니다.`,
+      payload: {
+        related_user_id: requester_user_id,
+        request_id,
+        user_name: requester_name,
+        profile_image_url: requester_profile_image,
+      },
+      actions: [
+        { type: "accept", label: "수락" },
+        { type: "reject", label: "거절" },
+      ],
     },
-    actions: [
-      { type: "accept", label: "수락" },
-      { type: "reject", label: "거절" },
-    ],
-  });
+    { transaction }
+  );
 }
 
 /**

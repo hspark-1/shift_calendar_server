@@ -6,10 +6,7 @@
   "scripts": {
     "dev": "nodemon --exec \"node --inspect -r ts-node/register src/index.ts\"",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "db:migrate": "sequelize-cli db:migrate",
-    "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "db:seed": "sequelize-cli db:seed:all"
+    "start": "node dist/index.js"
   },
   "keywords": [
     "shift",
@@ -43,7 +40,6 @@
     "@types/node": "^22.10.3",
     "@types/qs": "^6.14.0",
     "nodemon": "^3.1.9",
-    "sequelize-cli": "^6.6.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }

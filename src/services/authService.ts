@@ -1,11 +1,14 @@
 import jwt, { SignOptions } from "jsonwebtoken";
 import crypto from "crypto";
-import { Op } from "sequelize";
+import { Op, Transaction } from "sequelize";
 import { User, RefreshToken } from "../models";
+import { sequelize } from "../config/database";
+import { getRequiredEnvironmentVariable } from "../config/environment";
 
 interface TokenPayload {
   user_id: string; // UUID
   email: string;
+  jti?: string;
 }
 
 interface AuthTokens {
@@ -16,6 +19,7 @@ interface AuthTokens {
 
 interface GenerateTokensOptions {
   device_info?: string;
+  transaction?: Transaction;
 }
 
 // 토큰을 SHA-256으로 해싱
@@ -28,13 +32,21 @@ export async function generateTokens(
   user: User,
   options?: GenerateTokensOptions
 ): Promise<AuthTokens> {
-  const jwt_secret = process.env.JWT_SECRET || "default_secret";
+  const jwt_secret = getRequiredEnvironmentVariable("JWT_SECRET");
   const jwt_refresh_secret =
-    process.env.JWT_REFRESH_SECRET || "default_refresh_secret";
+    getRequiredEnvironmentVariable("JWT_REFRESH_SECRET");
 
-  const payload: TokenPayload = {
+  const base_payload = {
     user_id: user.user_id,
     email: user.email,
+  };
+  const access_payload: TokenPayload = {
+    ...base_payload,
+    jti: crypto.randomUUID(),
+  };
+  const refresh_payload: TokenPayload = {
+    ...base_payload,
+    jti: crypto.randomUUID(),
   };
 
   const access_token_options: SignOptions = {
@@ -45,9 +57,13 @@ export async function generateTokens(
     expiresIn: "30d",
   };
 
-  const access_token = jwt.sign(payload, jwt_secret, access_token_options);
+  const access_token = jwt.sign(
+    access_payload,
+    jwt_secret,
+    access_token_options
+  );
   const refresh_token = jwt.sign(
-    payload,
+    refresh_payload,
     jwt_refresh_secret,
     refresh_token_options
   );
@@ -58,12 +74,15 @@ export async function generateTokens(
 
   // refresh_token을 DB에 저장 (해시값으로)
   const token_hash = hashToken(refresh_token);
-  await RefreshToken.create({
-    user_id: user.user_id,
-    token_hash,
-    device_info: options?.device_info || null,
-    expires_at: refresh_expires_at,
-  });
+  await RefreshToken.create(
+    {
+      user_id: user.user_id,
+      token_hash,
+      device_info: options?.device_info || null,
+      expires_at: refresh_expires_at,
+    },
+    { transaction: options?.transaction }
+  );
 
   // access_token 만료 시간 계산 (7일 후) - Unix timestamp (밀리초)로 반환
   const access_expires_at = new Date();
@@ -80,7 +99,7 @@ export async function generateTokens(
 export function verifyRefreshTokenJwt(token: string): TokenPayload | null {
   try {
     const jwt_refresh_secret =
-      process.env.JWT_REFRESH_SECRET || "default_refresh_secret";
+      getRequiredEnvironmentVariable("JWT_REFRESH_SECRET");
     return jwt.verify(token, jwt_refresh_secret) as TokenPayload;
   } catch {
     return null;
@@ -115,21 +134,34 @@ export async function rotateRefreshToken(
   const payload = verifyRefreshTokenJwt(old_refresh_token);
   if (!payload) return null;
 
-  // 2. DB에서 토큰 유효성 확인
-  const stored_token = await findValidRefreshToken(old_refresh_token);
-  if (!stored_token) return null;
+  const token_hash = hashToken(old_refresh_token);
 
-  // 3. 사용자 조회
-  const user = await User.findByPk(payload.user_id);
-  if (!user) return null;
+  return sequelize.transaction(async (transaction) => {
+    // 같은 refresh token의 동시 갱신은 DB row lock으로 직렬화합니다.
+    const stored_token = await RefreshToken.findOne({
+      where: {
+        token_hash,
+        revoked_at: null,
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
-  // 4. 기존 토큰 무효화 (Token Rotation)
-  await stored_token.revoke();
+    if (!stored_token || !stored_token.isValid()) return null;
 
-  // 5. 새 토큰 발급
-  const tokens = await generateTokens(user, { device_info });
+    const user = await User.findByPk(payload.user_id, { transaction });
+    if (!user || stored_token.user_id !== user.user_id) return null;
 
-  return { tokens, user };
+    stored_token.revoked_at = new Date();
+    await stored_token.save({ transaction });
+
+    const tokens = await generateTokens(user, {
+      device_info,
+      transaction,
+    });
+
+    return { tokens, user };
+  });
 }
 
 // 단일 refresh_token 무효화 (로그아웃)
@@ -138,17 +170,17 @@ export async function revokeRefreshToken(
 ): Promise<boolean> {
   const token_hash = hashToken(refresh_token);
 
-  const stored_token = await RefreshToken.findOne({
-    where: {
-      token_hash,
-      revoked_at: null,
-    },
-  });
+  const [affected_count] = await RefreshToken.update(
+    { revoked_at: new Date() },
+    {
+      where: {
+        token_hash,
+        revoked_at: null,
+      },
+    }
+  );
 
-  if (!stored_token) return false;
-
-  await stored_token.revoke();
-  return true;
+  return affected_count === 1;
 }
 
 // 사용자의 모든 refresh_token 무효화 (모든 기기 로그아웃)

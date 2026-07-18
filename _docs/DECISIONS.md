@@ -678,3 +678,68 @@ Flutter 캘린더가 저장 직후 서버 응답의 근무 타입 이름, 색상
 ### 추후 과제(언제 다시 평가)
 
 - 삭제 이력 보존이 별도 요구사항이 되면 audit table 또는 partial unique index 기반 신규 row 생성 방식으로 재평가
+
+---
+
+## ADR-0015: PostgreSQL 잠금 기반 다중 인스턴스 운영 계약
+
+### 배경(문제)
+
+동일 Express 서버를 3개 인스턴스로 실행하면 요청이 서로 다른 프로세스에 전달됩니다. JWT 인증 자체는 stateless이지만 Refresh Token 갱신, 기본 템플릿 생성, 친구 요청 생성/응답에는 조회 후 변경하는 구간이 있어 동시 요청이 중복 성공하거나 unique 오류를 반환할 수 있었습니다. 컨테이너 종료와 헬스 체크도 다중 인스턴스 운영 기준이 정의되지 않았습니다.
+
+### 선택지(대안)
+
+1. PostgreSQL row lock/advisory transaction lock과 단일 트랜잭션 사용
+2. Redis 분산 잠금 도입
+3. Nginx sticky session으로 동일 사용자를 한 인스턴스에 고정
+4. 애플리케이션 메모리 mutex 사용
+
+### 결정(무엇을 선택)
+
+**공용 PostgreSQL의 row lock과 advisory transaction lock으로 인스턴스 간 동시성을 직렬화**합니다.
+
+- Refresh Token rotation: `refresh_tokens` row를 `FOR UPDATE`로 잠그고 무효화와 신규 저장을 단일 트랜잭션으로 처리
+- JWT 발급: Access/Refresh Token에 각각 무작위 `jti` 포함
+- 기본 템플릿: 사용자 ID 기반 advisory transaction lock
+- 친구 요청 생성: 정렬된 사용자 쌍 기반 advisory transaction lock
+- 친구 요청 수락/거절: `friend_requests` row lock
+- API 프로세스는 migration과 `sequelize.sync()`를 실행하지 않으며 `DB_SYNC=true`면 시작 거부
+- `SIGTERM`/`SIGINT`에서 HTTP 서버와 Sequelize pool을 순서대로 종료
+- liveness와 DB readiness를 별도 엔드포인트로 제공
+
+### 근거(왜)
+
+- 모든 API 인스턴스가 이미 동일 PostgreSQL을 사용하므로 추가 Redis 운영 의존성이 필요 없음
+- DB 트랜잭션과 잠금의 생명주기가 같아 오류 시 자동 해제됨
+- sticky session 없이 어느 인스턴스가 요청을 받아도 동일한 정합성 규칙을 적용 가능
+- 메모리 mutex와 달리 프로세스/컨테이너 경계를 넘어 동작
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 동일 Refresh Token 동시 갱신은 한 요청만 성공
+- 기본 템플릿과 반대 방향 친구 요청이 중복 생성되지 않음
+- 수락/거절 동시 요청이 서로 다른 완료 상태를 만들지 않음
+- DB 장애를 readiness 503으로 구분하고 rolling stop 시 진행 중 요청을 보호
+
+**트레이드오프**:
+
+- 같은 사용자/친구 쌍에 대한 동시 쓰기는 앞선 트랜잭션 완료까지 대기
+- 인스턴스 수에 비례해 DB pool 최대 연결 수가 증가하므로 `DB_POOL_MAX` 용량 계산 필요
+- Nginx 외 다른 프록시 계층이 추가되면 `TRUST_PROXY_HOPS` 재설정 필요
+
+### 구현 위치
+
+- **환경변수 검증**: `src/config/environment.ts`
+- **DB pool/readiness**: `src/config/database.ts`
+- **서버 수명주기/CORS/proxy**: `src/index.ts`
+- **헬스 체크**: `src/routes/index.ts`
+- **Refresh Token**: `src/services/authService.ts`
+- **기본 템플릿**: `src/services/shiftTemplateService.ts`
+- **친구 요청**: `src/services/friendService.ts`
+
+### 추후 과제(언제 다시 평가)
+
+- PostgreSQL 외부 작업 큐나 스케줄러가 추가되면 전용 worker 또는 큐 소비자 구조 재평가
+- API 인스턴스를 여러 DB 리전에 배치하게 되면 advisory lock 대신 전역 조정 수단 재평가

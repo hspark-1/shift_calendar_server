@@ -1,4 +1,4 @@
-import { Op, Transaction } from "sequelize";
+import { Op, QueryTypes, Transaction } from "sequelize";
 import { sequelize } from "../config/database";
 import {
   ShiftTemplate,
@@ -226,12 +226,16 @@ export async function createDefaultShiftTemplate(
  * 사용자가 기본 템플릿을 가지고 있는지 확인
  * @param user_id 사용자 UUID
  */
-export async function hasDefaultTemplate(user_id: string): Promise<boolean> {
+export async function hasDefaultTemplate(
+  user_id: string,
+  transaction?: Transaction
+): Promise<boolean> {
   const template = await ShiftTemplate.findOne({
     where: {
       owner_user_id: user_id,
       deleted_at: null,
     },
+    transaction,
   });
   return template !== null;
 }
@@ -245,11 +249,31 @@ export async function ensureDefaultTemplate(
   user_id: string,
   external_transaction?: Transaction
 ): Promise<void> {
-  const has_template = await hasDefaultTemplate(user_id);
-  if (!has_template) {
-    await createDefaultShiftTemplate(user_id, external_transaction);
-    console.log(`기본 근무 템플릿 생성 완료: user_id=${user_id}`);
+  const executeInTransaction = async (transaction: Transaction) => {
+    await sequelize.query(
+      "SELECT pg_advisory_xact_lock(hashtext(:lock_key))",
+      {
+        replacements: {
+          lock_key: `shiftmate:default-template:${user_id}`,
+        },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
+    );
+
+    const has_template = await hasDefaultTemplate(user_id, transaction);
+    if (!has_template) {
+      await createDefaultShiftTemplate(user_id, transaction);
+      console.log(`기본 근무 템플릿 생성 완료: user_id=${user_id}`);
+    }
+  };
+
+  if (external_transaction) {
+    await executeInTransaction(external_transaction);
+    return;
   }
+
+  await sequelize.transaction(executeInTransaction);
 }
 
 /**

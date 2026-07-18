@@ -21,13 +21,17 @@ DB_PORT=
 DB_NAME=
 DB_USER=
 DB_PASSWORD=
+DB_POOL_MAX=10
+DB_POOL_MIN=0
+TRUST_PROXY_HOPS=1
+CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
 NAVER_CLIENT_ID=               # 네이버 로그인 사용 시
 NAVER_CLIENT_SECRET=           # 네이버 로그인 사용 시
 KAKAO_CLIENT_ID=               # 카카오 로그인 사용 시
 KAKAO_CLIENT_SECRET=           # 카카오 로그인 사용 시
 ```
 
-**⚠️ 중요**: `JWT_SECRET`과 `JWT_REFRESH_SECRET`이 없으면 "인증 토큰이 없다"는 오류가 발생합니다!
+**중요**: 필수값 누락, 두 JWT secret의 동일 설정, `DB_SYNC=true`는 서버 시작 단계에서 거부됩니다.
 
 ### 2. 환경변수 생성 방법
 
@@ -57,11 +61,8 @@ git pull origin production
 ### 2. 의존성 설치
 
 ```bash
-# node_modules 재설치 (의존성 변경 시 필수)
-npm install
-
-# 또는 프로덕션 모드로 설치 (devDependencies 제외)
-npm install --production
+# lockfile 기준으로 빌드 의존성까지 설치
+npm ci
 ```
 
 ### 3. TypeScript 빌드
@@ -72,21 +73,22 @@ npm run build
 
 # 빌드 결과 확인
 ls -la dist/
+
+# 빌드 후 런타임 의존성만 유지할 경우
+npm prune --omit=dev
 ```
 
 **⚠️ 중요**: `dist/` 폴더가 없거나 비어있으면 서버가 실행되지 않습니다!
 
-### 4. 데이터베이스 마이그레이션
+### 4. 데이터베이스 변경
 
-```bash
-# 새로운 마이그레이션 실행
-npm run db:migrate
+1. 운영 DB 백업
+2. 개발자가 `migrations/`의 대상 SQL과 롤백 방법 확인
+3. SQL을 운영 DB에 직접 1회 실행
+4. 결과와 검증 내용을 `_docs/WORKLOG.md`에 기록
+5. 그 후 API 인스턴스 실행
 
-# 마이그레이션 상태 확인
-# (Sequelize CLI 사용 시)
-```
-
-**⚠️ 중요**: DB 스키마 변경이 있으면 반드시 마이그레이션을 실행해야 합니다!
+`migrations/`는 배포 자동화 대상이 아니며 API 컨테이너 시작 시 실행하지 않습니다. `final_schema.sql`은 `DROP SCHEMA`가 포함된 로컬 초기화 전용이므로 운영 DB에 실행하면 안 됩니다.
 
 ### 5. 환경변수 확인
 
@@ -112,50 +114,6 @@ sudo systemctl restart shift_calendar_server
 
 # 직접 실행 시
 npm start
-```
-
----
-
-## 배포 스크립트 예시
-
-### 간단한 배포 스크립트
-
-```bash
-#!/bin/bash
-# deploy.sh
-
-set -e  # 에러 발생 시 중단
-
-echo "🚀 배포 시작..."
-
-# 1. 코드 업데이트
-echo "📥 Git pull..."
-git pull origin main
-
-# 2. 의존성 설치
-echo "📦 의존성 설치..."
-npm install
-
-# 3. 빌드
-echo "🔨 TypeScript 빌드..."
-npm run build
-
-# 4. 마이그레이션 (선택적)
-echo "🗄️  DB 마이그레이션..."
-npm run db:migrate || echo "⚠️  마이그레이션 실패 (무시 가능)"
-
-# 5. 서버 재시작
-echo "🔄 서버 재시작..."
-pm2 restart shift_calendar_server || npm start
-
-echo "✅ 배포 완료!"
-```
-
-### 사용 방법
-
-```bash
-chmod +x deploy.sh
-./deploy.sh
 ```
 
 ---
@@ -248,17 +206,22 @@ pm2 logs shift_calendar_server
 
 ```env
 NODE_ENV=development
-DB_SYNC=true  # 개발 중 스키마 자동 동기화
 DB_SSL=false
+TRUST_PROXY_HOPS=0
 ```
 
 ### 프로덕션 환경
 
 ```env
 NODE_ENV=production
-DB_SYNC=false  # ⚠️ 절대 true로 설정하지 마세요!
 DB_SSL=true    # RDS 등 외부 DB 사용 시
+TRUST_PROXY_HOPS=1
+CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
+DB_POOL_MAX=10
+DB_POOL_MIN=0
 ```
+
+`DB_SYNC=true`는 개발/운영 구분 없이 허용하지 않습니다.
 
 ---
 
@@ -330,34 +293,16 @@ pm2 save
 
 ---
 
-## 데이터베이스 마이그레이션
+## 데이터베이스 변경 기록
 
-### 마이그레이션 실행
+- 실행 SQL 파일명과 체크섬
+- 대상 DB/환경
+- 백업 위치와 복구 방법
+- 실행 시각과 실행자
+- 실행 결과 및 검증 쿼리
+- 롤백 SQL
 
-```bash
-# 모든 마이그레이션 실행
-npm run db:migrate
-
-# 특정 마이그레이션만 실행
-npx sequelize-cli db:migrate --to XXXX-migration-name.js
-```
-
-### 마이그레이션 롤백
-
-```bash
-# 마지막 마이그레이션 롤백
-npm run db:migrate:undo
-
-# 모든 마이그레이션 롤백
-npm run db:migrate:undo:all
-```
-
-### 마이그레이션 확인
-
-```bash
-# 마이그레이션 상태 확인 (Sequelize CLI)
-npx sequelize-cli db:migrate:status
-```
+위 내용을 `_docs/WORKLOG.md`에 남깁니다. DB 변경 실패는 무시하고 배포를 계속할 수 없습니다.
 
 ---
 
@@ -400,8 +345,11 @@ pm2 status
 ### 헬스 체크
 
 ```bash
-# API 헬스 체크 (구현된 경우)
-curl http://localhost:3000/api/v1/health
+# 프로세스 생존
+curl --fail http://localhost:3000/api/v1/health/live
+
+# DB 연결까지 포함한 준비 상태
+curl --fail http://localhost:3000/api/v1/health/ready
 
 # 또는
 curl http://localhost:3000/api/v1/auth/profile \
@@ -452,7 +400,10 @@ curl http://localhost:3000/api/v1/auth/profile \
 
 - [ ] `.env` 파일이 `.gitignore`에 포함되어 있는가?
 - [ ] `JWT_SECRET`과 `JWT_REFRESH_SECRET`이 강력한 랜덤 문자열인가?
-- [ ] 프로덕션에서 `DB_SYNC=false`로 설정되어 있는가?
+- [ ] `DB_SYNC`가 없거나 `false`이며 런타임 DB 변경이 없는가?
+- [ ] `3 × DB_POOL_MAX`가 PostgreSQL 연결 한도와 운영 예약 연결을 침범하지 않는가?
+- [ ] Nginx 1단 프록시 기준 `TRUST_PROXY_HOPS=1`인가?
+- [ ] CORS origin이 정확한 운영 도메인으로 제한되어 있는가?
 - [ ] HTTPS가 설정되어 있는가? (프로덕션)
 - [ ] 방화벽이 올바르게 설정되어 있는가?
 - [ ] 불필요한 포트가 열려있지 않은가?
@@ -462,12 +413,14 @@ curl http://localhost:3000/api/v1/auth/profile \
 ## 배포 후 확인 사항
 
 - [ ] 서버가 정상적으로 시작되었는가?
-- [ ] API 엔드포인트가 정상 작동하는가?
+- [ ] liveness와 readiness가 모두 정상인가?
+- [ ] API 엔드포인트가 세 인스턴스에서 동일하게 작동하는가?
+- [ ] `SIGTERM` 시 기존 요청 완료 후 정상 종료되는가?
 - [ ] 데이터베이스 연결이 정상인가?
 - [ ] OAuth 로그인이 정상 작동하는가?
 - [ ] 로그에 에러가 없는가?
 
 ---
 
-**문서 버전**: 1.0  
-**최종 업데이트**: 2026-01-11
+**문서 버전**: 1.1
+**최종 업데이트**: 2026-07-19
