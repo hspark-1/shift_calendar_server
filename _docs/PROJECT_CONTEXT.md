@@ -350,6 +350,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: User;
+      request_id?: string;
     }
   }
 }
@@ -363,6 +364,10 @@ export async function handler(req: AuthenticatedRequest, res: Response) {
   const user_id = req.user!.user_id; // authMiddleware에서 주입됨
 }
 ```
+
+- `tsc`는 `include: ["src/**/*"]`로 이 선언 파일을 로드합니다.
+- `ts-node`는 엔트리포인트에서 직접 import하지 않은 선언 파일을 기본적으로 생략하므로 `tsconfig.json`의 `ts-node.files=true`를 유지해야 합니다.
+- 이 설정을 제거하면 `npm run dev`에서 `Request.request_id` 등의 전역 확장 타입이 없다는 컴파일 오류가 발생합니다.
 
 #### Refresh Token 관리
 
@@ -910,6 +915,8 @@ npm run build
 # 프로덕션 실행
 npm start
 ```
+
+개발 실행은 `ts-node/register`를 사용하므로 `tsconfig.json`의 `ts-node.files=true`가 `src/types/express.d.ts` 로딩을 보장합니다.
 
 ### Express Docker 이미지
 

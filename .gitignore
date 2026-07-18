@@ -59,3 +59,5 @@ migrations/
 AGENTS.md
 schema.drawio
 visibility_flow.drawio
+
+shiftmate-api-*.tar.gz

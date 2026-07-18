@@ -2,6 +2,29 @@
 
 ## 2026-07-19
 
+### [DONE] ts-node 개발 실행의 Express Request 타입 확장 로딩 수정
+
+- **목적**: `npm run dev`에서 `src/types/express.d.ts`가 로드되지 않아 `request_id` 속성 컴파일이 실패하는 문제 해결
+- **변경**:
+  - `tsconfig.json`에 `ts-node.files=true`를 추가해 `include: ["src/**/*"]`의 ambient 선언 파일 로딩 활성화
+  - 프로젝트 컨텍스트에 `express.d.ts`의 `request_id` 확장과 ts-node 설정 의존성 기록
+- **영향범위**:
+  - 로컬 개발 실행 및 디버거 기동
+  - 운영 빌드/런타임 동작 변경 없음
+- **파일**:
+  - `tsconfig.json`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - `npm run build` 성공
+  - 기존과 동일한 `node --inspect -r ts-node/register src/index.ts` 컴파일에서 TS2339 미발생
+  - 실제 `npm run dev` 디버거 기동 및 PostgreSQL 연결 성공
+  - `PORT=13105`, `INSTANCE_NAME=ts-node-check`에서 `GET /health` 200 및 인스턴스 이름 확인
+  - SIGINT 수신 후 HTTP 서버와 DB pool 정상 종료 확인
+  - `git diff --check`, `git diff --cached --check` 성공
+- **롤백**:
+  - tsconfig의 ts-node 선언 파일 로딩 설정 제거
+
 ### [DONE] Intel N100용 Express Docker 이미지 구성 및 검증
 
 - **목적**: TypeScript 빌드와 운영 의존성만 포함하는 `linux/amd64` 이미지를 만들고 비루트 실행, health check, graceful shutdown을 검증
