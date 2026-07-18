@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import { Op } from "sequelize";
 import { Schedule, ShiftPattern, SharedSchedule, User } from "../models";
+import { logError } from "../utils/logger";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -35,7 +36,7 @@ export async function getSchedules(
       data: schedules,
     });
   } catch (error) {
-    console.error("Get schedules error:", error);
+    logError("schedule_get_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -78,7 +79,7 @@ export async function upsertSchedule(
       data: schedule,
     });
   } catch (error) {
-    console.error("Upsert schedule error:", error);
+    logError("schedule_upsert_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -136,7 +137,7 @@ export async function bulkCreateSchedules(
       data: schedules,
     });
   } catch (error) {
-    console.error("Bulk create schedules error:", error);
+    logError("schedule_bulk_create_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -171,7 +172,7 @@ export async function deleteSchedule(
       message: "스케줄이 삭제되었습니다.",
     });
   } catch (error) {
-    console.error("Delete schedule error:", error);
+    logError("schedule_delete_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -229,7 +230,7 @@ export async function getSharedSchedules(
       data: schedules,
     });
   } catch (error) {
-    console.error("Get shared schedules error:", error);
+    logError("schedule_get_shared_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -257,7 +258,7 @@ export async function getShiftPatterns(
       data: patterns,
     });
   } catch (error) {
-    console.error("Get shift patterns error:", error);
+    logError("schedule_get_shift_patterns_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -300,7 +301,7 @@ export async function createShiftPattern(
       data: shift_pattern,
     });
   } catch (error) {
-    console.error("Create shift pattern error:", error);
+    logError("schedule_create_shift_pattern_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });

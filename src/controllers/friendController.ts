@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import * as friendService from "../services/friendService";
 import { FriendErrorCodes } from "../services/friendService";
+import { logError } from "../utils/logger";
 
 // 인증된 요청 타입
 interface AuthenticatedRequest extends Request {
@@ -81,7 +82,11 @@ const ErrorMessages: Record<string, { status: number; message: string }> = {
 /**
  * 에러 응답 헬퍼 함수
  */
-function handleError(res: Response, error: unknown): void {
+function handleError(
+  res: Response,
+  error: unknown,
+  request_id?: string
+): void {
   const error_code = error instanceof Error ? error.message : "UNKNOWN_ERROR";
   const error_info = ErrorMessages[error_code];
 
@@ -94,7 +99,7 @@ function handleError(res: Response, error: unknown): void {
       },
     });
   } else {
-    console.error("Friend controller error:", error);
+    logError("friend_controller_failed", error, request_id);
     res.status(500).json({
       success: false,
       error: {
@@ -138,7 +143,7 @@ export async function getFriends(
       data: result,
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -205,7 +210,7 @@ export async function getFriendCalendarRange(
       data: result,
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -263,7 +268,7 @@ export async function searchUser(
       data: { user: result },
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -304,7 +309,7 @@ export async function sendFriendRequest(
       message: "친구 요청을 보냈습니다.",
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -334,7 +339,7 @@ export async function getReceivedRequests(
       data: result,
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -364,7 +369,7 @@ export async function getSentRequests(
       data: result,
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -411,7 +416,7 @@ export async function respondToRequest(
       message,
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -435,7 +440,7 @@ export async function cancelRequest(
       message: "친구 요청을 취소했습니다.",
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -477,7 +482,7 @@ export async function updateFriendSettings(
       message: "친구 설정을 변경했습니다.",
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -501,7 +506,7 @@ export async function deleteFriend(
       message: "친구를 삭제했습니다.",
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -525,7 +530,7 @@ export async function getNotifications(
       data: result,
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }
 
@@ -547,6 +552,6 @@ export async function getUnreadNotificationCount(
       data: result,
     });
   } catch (error) {
-    handleError(res, error);
+    handleError(res, error, req.request_id);
   }
 }

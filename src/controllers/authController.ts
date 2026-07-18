@@ -11,6 +11,7 @@ import { processKakaoLogin, getKakaoUserInfo } from "../services/kakaoService";
 import { processNaverLogin, getNaverUserInfo } from "../services/naverService";
 import { ensureDefaultTemplate } from "../services/shiftTemplateService";
 import { normalizePhoneNumber } from "../utils/phone";
+import { logError } from "../utils/logger";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -68,7 +69,7 @@ export async function register(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (error) {
-    console.error("Register error:", error);
+    logError("auth_register_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -119,7 +120,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (error) {
-    console.error("Login error:", error);
+    logError("auth_login_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -153,7 +154,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
       data: result.tokens,
     });
   } catch (error) {
-    console.error("Refresh token error:", error);
+    logError("auth_refresh_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -189,7 +190,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
       message: "로그아웃 되었습니다.",
     });
   } catch (error) {
-    console.error("Logout error:", error);
+    logError("auth_logout_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -214,7 +215,7 @@ export async function logoutAll(
       message: `모든 기기에서 로그아웃 되었습니다. (${revoked_count}개 세션)`,
     });
   } catch (error) {
-    console.error("Logout all error:", error);
+    logError("auth_logout_all_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -232,7 +233,7 @@ export async function getProfile(
       data: req.user?.toJSON(),
     });
   } catch (error) {
-    console.error("Get profile error:", error);
+    logError("auth_profile_get_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -317,7 +318,7 @@ export async function updateProfile(
       data: req.user.toJSON(),
     });
   } catch (error) {
-    console.error("Update profile error:", error);
+    logError("auth_profile_update_failed", error, req.request_id);
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
@@ -362,7 +363,7 @@ export async function kakaoLogin(req: Request, res: Response): Promise<void> {
         existing_email_user.kakao_id = kakao_user_info.kakao_id;
         await existing_email_user.save();
         user = existing_email_user;
-        console.log(`카카오 계정 연결: ${user.email}`);
+        console.log(`카카오 계정 연결: user_id=${user.user_id}`);
         // 기존 사용자도 템플릿이 없으면 생성
         await ensureDefaultTemplate(user.user_id);
       } else {
@@ -374,12 +375,12 @@ export async function kakaoLogin(req: Request, res: Response): Promise<void> {
           kakao_id: kakao_user_info.kakao_id,
           timezone: "Asia/Seoul", // 기본 타임존
         });
-        console.log(`카카오 회원가입 성공: ${user.email}`);
+        console.log(`카카오 회원가입 성공: user_id=${user.user_id}`);
         // 신규 사용자 기본 근무 템플릿 생성
         await ensureDefaultTemplate(user.user_id);
       }
     } else {
-      console.log(`카카오 로그인 성공: ${user.email}`);
+      console.log(`카카오 로그인 성공: user_id=${user.user_id}`);
       // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
       await ensureDefaultTemplate(user.user_id);
     }
@@ -400,7 +401,7 @@ export async function kakaoLogin(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (error) {
-    console.error("Kakao login error:", error);
+    logError("auth_kakao_login_failed", error, req.request_id);
 
     if (error instanceof Error) {
       res.status(400).json({ success: false, message: error.message });
@@ -448,7 +449,7 @@ export async function kakaoLoginWithToken(
         existing_email_user.kakao_id = kakao_user_info.kakao_id;
         await existing_email_user.save();
         user = existing_email_user;
-        console.log(`카카오 계정 연결 (SDK): ${user.email}`);
+        console.log(`카카오 계정 연결 (SDK): user_id=${user.user_id}`);
         // 기존 사용자도 템플릿이 없으면 생성
         await ensureDefaultTemplate(user.user_id);
       } else {
@@ -460,12 +461,12 @@ export async function kakaoLoginWithToken(
           kakao_id: kakao_user_info.kakao_id,
           timezone: "Asia/Seoul", // 기본 타임존
         });
-        console.log(`카카오 회원가입 성공 (SDK): ${user.email}`);
+        console.log(`카카오 회원가입 성공 (SDK): user_id=${user.user_id}`);
         // 신규 사용자 기본 근무 템플릿 생성
         await ensureDefaultTemplate(user.user_id);
       }
     } else {
-      console.log(`카카오 로그인 성공 (SDK): ${user.email}`);
+      console.log(`카카오 로그인 성공 (SDK): user_id=${user.user_id}`);
       // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
       await ensureDefaultTemplate(user.user_id);
     }
@@ -486,7 +487,7 @@ export async function kakaoLoginWithToken(
       },
     });
   } catch (error) {
-    console.error("Kakao login with token error:", error);
+    logError("auth_kakao_token_login_failed", error, req.request_id);
 
     if (error instanceof Error) {
       res.status(400).json({ success: false, message: error.message });
@@ -538,7 +539,7 @@ export async function naverLogin(req: Request, res: Response): Promise<void> {
         existing_email_user.naver_id = naver_user_info.naver_id;
         await existing_email_user.save();
         user = existing_email_user;
-        console.log(`네이버 계정 연결: ${user.email}`);
+        console.log(`네이버 계정 연결: user_id=${user.user_id}`);
         // 기존 사용자도 템플릿이 없으면 생성
         await ensureDefaultTemplate(user.user_id);
       } else {
@@ -550,12 +551,12 @@ export async function naverLogin(req: Request, res: Response): Promise<void> {
           naver_id: naver_user_info.naver_id,
           timezone: "Asia/Seoul", // 기본 타임존
         });
-        console.log(`네이버 회원가입 성공: ${user.email}`);
+        console.log(`네이버 회원가입 성공: user_id=${user.user_id}`);
         // 신규 사용자 기본 근무 템플릿 생성
         await ensureDefaultTemplate(user.user_id);
       }
     } else {
-      console.log(`네이버 로그인 성공: ${user.email}`);
+      console.log(`네이버 로그인 성공: user_id=${user.user_id}`);
       // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
       await ensureDefaultTemplate(user.user_id);
     }
@@ -576,7 +577,7 @@ export async function naverLogin(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (error) {
-    console.error("Naver login error:", error);
+    logError("auth_naver_login_failed", error, req.request_id);
 
     if (error instanceof Error) {
       res.status(400).json({ success: false, message: error.message });
@@ -624,7 +625,7 @@ export async function naverLoginWithToken(
         existing_email_user.naver_id = naver_user_info.naver_id;
         await existing_email_user.save();
         user = existing_email_user;
-        console.log(`네이버 계정 연결 (SDK): ${user.email}`);
+        console.log(`네이버 계정 연결 (SDK): user_id=${user.user_id}`);
         // 기존 사용자도 템플릿이 없으면 생성
         await ensureDefaultTemplate(user.user_id);
       } else {
@@ -636,12 +637,12 @@ export async function naverLoginWithToken(
           naver_id: naver_user_info.naver_id,
           timezone: "Asia/Seoul", // 기본 타임존
         });
-        console.log(`네이버 회원가입 성공 (SDK): ${user.email}`);
+        console.log(`네이버 회원가입 성공 (SDK): user_id=${user.user_id}`);
         // 신규 사용자 기본 근무 템플릿 생성
         await ensureDefaultTemplate(user.user_id);
       }
     } else {
-      console.log(`네이버 로그인 성공 (SDK): ${user.email}`);
+      console.log(`네이버 로그인 성공 (SDK): user_id=${user.user_id}`);
       // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
       await ensureDefaultTemplate(user.user_id);
     }
@@ -662,7 +663,7 @@ export async function naverLoginWithToken(
       },
     });
   } catch (error) {
-    console.error("Naver login with token error:", error);
+    logError("auth_naver_token_login_failed", error, req.request_id);
 
     if (error instanceof Error) {
       res.status(400).json({ success: false, message: error.message });

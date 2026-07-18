@@ -1,5 +1,6 @@
 import axios from "axios";
 import qs from "qs";
+import { logError } from "../utils/logger";
 
 interface KakaoTokenResponse {
   access_token: string;
@@ -81,16 +82,7 @@ export async function exchangeKakaoToken(
     return response.data.access_token;
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
-      console.error("카카오 토큰 교환 실패:", {
-        status: error.response.status,
-        data: error.response.data,
-        request_body: {
-          grant_type: "authorization_code",
-          client_id: kakao_client_id,
-          redirect_uri: redirect_uri,
-          code: code.substring(0, 20) + "...",
-        },
-      });
+      logError("kakao_token_exchange_failed", error);
 
       const kakao_error = error.response.data as {
         error?: string;

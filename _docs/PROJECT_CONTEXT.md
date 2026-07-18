@@ -48,7 +48,10 @@ src/
 │   └── scheduleRoutes.ts # 스케줄 라우트 (레거시)
 ├── middlewares/
 │   ├── auth.ts          # JWT 인증 미들웨어
-│   └── errorHandler.ts  # 에러 핸들러
+│   ├── errorHandler.ts  # 에러 핸들러
+│   ├── rateLimit.ts     # 인스턴스별 인증 요청 제한
+│   ├── requestContext.ts # Request ID 생성/전파
+│   └── validateRequest.ts # 인증 route validation 결과 공통 처리
 ├── controllers/         # 요청 처리 로직
 │   ├── authController.ts
 │   ├── calendarController.ts
@@ -61,6 +64,7 @@ src/
 │   ├── kakaoService.ts
 │   └── shiftTemplateService.ts
 ├── utils/               # 공통 검증/정규화 유틸
+│   ├── logger.ts        # 민감 오류 객체를 직렬화하지 않는 구조화 오류 로그
 │   └── phone.ts         # 전화번호 저장 형식 검증 및 하이픈 정규화
 ├── models/              # Sequelize 모델
 │   ├── User.ts
@@ -77,6 +81,15 @@ src/
 - **파일 역할**: 서버 시작 전 필수 환경변수, JWT secret 분리, 숫자/boolean 운영 설정을 검증
 - **의존성**: `dotenv`, Node.js `process.env`
 - **사용 예**: 엔트리포인트에서 `validateEnvironment()`를 DB 연결 전에 호출하고, 서비스에서는 `getRequiredEnvironmentVariable("JWT_SECRET")`로 기본값 없는 필수 설정을 조회
+
+#### 운영 공통 미들웨어/로거
+
+- **`src/middlewares/requestContext.ts` 역할**: 유효한 `X-Request-ID`를 이어받거나 UUID를 생성하고 응답 헤더와 `req.request_id`로 전파
+- **`src/middlewares/rateLimit.ts` 역할**: 로그인/OAuth/토큰 갱신 요청을 IP 기준으로 인스턴스별 제한
+- **`src/middlewares/validateRequest.ts` 역할**: 인증 route의 `express-validator` 결과를 공통 400 응답으로 변환
+- **`src/utils/logger.ts` 역할**: 오류 객체 전체, stack, request/response/config를 직렬화하지 않고 context, Request ID, 오류 이름/코드/HTTP 상태만 기록
+- **의존성**: Express Request/Response, Node.js `crypto`, 공통 환경변수 파서
+- **사용 예**: 인증 컨트롤러에서 `logError("auth_login_failed", error, req.request_id)` 호출
 
 ---
 
@@ -254,28 +267,24 @@ router.post(
 );
 ```
 
-#### Controller에서 Validation 결과 확인
+#### 인증 Route에서 Validation 결과 공통 처리
 
 ```typescript
-// src/controllers/calendarController.ts
-import { validationResult } from "express-validator";
-
-export async function upsertWorkShift(req: Request, res: Response) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    res.status(400).json({
-      success: false,
-      error: {
-        code: "VALIDATION_ERROR",
-        message: "입력값 검증에 실패했습니다.",
-        errors: errors.array(),
-      },
-    });
-    return;
-  }
-  // ... 처리 로직
-}
+// src/routes/authRoutes.ts
+router.post(
+  "/login",
+  [
+    body("email").isEmail(),
+    body("password").isString().notEmpty(),
+  ],
+  validateRequestMiddleware,
+  login
+);
 ```
+
+- 인증 Route는 `validateRequestMiddleware`가 Controller 호출 전에 400으로 차단합니다.
+- 오류 응답은 `type`, `field`, `location`, `message`만 포함하며 입력 원문은 반환하지 않습니다.
+- 기존 비인증 Route는 각 Controller에서 `validationResult()`를 확인하는 현재 구조를 유지합니다.
 
 #### 주요 Validation 규칙
 
@@ -582,29 +591,32 @@ const work_shifts = await WorkShift.findAll({
 #### 로깅 레벨
 
 - **개발 환경**: `morgan("dev")` - 상세 로그
-- **프로덕션**: `morgan("combined")`
-- **인스턴스 식별**: 서버 시작 로그에 `INSTANCE_ID`, 미설정 시 컨테이너 hostname 기록
+- **프로덕션**: 원격 주소/메서드/쿼리 없는 경로/상태/응답 크기/처리시간 + `request_id`
+- **인스턴스 식별**: 서버 시작 로그와 루트 health에 `INSTANCE_NAME`, 미설정 시 `unknown` 기록
 
 #### 에러 로깅
 
-- **Controller**: `console.error()`로 에러 로깅
+- **모든 Controller/Service/전역 Handler**: 오류 객체 원문 대신 민감 객체를 직렬화하지 않는 `logError()` 사용
 
 ```typescript
 catch (error) {
-  console.error("Get work shifts error:", error);
-  res.status(500).json({ ... });
+  logError("auth_login_failed", error, req.request_id);
+  res.status(500).json({ success: false, message: "서버 오류가 발생했습니다." });
 }
 ```
 
 #### Structured Logging
 
-- **현재 미구현**: 구조화된 로깅 (JSON 형식)은 아직 적용되지 않음
-- **Request ID**: 현재 미적용
+- 애플리케이션 오류 로그는 JSON 형식으로 `context`, `request_id`, `error_name`, `error_code`, `http_status`만 기록
+- `X-Request-ID`가 영문/숫자/`_`/`-` 1~64자이면 이어받고, 아니면 UUID 신규 생성
+- 모든 HTTP access log에 `request_id` 포함
+- access log는 query string, request body, Authorization, referrer를 기록하지 않음
+- 오류 객체 전체와 Axios config/request/response를 로그에 전달하지 않아 비밀번호, OAuth code, Access/Refresh Token 노출 방지
 
 #### 로깅 위치
 
 - **요청 로그**: morgan이 자동으로 HTTP 요청/응답 로깅
-- **에러 로그**: Controller/Service에서 `console.error()` 사용
+- **에러 로그**: 인증/전역 오류는 `logError()` 사용
 - **비즈니스 로그**: Service에서 `console.log()` 사용 (예: "카카오 로그인 성공")
 
 ### 3.8 환경변수 표
@@ -640,7 +652,10 @@ catch (error) {
 | `TRUST_PROXY_HOPS`       | 신뢰할 Nginx 프록시 hop 수                | 개발 `0`, 운영 `1`      |
 | `SHUTDOWN_TIMEOUT_MS`    | graceful shutdown 최대 대기시간           | `10000`                 |
 | `CORS_ALLOWED_ORIGINS`   | 쉼표로 구분한 정확한 허용 Origin 목록     | 환경별 기본 목록        |
-| `INSTANCE_ID`            | 로그에서 식별할 컨테이너/인스턴스 이름    | OS/container hostname   |
+| `INSTANCE_NAME`          | health/log에서 식별할 컨테이너 이름       | `unknown`               |
+| `REQUEST_BODY_LIMIT`     | JSON/form 요청 본문 최대 크기             | `100kb`                 |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | 인증 요청 제한 구간                    | `60000`                 |
+| `AUTH_RATE_LIMIT_MAX`    | 구간당 인스턴스별 인증 요청 최대 횟수     | `10`                    |
 
 #### 환경별 차이
 
@@ -659,6 +674,10 @@ NODE_ENV=production
 DB_SSL=true
 TRUST_PROXY_HOPS=1
 CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
+INSTANCE_NAME=shiftmate-api-1
+REQUEST_BODY_LIMIT=100kb
+AUTH_RATE_LIMIT_WINDOW_MS=60000
+AUTH_RATE_LIMIT_MAX=10
 ```
 
 `JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다.
@@ -681,7 +700,7 @@ CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
 
 ### 로깅
 
-- 에러는 `console.error()`로 로깅
+- 인증/전역 에러는 `logError()`로 구조화해 기록
 - 비즈니스 로직 로그는 `console.log()` 사용
 - 프로덕션에서는 민감 정보 로깅 금지
 
@@ -913,6 +932,7 @@ npm start
 - **기존 호환 Health Check**: `GET /api/v1/health`
 - **Liveness**: `GET /api/v1/health/live` - Express 프로세스 생존 확인
 - **Readiness**: `GET /api/v1/health/ready` - PostgreSQL `SELECT 1`까지 성공해야 200, 실패 시 503
+- **컨테이너 식별 Health Check**: `GET /health` - `{ "status": "ok", "instance": "<INSTANCE_NAME>" }`
 - **사용자 검색**: `GET /users/search?query={email_or_phone}` (인증 필요)
   - 이메일 형식이면 `users.email`에서 검색
   - 전화번호 형식이면 `users.phone`에서 검색
@@ -966,9 +986,21 @@ npm start
 ### 8. 프록시 및 종료
 
 - 운영 컨테이너 포트는 외부 공개하지 않고 Nginx만 접근할 수 있게 제한
+- Express는 컨테이너 외부 Nginx 연결을 위해 `0.0.0.0:${PORT}`에 listen
 - Nginx 1단 구성은 `TRUST_PROXY_HOPS=1` 사용
 - `SIGTERM`/`SIGINT` 수신 시 HTTP 신규 연결을 중단하고 기존 요청 완료 후 Sequelize pool 종료
 - OAuth 수동 테스트 페이지와 CSP 비활성화는 개발 환경에서만 사용
+
+### 9. 운영 요청 보안
+
+- `helmet` 적용
+- JSON/form 본문은 `REQUEST_BODY_LIMIT`로 제한하며 초과 시 413
+- 입력 검증 규칙은 각 route의 `express-validator`로 정의
+- 인증 route는 `validateRequestMiddleware`가 Controller 진입 전에 validation 오류를 차단하고 입력 원문 없는 공통 400 응답 반환
+- 운영 5xx 응답은 내부 오류 메시지와 stack을 노출하지 않음
+- 로그인/회원가입/OAuth/토큰 갱신은 IP 기준 `AUTH_RATE_LIMIT_*` 제한 적용
+- Express 제한은 인스턴스별이므로 3개 인스턴스 전체 공통 제한은 Nginx `limit_req`에서 추가
+- 비밀번호, Authorization/OAuth code, Access/Refresh Token은 로그 필드로 기록하지 않음
 
 ---
 
@@ -1000,3 +1032,5 @@ npm start
 - [ ] 롤백 계획 수립
 - [ ] `3 × DB_POOL_MAX`와 PostgreSQL 연결 한도 확인
 - [ ] liveness/readiness 및 SIGTERM 종료 확인
+- [ ] 컨테이너별 고유 `INSTANCE_NAME` 확인
+- [ ] Request ID, 본문 제한, 인증 rate limit 확인

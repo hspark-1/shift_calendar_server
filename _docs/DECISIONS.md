@@ -743,3 +743,68 @@ Flutter 캘린더가 저장 직후 서버 응답의 근무 타입 이름, 색상
 
 - PostgreSQL 외부 작업 큐나 스케줄러가 추가되면 전용 worker 또는 큐 소비자 구조 재평가
 - API 인스턴스를 여러 DB 리전에 배치하게 되면 advisory lock 대신 전역 조정 수단 재평가
+
+---
+
+## ADR-0016: Request ID와 인스턴스별 인증 요청 제한을 포함한 운영 HTTP 경계
+
+### 배경(문제)
+
+Nginx 뒤의 Express 인스턴스 3개를 운영하려면 컨테이너 식별, 요청 추적, 과도한 인증 요청 제한, 요청 본문 크기 제한이 필요합니다. 기존 인증 오류 로깅은 Axios 오류 객체 전체를 전달할 수 있어 Authorization 헤더나 OAuth Token이 로그에 포함될 가능성도 있었습니다.
+
+### 선택지(대안)
+
+1. Express 공통 미들웨어에서 Request ID, 본문 제한, 인스턴스별 rate limit, 안전 오류 로그 적용
+2. 모든 기능을 Nginx에만 적용
+3. Redis 기반 전역 rate limit을 즉시 도입
+
+### 결정(무엇을 선택)
+
+**Express에 최소 운영 방어선을 적용하고, 전체 인스턴스 공통 인증 제한은 Nginx 단계에서 추가**합니다.
+
+- `GET /health`는 `status=ok`와 `INSTANCE_NAME` 반환
+- Express는 `0.0.0.0:${PORT}`에 listen
+- JSON/form body는 `REQUEST_BODY_LIMIT` 적용
+- 로그인/회원가입/OAuth/Refresh는 IP 기준 인스턴스별 `AUTH_RATE_LIMIT_*` 적용
+- 모든 요청에 `X-Request-ID`를 생성/전파하고 access/error log에 포함
+- access log는 쿼리 문자열, 본문, Authorization, referrer를 기록하지 않음
+- 오류 로그는 오류 객체 전체 대신 context, Request ID, 오류 이름/코드/HTTP 상태만 기록
+- 운영 5xx 응답은 내부 메시지와 stack을 반환하지 않음
+
+### 근거(왜)
+
+- Nginx 설정 누락이나 내부 직접 접근 시에도 Express 자체 최소 방어 유지
+- Request ID로 Nginx와 각 컨테이너 로그를 연결 가능
+- Redis 도입 없이 현재 단계의 로그인 폭주를 제한하면서 후속 Nginx `limit_req`로 전체 제한 가능
+- Axios request/config/response를 직렬화하지 않아 Bearer Token과 OAuth 자격증명 로그 노출 경로 제거
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- `curl /health`만으로 컨테이너 식별 가능
+- 큰 본문은 Controller 도달 전 413으로 차단
+- 과도한 인증 요청은 429와 `Retry-After`로 응답
+- 모든 응답과 HTTP 로그를 Request ID로 추적 가능
+
+**트레이드오프**:
+
+- Express rate limit은 프로세스 메모리 기반이므로 3개 인스턴스 합산 전역 제한이 아님
+- Nginx 프록시 hop 수가 잘못되면 IP 기준 제한과 로그의 클라이언트 주소가 부정확할 수 있음
+- 오류 객체 원문을 기록하지 않으므로 상세 디버깅은 로컬 재현이나 명시적 안전 필드 추가가 필요
+
+### 구현 위치
+
+- **서버 경계**: `src/index.ts`
+- **Request ID**: `src/middlewares/requestContext.ts`
+- **인증 요청 제한**: `src/middlewares/rateLimit.ts`
+- **인증 입력 검증 응답**: `src/middlewares/validateRequest.ts`
+- **안전 오류 로그**: `src/utils/logger.ts`
+- **Controller/Service 오류 처리**: `src/controllers/*.ts`, `src/services/*.ts`
+- **전역 오류 응답**: `src/middlewares/errorHandler.ts`
+- **인증 라우트**: `src/routes/authRoutes.ts`
+
+### 추후 과제(언제 다시 평가)
+
+- Nginx 설정 단계에서 전체 인스턴스 공통 `limit_req` 추가
+- 다중 홈서버로 확장하거나 프록시를 우회하는 내부 클라이언트가 생기면 Redis/PostgreSQL 기반 전역 rate limit 재평가

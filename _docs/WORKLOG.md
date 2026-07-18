@@ -2,6 +2,73 @@
 
 ## 2026-07-19
 
+### [DONE] Express 운영 보안·관측 기능 추가
+
+- **목적**: 컨테이너별 식별 가능한 루트 health check와 외부 바인딩, 요청 제한, Request ID, 민감정보 안전 로그를 운영 기준으로 적용
+- **변경**:
+  - 루트 `GET /health`에서 `status=ok`, `instance=INSTANCE_NAME` 반환
+  - Express listen 주소를 `0.0.0.0`으로 명시하고 시작 로그에 인스턴스 이름 포함
+  - JSON/form 본문에 `REQUEST_BODY_LIMIT` 적용
+  - 로그인/회원가입/카카오/네이버/Refresh Token 요청에 인스턴스별 IP rate limit 적용
+  - `X-Request-ID` 검증·생성·응답 전파 및 모든 morgan access log 연결
+  - 전역 오류 응답에 `request_id` 포함
+  - 운영 5xx 응답의 내부 메시지와 stack 제거
+  - 인증/캘린더/친구/스케줄 Controller와 OAuth/친구 서비스의 오류 객체 원문 로그를 `logError()`로 교체
+  - `logError()`는 Axios config/request/response, 오류 message/stack 전체를 직렬화하지 않고 안전한 메타데이터만 기록
+  - access log는 쿼리 문자열, 요청 본문, Authorization, referrer를 기록하지 않는 경로 기반 형식으로 제한
+  - OAuth 성공 로그의 이메일을 `user_id`로 대체
+  - 카카오 `redirect_uri`와 Refresh Token 요청에 route validation 추가
+  - 인증 route의 express-validator 결과를 Controller 전에 차단하는 `validateRequestMiddleware` 추가
+  - `.env.example`, 프로젝트 컨텍스트, 배포 가이드, ADR-0016에 운영 정책 반영
+- **영향범위**:
+  - 서버 기동과 health check
+  - 인증 라우트
+  - HTTP 요청/오류 로그
+  - 공통 요청 body parsing
+- **파일**:
+  - `src/index.ts`
+  - `src/config/environment.ts`
+  - `src/routes/authRoutes.ts`
+  - `src/middlewares/errorHandler.ts`
+  - `src/middlewares/rateLimit.ts`
+  - `src/middlewares/requestContext.ts`
+  - `src/middlewares/validateRequest.ts`
+  - `src/utils/logger.ts`
+  - `src/types/express.d.ts`
+  - `src/controllers/authController.ts`
+  - `src/controllers/calendarController.ts`
+  - `src/controllers/friendController.ts`
+  - `src/controllers/scheduleController.ts`
+  - `src/services/friendService.ts`
+  - `src/services/kakaoService.ts`
+  - `src/services/naverService.ts`
+  - `.env.example`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DEPLOYMENT_GUIDE.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - 최초 `npm run build`에서 morgan `IncomingMessage.request_id` 타입 오류 확인 후 Express `Request` cast로 수정
+  - 수정 후 `npm run build` 성공
+  - `git diff --check` 성공
+  - `PORT=3000`, `INSTANCE_NAME=shiftmate-api-test` 운영 실행:
+    - `GET /health` → 200, `{"status":"ok","instance":"shiftmate-api-test"}`
+    - listen 주소 `*:3000`으로 `0.0.0.0` 바인딩 확인
+  - 유효한 `X-Request-ID` 응답 전파 및 access log 포함 확인
+  - access log에 요청 query와 민감 테스트 문자열이 포함되지 않음 확인
+  - `REQUEST_BODY_LIMIT=1kb` 검증에서 초과 JSON 요청 413
+  - `AUTH_RATE_LIMIT_MAX=2` 검증에서 로그인 요청 상태 `400, 400, 429`
+  - 잘못된 카카오 OAuth 입력은 외부 호출 전 400 `VALIDATION_ERROR`로 차단되고 입력 원문은 응답/로그에 미포함
+  - 운영 5xx 응답의 stack 미포함 및 일반화된 메시지 확인
+  - 민감 테스트 문자열이 오류/access log에 포함되지 않음 확인
+  - `SIGTERM`과 `SIGINT`에서 HTTP 서버 종료 후 DB pool 정상 종료 확인
+- **롤백**:
+  - 신규 `requestContext.ts`, `rateLimit.ts`, `validateRequest.ts`, `logger.ts` 제거
+  - `src/index.ts`, 인증 라우트/컨트롤러/OAuth 서비스, 문서를 이번 작업 이전으로 되돌리기
+- **다음**:
+  - Docker liveness는 `/health`, readiness는 `/api/v1/health/ready` 사용
+  - Nginx에 3개 인스턴스 전체 공통 인증 `limit_req`와 Request ID 전달 설정
+
 ### [DONE] Express 다중 인스턴스 운영 안전성 보완
 
 - **목적**: 동일 Express 서버 3개를 로드밸런서 뒤에서 실행할 때 인증·도메인 동시성과 컨테이너 기동/종료 안전성을 확보

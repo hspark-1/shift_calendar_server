@@ -79,6 +79,8 @@ export function validateEnvironment(): void {
     allow_zero: true,
   });
   getPositiveIntegerEnvironmentVariable("SHUTDOWN_TIMEOUT_MS", 10000);
+  getPositiveIntegerEnvironmentVariable("AUTH_RATE_LIMIT_WINDOW_MS", 60000);
+  getPositiveIntegerEnvironmentVariable("AUTH_RATE_LIMIT_MAX", 10);
 
   const db_pool_max = getPositiveIntegerEnvironmentVariable("DB_POOL_MAX", 10);
   const db_pool_min = getPositiveIntegerEnvironmentVariable(
@@ -93,5 +95,15 @@ export function validateEnvironment(): void {
   const db_ssl = process.env.DB_SSL;
   if (db_ssl !== undefined && !["true", "false"].includes(db_ssl)) {
     throw new Error("DB_SSL은 true 또는 false여야 합니다.");
+  }
+
+  const request_body_limit = process.env.REQUEST_BODY_LIMIT;
+  if (
+    request_body_limit !== undefined &&
+    !/^[1-9][0-9]*(b|kb|mb)$/i.test(request_body_limit)
+  ) {
+    throw new Error(
+      "REQUEST_BODY_LIMIT은 100kb, 1mb와 같은 양의 크기 형식이어야 합니다."
+    );
   }
 }

@@ -1,5 +1,6 @@
 import axios from "axios";
 import qs from "qs";
+import { logError } from "../utils/logger";
 
 interface NaverTokenResponse {
   access_token: string;
@@ -77,16 +78,7 @@ export async function exchangeNaverToken(
     return response.data.access_token;
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
-      console.error("네이버 토큰 교환 실패:", {
-        status: error.response.status,
-        data: error.response.data,
-        request_body: {
-          grant_type: "authorization_code",
-          client_id: naver_client_id,
-          redirect_uri: redirect_uri,
-          code: code.substring(0, 20) + "...",
-        },
-      });
+      logError("naver_token_exchange_failed", error);
 
       const naver_error = error.response.data as {
         error?: string;
@@ -146,10 +138,7 @@ export async function getNaverUserInfo(
     };
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
-      console.error("네이버 사용자 정보 조회 실패:", {
-        status: error.response.status,
-        data: error.response.data,
-      });
+      logError("naver_user_info_failed", error);
 
       throw new Error(
         error.response.data?.message ||
@@ -172,4 +161,3 @@ export async function processNaverLogin(
   const user_info = await getNaverUserInfo(access_token);
   return user_info;
 }
-

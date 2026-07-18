@@ -1,9 +1,8 @@
-import express from "express";
+import express, { Request } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import path from "path";
-import os from "os";
 import type { Server } from "http";
 
 import { connectDatabase, disconnectDatabase } from "./config/database";
@@ -11,13 +10,16 @@ import {
   getPositiveIntegerEnvironmentVariable,
   validateEnvironment,
 } from "./config/environment";
+import { requestContextMiddleware } from "./middlewares/requestContext";
 import routes from "./routes";
 import { errorHandler } from "./middlewares/errorHandler";
+import { logError } from "./utils/logger";
 
 const app = express();
 const port = getPositiveIntegerEnvironmentVariable("PORT", 3000);
 const node_env = process.env.NODE_ENV || "development";
-const instance_id = process.env.INSTANCE_ID || os.hostname();
+const instance_name = process.env.INSTANCE_NAME ?? "unknown";
+const request_body_limit = process.env.REQUEST_BODY_LIMIT || "100kb";
 const trust_proxy_hops = getPositiveIntegerEnvironmentVariable(
   "TRUST_PROXY_HOPS",
   node_env === "production" ? 1 : 0,
@@ -40,6 +42,7 @@ app.use(
     contentSecurityPolicy: node_env === "development" ? false : undefined,
   })
 );
+app.use(requestContextMiddleware);
 
 // CORS 설정 (Flutter 앱 접속용)
 const default_allowed_origins =
@@ -94,14 +97,38 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(morgan(node_env === "production" ? "combined" : "dev"));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+morgan.token(
+  "request-id",
+  (req) => (req as Request).request_id || "-"
+);
+morgan.token("safe-path", (req) => {
+  const request = req as Request;
+  return request.originalUrl.split("?")[0] || "/";
+});
+const request_log_format =
+  node_env === "production"
+    ? ':remote-addr [:date[clf]] ":method :safe-path HTTP/:http-version" :status :res[content-length] :response-time ms request_id=:request-id'
+    : ":method :safe-path :status :response-time ms - :res[content-length] request_id=:request-id";
+app.use(morgan(request_log_format));
+app.use(express.json({ limit: request_body_limit }));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: request_body_limit,
+  })
+);
 
 app.use("/api", (_req, res, next) => {
   res.setHeader("Cache-Control", "private, no-store");
   res.setHeader("Vary", "Authorization");
   next();
+});
+
+app.get("/health", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    instance: instance_name,
+  });
 });
 
 // OAuth 수동 테스트 페이지는 개발 환경에서만 노출
@@ -121,12 +148,12 @@ async function startServer(): Promise<void> {
     validateEnvironment();
     await connectDatabase();
 
-    http_server = app.listen(port, () => {
+    http_server = app.listen(port, "0.0.0.0", () => {
       console.log(
-        `🚀 서버가 포트 ${port}에서 실행 중입니다. instance_id=${instance_id}`
+        `🚀 서버가 0.0.0.0:${port}에서 실행 중입니다. instance=${instance_name}`
       );
       console.log(`📍 API: http://localhost:${port}/api/v1`);
-      console.log(`❤️  Health: http://localhost:${port}/api/v1/health`);
+      console.log(`❤️  Health: http://localhost:${port}/health`);
       if (node_env === "development") {
         console.log(
           `🔐 카카오 로그인 테스트: http://localhost:${port}/test/kakao-login.html`
@@ -134,7 +161,7 @@ async function startServer(): Promise<void> {
       }
     });
   } catch (error) {
-    console.error("❌ 서버 시작 실패:", error);
+    logError("server_start_failed", error);
     process.exit(1);
   }
 }
@@ -168,7 +195,7 @@ async function shutdownServer(signal: string): Promise<void> {
     process.exit(0);
   } catch (error) {
     clearTimeout(force_shutdown_timer);
-    console.error("❌ 서버 종료 실패:", error);
+    logError("server_shutdown_failed", error);
     process.exit(1);
   }
 }

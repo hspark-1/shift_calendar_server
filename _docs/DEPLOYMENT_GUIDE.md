@@ -25,6 +25,10 @@ DB_POOL_MAX=10
 DB_POOL_MIN=0
 TRUST_PROXY_HOPS=1
 CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
+INSTANCE_NAME=shiftmate-api-1
+REQUEST_BODY_LIMIT=100kb
+AUTH_RATE_LIMIT_WINDOW_MS=60000
+AUTH_RATE_LIMIT_MAX=10
 NAVER_CLIENT_ID=               # 네이버 로그인 사용 시
 NAVER_CLIENT_SECRET=           # 네이버 로그인 사용 시
 KAKAO_CLIENT_ID=               # 카카오 로그인 사용 시
@@ -219,6 +223,10 @@ TRUST_PROXY_HOPS=1
 CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
 DB_POOL_MAX=10
 DB_POOL_MIN=0
+INSTANCE_NAME=shiftmate-api-1
+REQUEST_BODY_LIMIT=100kb
+AUTH_RATE_LIMIT_WINDOW_MS=60000
+AUTH_RATE_LIMIT_MAX=10
 ```
 
 `DB_SYNC=true`는 개발/운영 구분 없이 허용하지 않습니다.
@@ -345,6 +353,9 @@ pm2 status
 ### 헬스 체크
 
 ```bash
+# 컨테이너 프로세스와 인스턴스 이름
+curl --fail http://localhost:3000/health
+
 # 프로세스 생존
 curl --fail http://localhost:3000/api/v1/health/live
 
@@ -404,6 +415,9 @@ curl http://localhost:3000/api/v1/auth/profile \
 - [ ] `3 × DB_POOL_MAX`가 PostgreSQL 연결 한도와 운영 예약 연결을 침범하지 않는가?
 - [ ] Nginx 1단 프록시 기준 `TRUST_PROXY_HOPS=1`인가?
 - [ ] CORS origin이 정확한 운영 도메인으로 제한되어 있는가?
+- [ ] 세 컨테이너의 `INSTANCE_NAME`이 서로 다른가?
+- [ ] Nginx에 3개 인스턴스 전체 공통 로그인 `limit_req`가 설정되어 있는가?
+- [ ] access log에 Request ID가 있으며 비밀번호/토큰이 없는가?
 - [ ] HTTPS가 설정되어 있는가? (프로덕션)
 - [ ] 방화벽이 올바르게 설정되어 있는가?
 - [ ] 불필요한 포트가 열려있지 않은가?
@@ -414,6 +428,7 @@ curl http://localhost:3000/api/v1/auth/profile \
 
 - [ ] 서버가 정상적으로 시작되었는가?
 - [ ] liveness와 readiness가 모두 정상인가?
+- [ ] 루트 `/health`에 해당 컨테이너 `INSTANCE_NAME`이 반환되는가?
 - [ ] API 엔드포인트가 세 인스턴스에서 동일하게 작동하는가?
 - [ ] `SIGTERM` 시 기존 요청 완료 후 정상 종료되는가?
 - [ ] 데이터베이스 연결이 정상인가?

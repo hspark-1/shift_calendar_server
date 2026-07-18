@@ -3,6 +3,7 @@ import { validationResult } from "express-validator";
 import { User } from "../models";
 import * as calendarService from "../services/calendarService";
 import * as shiftTemplateService from "../services/shiftTemplateService";
+import { logError } from "../utils/logger";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -65,7 +66,7 @@ export async function getShiftTypes(
       data: result,
     });
   } catch (error: any) {
-    console.error("Get shift types error:", error);
+    logError("calendar_get_shift_types_failed", error, req.request_id);
     if (error.message === "TEMPLATE_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -157,7 +158,7 @@ export async function getWorkShifts(
       },
     });
   } catch (error: any) {
-    console.error("Get work shifts error:", error);
+    logError("calendar_get_work_shifts_failed", error, req.request_id);
     res.status(500).json({
       success: false,
       error: {
@@ -211,7 +212,7 @@ export async function getDaySchedule(
       data: result,
     });
   } catch (error: any) {
-    console.error("Get day schedule error:", error);
+    logError("calendar_get_day_schedule_failed", error, req.request_id);
     res.status(500).json({
       success: false,
       error: {
@@ -293,7 +294,7 @@ export async function getEvents(
       },
     });
   } catch (error: any) {
-    console.error("Get events error:", error);
+    logError("calendar_get_events_failed", error, req.request_id);
     res.status(500).json({
       success: false,
       error: {
@@ -332,7 +333,7 @@ export async function createEvent(
       message: "일정이 생성되었습니다.",
     });
   } catch (error: any) {
-    console.error("Create event error:", error);
+    logError("calendar_create_event_failed", error, req.request_id);
 
     if (error.message === "INVALID_TITLE") {
       res.status(400).json({
@@ -398,7 +399,7 @@ export async function deleteEvent(
       },
     });
   } catch (error: any) {
-    console.error("Delete event error:", error);
+    logError("calendar_delete_event_failed", error, req.request_id);
     if (error.message === "EVENT_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -488,7 +489,7 @@ export async function getCalendarRange(
       data: result,
     });
   } catch (error: any) {
-    console.error("Get calendar range error:", error);
+    logError("calendar_get_range_failed", error, req.request_id);
     res.status(500).json({
       success: false,
       error: {
@@ -564,7 +565,7 @@ export async function upsertWorkShift(
       data: work_shift_with_details,
     });
   } catch (error: any) {
-    console.error("Upsert work shift error:", error);
+    logError("calendar_upsert_work_shift_failed", error, req.request_id);
     if (error.message === "SHIFT_TYPE_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -660,7 +661,7 @@ export async function updateWorkShift(
       data: work_shift_with_details,
     });
   } catch (error: any) {
-    console.error("Update work shift error:", error);
+    logError("calendar_update_work_shift_failed", error, req.request_id);
     if (error.message === "WORK_SHIFT_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -732,7 +733,7 @@ export async function deleteWorkShift(
       },
     });
   } catch (error: any) {
-    console.error("Delete work shift error:", error);
+    logError("calendar_delete_work_shift_failed", error, req.request_id);
     if (error.message === "WORK_SHIFT_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -841,7 +842,7 @@ export async function batchUpsertWorkShifts(
       },
     });
   } catch (error: any) {
-    console.error("Batch upsert work shifts error:", error);
+    logError("calendar_batch_upsert_work_shifts_failed", error, req.request_id);
 
     // 중복 날짜 에러
     if (error.message === "DUPLICATE_DATE") {
@@ -979,7 +980,7 @@ export async function getCurrentTemplate(
       data: result,
     });
   } catch (error: any) {
-    console.error("Get current template error:", error);
+    logError("calendar_get_current_template_failed", error, req.request_id);
     if (error.message === "TEMPLATE_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -1036,7 +1037,7 @@ export async function updateCurrentTemplate(
       },
     });
   } catch (error: any) {
-    console.error("Update current template error:", error);
+    logError("calendar_update_current_template_failed", error, req.request_id);
     if (error.message === "TEMPLATE_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -1106,7 +1107,7 @@ export async function createShiftType(
       data: result,
     });
   } catch (error: any) {
-    console.error("Create shift type error:", error);
+    logError("calendar_create_shift_type_failed", error, req.request_id);
     if (error.message === "TEMPLATE_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -1205,7 +1206,7 @@ export async function updateShiftType(
       data: result,
     });
   } catch (error: any) {
-    console.error("Update shift type error:", error);
+    logError("calendar_update_shift_type_failed", error, req.request_id);
     if (error.message === "SHIFT_TYPE_NOT_FOUND") {
       res.status(404).json({
         success: false,
@@ -1281,7 +1282,7 @@ export async function deleteShiftType(
       data: result,
     });
   } catch (error: any) {
-    console.error("Delete shift type error:", error);
+    logError("calendar_delete_shift_type_failed", error, req.request_id);
     if (error.message === "SHIFT_TYPE_NOT_FOUND") {
       res.status(404).json({
         success: false,

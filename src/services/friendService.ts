@@ -8,6 +8,7 @@ import {
   Notification,
 } from "../models";
 import { NotificationAction, NotificationType } from "../models/Notification";
+import { logError } from "../utils/logger";
 import { normalizePhoneNumber } from "../utils/phone";
 
 // ============================================================
@@ -1199,7 +1200,7 @@ export async function getNotifications(
     Notification.update(
       { is_read: true, read_at },
       { where: { notification_id: unread_notification_ids } }
-    ).catch((err) => console.error("알림 읽음 처리 실패:", err));
+    ).catch((error) => logError("notification_mark_read_failed", error));
   }
 
   const notifications = rows.map((row) =>
