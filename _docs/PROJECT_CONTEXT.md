@@ -550,6 +550,11 @@ const work_shifts = await WorkShift.findAll({
 - `WorkShiftApiModel`: `work_shift_id`, `work_date`, `shift_type_code`, `shift_type_name`, `shift_type_color`, `start_time`, `end_time`, `note`, `created_at`, `updated_at`
 - `POST /work-shifts`, `POST /work-shifts/batch`는 `(owner_user_id, work_date)` 기준 upsert이며, 같은 날짜의 soft-deleted 근무표가 있으면 `deleted_at`, `deleted_by_user_id`를 `null`로 되돌려 재등록 데이터가 조회되도록 복구
 - `shift_type_color` 응답 포맷은 `#AARRGGBB` 문자열 또는 값이 없을 때 `null`
+- `GET /shift-types`, `POST /shift-types`, `PUT /shift-types/:shift_type_id`의 근무 타입 객체는 최종 렌더링 색상 `color`와 함께 기준 색상 `base_color`, 정수 농도 `color_intensity(0..100)`를 반환
+- 신규 색상 설정은 불투명 기준 색상 `#FFRRGGBB`와 농도를 함께 전달하며, 서버가 불투명 흰색 `#FFFFFFFF` 기준으로 최종 `color`를 계산
+- `base_color`와 `color_intensity` 중 하나만 전달하면 `INVALID_COLOR_METADATA`, 함께 전달한 `color`가 서버 계산값과 다르면 `COLOR_METADATA_MISMATCH`로 거절
+- 구버전 클라이언트의 `color` 단독 쓰기는 `base_color=color`, `color_intensity=100`으로 저장하고, 레거시 DB 행 조회도 같은 기준으로 fallback
+- 색상 메타데이터가 없는 수정 요청은 기존 세 값을 유지하며, `color:null` 단독 수정은 최종/기준 색상을 `null`, 농도를 `100`으로 갱신
 - `start_time`, `end_time` 응답 포맷은 `HH:mm:ss` 문자열 또는 값이 없을 때 `null`
 - 개인 캘린더의 `GET /events`, `POST /events`, `GET /calendar/day`, `GET /calendar/range` 이벤트 응답은 `EventApiModel` 필드를 반환
 - `EventApiModel`: `event_id`, `title`, `memo`, `place`, `all_day`, `start_at`, `end_at`, `visibility_level`, `created_at`, `updated_at`
@@ -796,6 +801,9 @@ AUTH_RATE_LIMIT_MAX=10
 - `code` (예: 'D', 'E', 'N', 'OFF')
 - `name`, `color`, `sort_order`
 - `color` API 입력/응답 표준은 `#AARRGGBB` 문자열
+- `base_color`: 농도 적용 전 기준 색상. 신규 API 요청은 불투명 `#FFRRGGBB`
+- `color_intensity`: 기준 색상 농도 정수 퍼센트 `0..100`, 기본값 `100`
+- 최종 `color` 계산은 각 RGB 채널에 `round(255 + (base - 255) × color_intensity / 100)` 적용
 
 #### ShiftTypeSchedule (근무 시간표)
 
@@ -882,6 +890,34 @@ docker exec -i shift-calendar-postgres \
 ```bash
 psql -U postgres -d shift_calendar -f migrations/enforce_users_phone_format.sql
 ```
+
+기존 DB에 근무 타입 색상 기준값과 농도를 추가할 때는 두 단계 SQL을 순서대로 수동 적용합니다.
+
+#### `migrations/add_shift_type_color_metadata.sql`
+
+- **파일 역할**: 신규 서버 배포 전에 `shift_types.base_color`, `shift_types.color_intensity` nullable 컬럼을 확장하고 사전 색상 감사 결과를 출력
+- **의존성**: 기존 `shift_types.color`가 PostgreSQL `text`이며, 대상 DB 백업과 감사 결과 확인이 선행되어야 함
+- **사용 예**:
+
+```bash
+psql -U postgres -d shift_calendar \
+  -f migrations/add_shift_type_color_metadata.sql
+```
+
+#### `migrations/backfill_shift_type_color_metadata.sql`
+
+- **파일 역할**: 모든 API 인스턴스를 신규 dual-read/dual-write 서버로 교체한 뒤 레거시 행을 `base_color=color`, `color_intensity=100`으로 백필하고 기본값·NOT NULL·CHECK 제약을 적용
+- **의존성**: expand SQL 적용, 신규 서버 API 검증, `color`/`base_color` 형식 및 농도 사전 감사 통과
+- **사용 예**:
+
+```bash
+psql -U postgres -d shift_calendar \
+  -f migrations/backfill_shift_type_color_metadata.sql
+```
+
+- 두 SQL은 운영 DB에서 `migrations/final_schema.sql` 대신 사용합니다.
+- 확인되지 않은 과거 색상값이 있으면 backfill SQL이 예외로 중단되며 임의 변환하지 않습니다.
+- 색상 메타데이터는 조회 필터·정렬·조인 조건이 아니므로 별도 인덱스를 만들지 않습니다.
 
 ### 필수 환경변수
 
@@ -970,6 +1006,10 @@ curl --fail http://127.0.0.1:3000/health
 ### Swagger/Postman
 
 - **Swagger**: 현재 미구현
+- **근무 타입 색상 API 가이드**: `_docs/SHIFT_TYPE_COLOR_API_GUIDE.md`
+  - **파일 역할**: Flutter 프론트팀에 `color`, `base_color`, `color_intensity` 요청/응답, 레거시 fallback, 오류 코드, 미리보기 계산 및 연동 체크리스트 제공
+  - **의존성**: 서버의 `GET/POST/PUT /shift-types` 계약과 `shift_types` 색상 메타데이터 migration
+  - **사용 예**: 근무 타입 API 모델·요청 모델·색상 선택 화면을 구현하거나 연동 테스트할 때 기준 문서로 사용
 - **테스트 페이지**:
   - `http://localhost:3000/test/kakao-login.html` (카카오 로그인 테스트)
   - `http://localhost:3000/test/naver-login.html` (네이버 로그인 테스트)

@@ -1,6 +1,103 @@
 # 작업 일지
 
+## 2026-07-20
+
+### [DONE] 프론트팀용 근무 타입 색상 메타데이터 API 가이드 작성
+
+- **목적**: Flutter 프론트팀이 신규 `base_color`, `color_intensity` 계약을 정확히 연동할 수 있는 요청/응답·호환·오류 처리 가이드 제공
+- **변경**:
+  - 색상 필드 역할, 흰색 기준 농도 계산식, 인증·응답 계약 문서화
+  - 조회·생성·수정 요청/응답 예시와 수정 조합별 서버 동작 정리
+  - 레거시 데이터 fallback 및 구버전 `color` 단독 요청 호환 정책 명시
+  - 오류 코드별 Flutter 처리 기준과 실제 프론트 영향 파일·구현 예시 추가
+  - DB expand migration 선적용을 포함한 배포·연동 체크리스트 제공
+- **영향범위**:
+  - `GET/POST /api/v1/shift-types`
+  - `PUT /api/v1/shift-types/:shift_type_id`
+  - Flutter 근무 타입 API 모델·요청 모델·색상 선택 상태
+- **파일**:
+  - `_docs/SHIFT_TYPE_COLOR_API_GUIDE.md`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - 서버 route/controller/service/model 구현과 필드·검증·오류 코드 직접 대조
+  - 현재 Flutter 모델·서비스·색상 선택 화면과 영향 범위 직접 대조
+  - 가이드 내 JSON 코드 블록 9개 파싱 성공
+  - `npm run build` 성공
+  - `git diff --check` 성공
+- **롤백**: 신규 가이드와 관련 문서 항목 제거
+- **다음**:
+  - 서버 DB에 `add_shift_type_color_metadata.sql` 적용 후 API 계약 확인
+  - 프론트에서 기준 색상·농도 상태 보존 및 요청 모델 반영
+  - Flutter 모델·서비스·위젯 테스트에 신규/레거시 응답 사례 추가
+
+### [DONE] 색상 메타데이터 배포 후 캘린더 API 500 원인 확인
+
+- **목적**: `GET /shift-types`, `GET /calendar/range`에서 발생한 `SequelizeDatabaseError`의 실제 DB 원인을 확인
+- **변경**:
+  - DebugMCP 중단점과 디버그 세션 상태 확인 후 정리
+  - 현재 `.env`가 연결한 `shift_calendar.public.shift_types` 컬럼과 제약을 읽기 전용 조회
+  - 누락 컬럼 직접 SELECT로 PostgreSQL 오류 코드 확인
+- **영향범위**:
+  - `GET /api/v1/shift-types`
+  - `GET /api/v1/calendar/range`
+  - PostgreSQL `shift_types`
+- **파일**: `_docs/WORKLOG.md`
+- **테스트**:
+  - 실제 DB `shift_types`에 `base_color`, `color_intensity`가 없음을 확인
+  - `SELECT base_color, color_intensity FROM shift_types`가 PostgreSQL `42703`, `column "base_color" does not exist`를 반환함을 확인
+  - `GET /shift-types` 직접 조회와 `GET /calendar/range`의 `ShiftType` include 모두 Sequelize 기본 attribute 선택으로 신규 컬럼을 참조하는 코드 경로 확인
+- **롤백**: 문서 항목만 되돌리기
+- **다음**:
+  - DB 백업 후 `migrations/add_shift_type_color_metadata.sql`을 먼저 수동 적용
+  - 신규 서버 API 확인 후 `migrations/backfill_shift_type_color_metadata.sql` 적용
+
 ## 2026-07-19
+
+### [DONE] 근무 타입 색상 메타데이터 서버 계약 및 DB 마이그레이션 추가
+
+- **목적**: 근무 타입의 최종 색상뿐 아니라 기준 색상과 농도를 저장·복원할 수 있도록 서버 로직과 수동 PostgreSQL 마이그레이션을 추가
+- **변경**:
+  - `ShiftType` 모델에 nullable `base_color`와 기본값 100의 `color_intensity` 추가
+  - 신규 기준 색상 `#FFRRGGBB`, 정수 농도 `0..100` route validation 및 안정적인 오류 코드 매핑
+  - 불투명 흰색 기준 채널 혼합 계산과 생성/수정 공통 색상 메타데이터 해석 추가
+  - 신규 메타데이터 요청은 최종 `color`를 서버에서 계산하고, 함께 전달된 값이 다르면 `COLOR_METADATA_MISMATCH`로 거절
+  - 구버전 `color` 단독 쓰기와 레거시 조회는 `base_color=color`, `color_intensity=100`으로 처리
+  - 기본 근무 템플릿 생성도 세 색상 값을 함께 저장
+  - 운영 DB용 expand SQL과 backfill/constraint SQL을 분리해 추가
+  - 최종 DDL, `AGENTS.md`, `schema.drawio`, 프로젝트 컨텍스트, ADR-0018 동기화
+- **영향범위**:
+  - `GET/POST /api/v1/shift-types`
+  - `PUT /api/v1/shift-types/:shift_type_id`
+  - PostgreSQL `shift_types`
+- **파일**:
+  - `src/models/ShiftType.ts`
+  - `src/routes/calendarRoutes.ts`
+  - `src/controllers/calendarController.ts`
+  - `src/services/shiftTemplateService.ts`
+  - `src/services/calendarService.ts`
+  - `migrations/add_shift_type_color_metadata.sql`
+  - `migrations/backfill_shift_type_color_metadata.sql`
+  - `migrations/final_schema.sql`
+  - `AGENTS.md`
+  - `schema.drawio`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - `npm run build` 성공
+  - 색상 계산 0%/50%/100% 예상값 확인
+  - 색상 계산·메타데이터 해석 9개 사례 확인: 농도 0%/50%/100%, 신규 계산, 구버전 color 단독, null 삭제, 무변경, 부분 메타데이터, 최종값 불일치
+  - `git diff --check` 성공
+  - PostgreSQL 임시 테이블 SQL 검증을 시도했으나 로컬 `localhost:5432`가 실행 중이지 않아 `ECONNREFUSED`; 대상 DB에는 migration을 실행하지 않음
+- **롤백**:
+  - 서버/문서 변경을 이전 상태로 복원
+  - 구버전 서버로 먼저 롤백한 뒤 SQL 파일의 rollback 구문으로 신규 CHECK 제약과 두 컬럼 제거
+  - 컬럼 제거 전 기준 색상·농도 데이터 백업 필수
+- **다음**:
+  - 대상 DB 백업 및 Phase 0 감사 결과 기록
+  - `add_shift_type_color_metadata.sql` 수동 적용 후 신규 서버 배포/API 검증
+  - 모든 인스턴스 교체 확인 후 `backfill_shift_type_color_metadata.sql` 수동 적용 및 결과 기록
 
 ### [DONE] ts-node 개발 실행의 Express Request 타입 확장 로딩 수정
 

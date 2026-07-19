@@ -215,6 +215,8 @@ export async function getShiftTypes(user_id: string): Promise<{
     code: string;
     name: string;
     color: string | null;
+    base_color: string | null;
+    color_intensity: number;
     sort_order: number | null;
     start_time: string | null;
     end_time: string | null;
@@ -268,11 +270,20 @@ export async function getShiftTypes(user_id: string): Promise<{
   const result = shift_types.map((st) => {
     const schedules = (st as any).schedules as ShiftTypeSchedule[] | undefined;
     const schedule = schedules?.[0]; // 최대 1개
+    const color = formatShiftTypeColor(st.color);
+    const has_base_color =
+      st.base_color !== null && st.base_color !== undefined;
     return {
       shift_type_id: st.shift_type_id,
       code: st.code,
       name: st.name,
-      color: formatShiftTypeColor(st.color),
+      color,
+      base_color: has_base_color
+        ? formatShiftTypeColor(st.base_color)
+        : color,
+      color_intensity: has_base_color
+        ? st.color_intensity ?? 100
+        : 100,
       sort_order: st.sort_order ?? null,
       start_time: formatDbTime(schedule?.start_time),
       end_time: formatDbTime(schedule?.end_time),

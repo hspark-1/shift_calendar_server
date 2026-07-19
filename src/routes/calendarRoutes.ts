@@ -217,6 +217,14 @@ router.post(
       .optional({ nullable: true })
       .matches(/^#[0-9A-Fa-f]{8}$/)
       .withMessage("색상은 #AARRGGBB 형식이어야 합니다."),
+    body("base_color")
+      .optional()
+      .matches(/^#FF[0-9A-F]{6}$/i)
+      .withMessage("기준 색상은 #FFRRGGBB 형식이어야 합니다."),
+    body("color_intensity")
+      .optional()
+      .custom((value) => Number.isInteger(value) && value >= 0 && value <= 100)
+      .withMessage("색상 농도는 0 이상 100 이하의 정수여야 합니다."),
     body("start_time")
       .optional({ nullable: true, checkFalsy: true })
       .custom((value) => {
@@ -262,6 +270,14 @@ router.put(
       .optional({ nullable: true })
       .matches(/^#[0-9A-Fa-f]{8}$/)
       .withMessage("색상은 #AARRGGBB 형식이어야 합니다."),
+    body("base_color")
+      .optional()
+      .matches(/^#FF[0-9A-F]{6}$/i)
+      .withMessage("기준 색상은 #FFRRGGBB 형식이어야 합니다."),
+    body("color_intensity")
+      .optional()
+      .custom((value) => Number.isInteger(value) && value >= 0 && value <= 100)
+      .withMessage("색상 농도는 0 이상 100 이하의 정수여야 합니다."),
     body("start_time")
       .optional({ nullable: true, checkFalsy: true })
       .custom((value) => {

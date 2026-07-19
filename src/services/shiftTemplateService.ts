@@ -67,6 +67,19 @@ const DEFAULT_SHIFT_TYPES: DefaultShiftTypeInfo[] = [
 const DEFAULT_TEMPLATE_NAME = "기본 3교대";
 const MAX_SHIFT_TYPES_PER_TEMPLATE = 10;
 
+interface ShiftTypeColorInput {
+  color?: number | string | null;
+  base_color?: string | null;
+  color_intensity?: number;
+}
+
+interface ResolvedShiftTypeColor {
+  has_update: boolean;
+  color: string | null;
+  base_color: string | null;
+  color_intensity: number;
+}
+
 /**
  * 숫자 색상 값을 16진수 문자열로 변환
  * @param color 숫자 색상 값 (예: 0xFFF5A623)
@@ -140,6 +153,139 @@ export function normalizeColor(
   throw new Error("INVALID_COLOR_TYPE");
 }
 
+function normalizeRequestedColor(
+  color: number | string | null | undefined
+): string | null {
+  try {
+    return normalizeColor(color);
+  } catch (error: any) {
+    if (
+      error.message === "INVALID_COLOR_FORMAT" ||
+      error.message === "INVALID_COLOR_TYPE"
+    ) {
+      throw new Error("INVALID_COLOR_FORMAT");
+    }
+    throw error;
+  }
+}
+
+function normalizeBaseColor(base_color: string | null | undefined): string {
+  if (
+    typeof base_color !== "string" ||
+    !/^#FF[0-9A-F]{6}$/i.test(base_color)
+  ) {
+    throw new Error("INVALID_BASE_COLOR_FORMAT");
+  }
+
+  return base_color.toUpperCase();
+}
+
+function validateColorIntensity(color_intensity: number | undefined): number {
+  if (
+    !Number.isInteger(color_intensity) ||
+    color_intensity === undefined ||
+    color_intensity < 0 ||
+    color_intensity > 100
+  ) {
+    throw new Error("INVALID_COLOR_INTENSITY");
+  }
+
+  return color_intensity;
+}
+
+export function calculateColorFromMetadata(
+  base_color: string,
+  color_intensity: number
+): string {
+  const normalized_base_color = normalizeBaseColor(base_color);
+  const normalized_color_intensity =
+    validateColorIntensity(color_intensity);
+  const red = Number.parseInt(normalized_base_color.slice(3, 5), 16);
+  const green = Number.parseInt(normalized_base_color.slice(5, 7), 16);
+  const blue = Number.parseInt(normalized_base_color.slice(7, 9), 16);
+
+  const mix_channel = (channel: number) =>
+    Math.round(
+      255 + ((channel - 255) * normalized_color_intensity) / 100
+    );
+  const to_hex = (channel: number) =>
+    channel.toString(16).toUpperCase().padStart(2, "0");
+
+  return `#FF${to_hex(mix_channel(red))}${to_hex(
+    mix_channel(green)
+  )}${to_hex(mix_channel(blue))}`;
+}
+
+export function resolveShiftTypeColor(
+  data: ShiftTypeColorInput
+): ResolvedShiftTypeColor {
+  const has_color = data.color !== undefined;
+  const has_base_color = data.base_color !== undefined;
+  const has_color_intensity = data.color_intensity !== undefined;
+
+  if (has_base_color !== has_color_intensity) {
+    throw new Error("INVALID_COLOR_METADATA");
+  }
+
+  if (has_base_color && has_color_intensity) {
+    const base_color = normalizeBaseColor(data.base_color);
+    const color_intensity = validateColorIntensity(data.color_intensity);
+    const color = calculateColorFromMetadata(base_color, color_intensity);
+
+    if (has_color) {
+      const requested_color = normalizeRequestedColor(data.color);
+      if (requested_color !== color) {
+        throw new Error("COLOR_METADATA_MISMATCH");
+      }
+    }
+
+    return {
+      has_update: true,
+      color,
+      base_color,
+      color_intensity,
+    };
+  }
+
+  if (has_color) {
+    const color = normalizeRequestedColor(data.color);
+    return {
+      has_update: true,
+      color,
+      base_color: color,
+      color_intensity: 100,
+    };
+  }
+
+  return {
+    has_update: false,
+    color: null,
+    base_color: null,
+    color_intensity: 100,
+  };
+}
+
+function getShiftTypeColorMetadata(shift_type: ShiftType): {
+  color: string | null;
+  base_color: string | null;
+  color_intensity: number;
+} {
+  const color = normalizeRequestedColor(shift_type.color);
+  const base_color =
+    shift_type.base_color === null || shift_type.base_color === undefined
+      ? color
+      : normalizeRequestedColor(shift_type.base_color);
+
+  return {
+    color,
+    base_color,
+    color_intensity:
+      shift_type.base_color === null || shift_type.base_color === undefined
+        ? 100
+        : shift_type.color_intensity ?? 100,
+  };
+}
+
 /**
  * 새 사용자를 위한 기본 근무 템플릿 생성
  * @param user_id 사용자 UUID
@@ -178,12 +324,15 @@ export async function createDefaultShiftTemplate(
     // 3. 근무 타입들 생성
     const shift_types: ShiftType[] = [];
     for (const type_info of DEFAULT_SHIFT_TYPES) {
+      const color = colorNumberToString(type_info.color);
       const shift_type = await ShiftType.create(
         {
           template_id: template.template_id,
           code: type_info.code,
           name: type_info.name,
-          color: colorNumberToString(type_info.color),
+          color,
+          base_color: color,
+          color_intensity: 100,
           sort_order: type_info.sort_order,
         },
         { transaction }
@@ -428,6 +577,8 @@ export async function createShiftType(
     code: string;
     name: string;
     color?: number | string | null;
+    base_color?: string | null;
+    color_intensity?: number;
     start_time?: string | null;
     end_time?: string | null;
     sort_order?: number | null;
@@ -437,6 +588,8 @@ export async function createShiftType(
   code: string;
   name: string;
   color: string | null;
+  base_color: string | null;
+  color_intensity: number;
   sort_order: number | null;
   start_time: string | null;
   end_time: string | null;
@@ -445,11 +598,8 @@ export async function createShiftType(
   created_at: Date;
 }> {
   return sequelize.transaction(async (transaction) => {
-    // 색상 값 정규화
-    let normalized_color: string | null = null;
-    if (data.color !== null && data.color !== undefined) {
-      normalized_color = normalizeColor(data.color);
-    }
+    const color_metadata = resolveShiftTypeColor(data);
+
     // 1. 현재 사용자의 활성 템플릿 조회
     const template = await ShiftTemplate.findOne({
       where: {
@@ -496,7 +646,9 @@ export async function createShiftType(
         template_id: template.template_id,
         code: data.code,
         name: data.name,
-        color: normalized_color,
+        color: color_metadata.color,
+        base_color: color_metadata.base_color,
+        color_intensity: color_metadata.color_intensity,
         sort_order: sort_order,
       },
       { transaction }
@@ -534,11 +686,15 @@ export async function createShiftType(
       { transaction }
     );
 
+    const saved_color_metadata = getShiftTypeColorMetadata(shift_type);
+
     return {
       shift_type_id: shift_type.shift_type_id,
       code: shift_type.code,
       name: shift_type.name,
-      color: shift_type.color ?? null,
+      color: saved_color_metadata.color,
+      base_color: saved_color_metadata.base_color,
+      color_intensity: saved_color_metadata.color_intensity,
       sort_order: shift_type.sort_order ?? null,
       start_time: start_time,
       end_time: end_time,
@@ -559,6 +715,8 @@ export async function updateShiftType(
     code?: string;
     name?: string;
     color?: number | string | null;
+    base_color?: string | null;
+    color_intensity?: number;
     start_time?: string | null;
     end_time?: string | null;
     sort_order?: number | null;
@@ -568,6 +726,8 @@ export async function updateShiftType(
   code: string;
   name: string;
   color: string | null;
+  base_color: string | null;
+  color_intensity: number;
   sort_order: number | null;
   start_time: string | null;
   end_time: string | null;
@@ -576,12 +736,8 @@ export async function updateShiftType(
   updated_at: Date;
 }> {
   return sequelize.transaction(async (transaction) => {
-    // 색상 값 정규화 (제공된 경우에만)
-    let normalized_color: string | null | undefined = undefined;
-    if (data.color !== undefined) {
-      normalized_color =
-        data.color === null ? null : normalizeColor(data.color);
-    }
+    const color_metadata = resolveShiftTypeColor(data);
+
     // 1. 근무 타입 조회 및 소유권 확인
     const shift_type = await ShiftType.findOne({
       where: {
@@ -614,8 +770,10 @@ export async function updateShiftType(
     if (data.name !== undefined) {
       shift_type.name = data.name;
     }
-    if (normalized_color !== undefined) {
-      shift_type.color = normalized_color;
+    if (color_metadata.has_update) {
+      shift_type.color = color_metadata.color;
+      shift_type.base_color = color_metadata.base_color;
+      shift_type.color_intensity = color_metadata.color_intensity;
     }
     if (data.sort_order !== undefined) {
       shift_type.sort_order = data.sort_order;
@@ -718,11 +876,15 @@ export async function updateShiftType(
       }
     }
 
+    const saved_color_metadata = getShiftTypeColorMetadata(shift_type);
+
     return {
       shift_type_id: shift_type.shift_type_id,
       code: shift_type.code,
       name: shift_type.name,
-      color: shift_type.color ?? null,
+      color: saved_color_metadata.color,
+      base_color: saved_color_metadata.base_color,
+      color_intensity: saved_color_metadata.color_intensity,
       sort_order: shift_type.sort_order ?? null,
       start_time: start_time,
       end_time: end_time,

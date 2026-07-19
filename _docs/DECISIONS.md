@@ -871,3 +871,64 @@ Intel N100 홈서버에서 동일 Express 인스턴스를 3개 실행하려면 �
 - Sequelize 7 전환 또는 Sequelize 6의 uuid 의존성 상향 시 override 제거 검토
 - 이미지 전송 전 digest와 파일 크기 기록
 - 홈서버에서 amd64 네이티브 실행, DB 연결, 메모리 사용량 재검증
+
+---
+
+## ADR-0018: 근무 타입 최종 색상과 기준 색상·농도 분리 저장
+
+### 배경(문제)
+
+Flutter 색상 선택기는 기준 색상을 흰색과 혼합해 농도가 적용된 최종 색상을 만듭니다. 기존 `shift_types.color`에는 최종 색상만 저장되어 같은 설정 화면에 다시 진입할 때 원래 기준 색상과 농도를 정확히 복원할 수 없습니다. 최종 색상 하나는 여러 기준 색상·농도 조합으로 만들 수 있어 역산도 안전하지 않습니다.
+
+### 선택지(대안)
+
+1. 기존 최종 `color`를 유지하고 `base_color`, 정수 `color_intensity`를 추가
+2. 최종 `color`를 제거하고 조회마다 기준 색상과 농도로 계산
+3. 기존 최종 `color`만 유지하고 클라이언트에서 근사 역산
+4. 농도를 부동소수점 `0..1`로 저장
+
+### 결정(무엇을 선택)
+
+**최종 렌더링 색상 `color`를 유지하고 `base_color`, `color_intensity(0..100)`를 함께 저장**합니다.
+
+- 신규 기준 색상은 불투명 `#FFRRGGBB`만 허용
+- 최종 색상은 불투명 흰색 `#FFFFFFFF` 기준 채널별 선형 혼합으로 서버가 계산
+- 구버전 `color` 단독 쓰기와 레거시 행은 `base_color=color`, `color_intensity=100`으로 해석
+- 신규 필드 중 하나만 전달하거나 클라이언트 최종 색상이 서버 계산값과 다르면 요청 거절
+- DB 변경은 nullable 컬럼 확장 → 신규 서버 dual-read/dual-write 배포 → 백필·제약 적용 순서로 수행
+
+### 근거(왜)
+
+- 기존 Flutter와 캘린더/친구 캘린더의 `shift_type_color` 계약을 깨지 않음
+- 설정 화면은 기준 색상과 농도를 손실 없이 복원 가능
+- 정수 퍼센트는 UI 표시 단위와 일치하고 JSON/DB 부동소수점 오차가 없음
+- 최종 색상을 서버에서 계산해 세 필드 불일치를 방지
+- 확장/백필 분리로 구버전 서버 롤백 기간에도 기존 `color` 쓰기가 실패하지 않음
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 색상 설정 화면 재진입 시 기준 색상과 농도 복원
+- 기존 앱과 캘린더 표시 API의 하위 호환 유지
+- DB CHECK로 농도 범위와 백필 이후 기준 색상 형식 보장
+
+**트레이드오프**:
+
+- 동일한 색상 의미를 세 컬럼으로 저장하므로 서버의 원자적 갱신 규칙이 필요
+- DB 마이그레이션과 서버 배포 순서를 지켜야 함
+- 서버 롤백 기간에는 `base_color`를 nullable로 유지해야 하므로 DB만으로 세 컬럼의 완전한 쌍 제약을 강제하지 않음
+
+### 구현 위치
+
+- **모델**: `src/models/ShiftType.ts`
+- **요청 검증**: `src/routes/calendarRoutes.ts`
+- **오류 매핑**: `src/controllers/calendarController.ts`
+- **계산·저장**: `src/services/shiftTemplateService.ts`
+- **목록 fallback**: `src/services/calendarService.ts`
+- **수동 migration**: `migrations/add_shift_type_color_metadata.sql`, `migrations/backfill_shift_type_color_metadata.sql`
+
+### 추후 과제(언제 다시 평가)
+
+- 구버전 서버 롤백 기간 종료 후 `color`와 `base_color`의 쌍 제약 강화 여부 검토
+- 테마 색상 혼합 기준 변경 요구가 생기면 고정 흰색 계산 계약과 데이터 migration 재평가

@@ -19,7 +19,7 @@ function getCreateEventValidationError(errors: any[]): {
   message: string;
 } {
   const error_paths = new Set(
-    errors.map((error) => getValidationErrorPath(error))
+    errors.map((error) => getValidationErrorPath(error)),
   );
 
   if (error_paths.has("title")) {
@@ -49,13 +49,77 @@ function getCreateEventValidationError(errors: any[]): {
   };
 }
 
+function getShiftTypeValidationError(errors: any[]): {
+  code: string;
+  message: string;
+} {
+  const error_paths = new Set(
+    errors.map((error) => getValidationErrorPath(error)),
+  );
+
+  if (error_paths.has("base_color")) {
+    return {
+      code: "INVALID_BASE_COLOR_FORMAT",
+      message:
+        "기준 색상 형식이 올바르지 않습니다. #FFRRGGBB 형식을 사용하세요.",
+    };
+  }
+
+  if (error_paths.has("color_intensity")) {
+    return {
+      code: "INVALID_COLOR_INTENSITY",
+      message: "색상 농도는 0 이상 100 이하의 정수여야 합니다.",
+    };
+  }
+
+  if (error_paths.has("color")) {
+    return {
+      code: "INVALID_COLOR_FORMAT",
+      message: "색상 형식이 올바르지 않습니다. #AARRGGBB 형식을 사용하세요.",
+    };
+  }
+
+  return {
+    code: "VALIDATION_ERROR",
+    message: "입력값 검증에 실패했습니다.",
+  };
+}
+
+function sendShiftTypeColorError(res: Response, error_code: string): boolean {
+  const error_messages: Record<string, string> = {
+    INVALID_COLOR_FORMAT:
+      "색상 형식이 올바르지 않습니다. #AARRGGBB 형식을 사용하세요.",
+    INVALID_BASE_COLOR_FORMAT:
+      "기준 색상 형식이 올바르지 않습니다. #FFRRGGBB 형식을 사용하세요.",
+    INVALID_COLOR_INTENSITY: "색상 농도는 0 이상 100 이하의 정수여야 합니다.",
+    INVALID_COLOR_METADATA:
+      "base_color와 color_intensity는 함께 전달해야 합니다.",
+    COLOR_METADATA_MISMATCH:
+      "전달된 color가 기준 색상과 농도로 계산한 결과와 일치하지 않습니다.",
+  };
+  const message = error_messages[error_code];
+
+  if (!message) {
+    return false;
+  }
+
+  res.status(400).json({
+    success: false,
+    error: {
+      code: error_code,
+      message,
+    },
+  });
+  return true;
+}
+
 /**
  * 근무 타입 정보 조회
  * GET /api/v1/shift-types
  */
 export async function getShiftTypes(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -93,7 +157,7 @@ export async function getShiftTypes(
  */
 export async function getWorkShifts(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -148,7 +212,7 @@ export async function getWorkShifts(
     const work_shifts = await calendarService.getWorkShifts(
       user_id,
       start_date,
-      end_date
+      end_date,
     );
 
     res.json({
@@ -175,7 +239,7 @@ export async function getWorkShifts(
  */
 export async function getDaySchedule(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -229,7 +293,7 @@ export async function getDaySchedule(
  */
 export async function getEvents(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -284,7 +348,7 @@ export async function getEvents(
     const events = await calendarService.getEvents(
       user_id,
       start_date,
-      end_date
+      end_date,
     );
 
     res.json({
@@ -311,7 +375,7 @@ export async function getEvents(
  */
 export async function createEvent(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const errors = validationResult(req);
@@ -384,7 +448,7 @@ export async function createEvent(
  */
 export async function deleteEvent(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -426,7 +490,7 @@ export async function deleteEvent(
  */
 export async function getCalendarRange(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -481,7 +545,7 @@ export async function getCalendarRange(
     const result = await calendarService.getCalendarRange(
       user_id,
       start_date,
-      end_date
+      end_date,
     );
 
     res.json({
@@ -506,7 +570,7 @@ export async function getCalendarRange(
  */
 export async function upsertWorkShift(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const errors = validationResult(req);
@@ -540,13 +604,13 @@ export async function upsertWorkShift(
       user_id,
       work_date,
       shift_type_code,
-      note
+      note,
     );
 
     const work_shift_with_details =
       await calendarService.getWorkShiftApiModelById(
         user_id,
-        work_shift.work_shift_id
+        work_shift.work_shift_id,
       );
 
     if (!work_shift_with_details) {
@@ -612,7 +676,7 @@ export async function upsertWorkShift(
  */
 export async function updateWorkShift(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const errors = validationResult(req);
@@ -636,13 +700,13 @@ export async function updateWorkShift(
       user_id,
       work_shift_id,
       shift_type_code,
-      note
+      note,
     );
 
     const work_shift_with_details =
       await calendarService.getWorkShiftApiModelById(
         user_id,
-        work_shift.work_shift_id
+        work_shift.work_shift_id,
       );
 
     if (!work_shift_with_details) {
@@ -718,7 +782,7 @@ export async function updateWorkShift(
  */
 export async function deleteWorkShift(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -760,7 +824,7 @@ export async function deleteWorkShift(
  */
 export async function batchUpsertWorkShifts(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -831,7 +895,7 @@ export async function batchUpsertWorkShifts(
     // 3. 서비스 호출
     const saved_work_shifts = await calendarService.batchUpsertWorkShifts(
       user_id,
-      work_shifts
+      work_shifts,
     );
 
     // 4. 성공 응답
@@ -968,7 +1032,7 @@ export async function batchUpsertWorkShifts(
  */
 export async function getCurrentTemplate(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -1007,7 +1071,7 @@ export async function getCurrentTemplate(
  */
 export async function updateCurrentTemplate(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const errors = validationResult(req);
@@ -1074,29 +1138,38 @@ export async function updateCurrentTemplate(
  */
 export async function createShiftType(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const validation_error = getShiftTypeValidationError(errors.array());
       res.status(400).json({
         success: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "입력값 검증에 실패했습니다.",
-        },
+        error: validation_error,
         errors: errors.array(),
       });
       return;
     }
 
     const user_id = req.user!.user_id;
-    const { code, name, color, start_time, end_time, sort_order } = req.body;
+    const {
+      code,
+      name,
+      color,
+      base_color,
+      color_intensity,
+      start_time,
+      end_time,
+      sort_order,
+    } = req.body;
 
     const result = await shiftTemplateService.createShiftType(user_id, {
       code,
       name,
-      color: color ?? null,
+      color,
+      base_color,
+      color_intensity,
       start_time: start_time ?? null,
       end_time: end_time ?? null,
       sort_order: sort_order ?? null,
@@ -1128,17 +1201,7 @@ export async function createShiftType(
       });
       return;
     }
-    if (
-      error.message === "INVALID_COLOR_FORMAT" ||
-      error.message === "INVALID_COLOR_TYPE"
-    ) {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: "INVALID_COLOR_FORMAT",
-          message: "색상 형식이 올바르지 않습니다. #AARRGGBB 형식을 사용하세요.",
-        },
-      });
+    if (sendShiftTypeColorError(res, error.message)) {
       return;
     }
     // DB unique constraint 위반 (마이그레이션 미적용 시 발생 가능)
@@ -1168,17 +1231,15 @@ export async function createShiftType(
  */
 export async function updateShiftType(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const validation_error = getShiftTypeValidationError(errors.array());
       res.status(400).json({
         success: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "입력값 검증에 실패했습니다.",
-        },
+        error: validation_error,
         errors: errors.array(),
       });
       return;
@@ -1186,7 +1247,16 @@ export async function updateShiftType(
 
     const user_id = req.user!.user_id;
     const { shift_type_id } = req.params;
-    const { code, name, color, start_time, end_time, sort_order } = req.body;
+    const {
+      code,
+      name,
+      color,
+      base_color,
+      color_intensity,
+      start_time,
+      end_time,
+      sort_order,
+    } = req.body;
 
     const result = await shiftTemplateService.updateShiftType(
       user_id,
@@ -1195,10 +1265,13 @@ export async function updateShiftType(
         code: code !== undefined ? code : undefined,
         name,
         color: color !== undefined ? color : undefined,
+        base_color: base_color !== undefined ? base_color : undefined,
+        color_intensity:
+          color_intensity !== undefined ? color_intensity : undefined,
         start_time: start_time !== undefined ? start_time : undefined,
         end_time: end_time !== undefined ? end_time : undefined,
         sort_order: sort_order !== undefined ? sort_order : undefined,
-      }
+      },
     );
 
     res.json({
@@ -1227,17 +1300,7 @@ export async function updateShiftType(
       });
       return;
     }
-    if (
-      error.message === "INVALID_COLOR_FORMAT" ||
-      error.message === "INVALID_COLOR_TYPE"
-    ) {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: "INVALID_COLOR_FORMAT",
-          message: "색상 형식이 올바르지 않습니다. #AARRGGBB 형식을 사용하세요.",
-        },
-      });
+    if (sendShiftTypeColorError(res, error.message)) {
       return;
     }
     if (error.message === "TEMPLATE_NOT_FOUND") {
@@ -1266,7 +1329,7 @@ export async function updateShiftType(
  */
 export async function deleteShiftType(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const user_id = req.user!.user_id;
@@ -1274,7 +1337,7 @@ export async function deleteShiftType(
 
     const result = await shiftTemplateService.deleteShiftType(
       user_id,
-      shift_type_id
+      shift_type_id,
     );
 
     res.json({
