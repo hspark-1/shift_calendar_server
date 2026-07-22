@@ -10,6 +10,7 @@ import {
 import { NotificationAction, NotificationType } from "../models/Notification";
 import { logError } from "../utils/logger";
 import { normalizePhoneNumber } from "../utils/phone";
+import { getWorkShifts } from "./calendarService";
 
 // ============================================================
 // 에러 코드 상수
@@ -94,8 +95,8 @@ export interface FriendCalendarWorkShift {
   start_time: string | null;
   end_time: string | null;
   note: string | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface FriendCalendarEvent {
@@ -125,66 +126,6 @@ function isValidDateString(date: string): boolean {
   }
 
   return parsed_date.toISOString().slice(0, 10) === date;
-}
-
-function formatDbDate(date: string | Date): string {
-  return date instanceof Date ? date.toISOString().slice(0, 10) : String(date);
-}
-
-function formatDbTime(time: string | null): string | null {
-  if (!time) {
-    return null;
-  }
-
-  const trimmed_time = String(time).trim();
-  if (/^\d{2}:\d{2}$/.test(trimmed_time)) {
-    return `${trimmed_time}:00`;
-  }
-
-  if (/^\d{2}:\d{2}:\d{2}/.test(trimmed_time)) {
-    return trimmed_time.slice(0, 8);
-  }
-
-  return trimmed_time;
-}
-
-function colorNumberToArgbString(color: number): string {
-  const unsigned_color = color >>> 0;
-  return `#${unsigned_color.toString(16).toUpperCase().padStart(8, "0")}`;
-}
-
-function formatShiftTypeColor(color: string | number | null): string | null {
-  if (color === null || color === undefined) {
-    return null;
-  }
-
-  if (typeof color === "number") {
-    return colorNumberToArgbString(color);
-  }
-
-  const trimmed_color = color.trim();
-  if (!trimmed_color) {
-    return null;
-  }
-
-  let hex_color = trimmed_color.toUpperCase();
-  if (hex_color.startsWith("#")) {
-    hex_color = hex_color.slice(1);
-  }
-
-  if (/^[0-9A-F]{6}$/.test(hex_color)) {
-    return `#FF${hex_color}`;
-  }
-
-  if (/^[0-9A-F]{8}$/.test(hex_color)) {
-    return `#${hex_color}`;
-  }
-
-  if (/^\d+$/.test(trimmed_color)) {
-    return colorNumberToArgbString(Number(trimmed_color));
-  }
-
-  return null;
 }
 
 export function getUserSearchField(query: string): UserSearchField | null {
@@ -302,34 +243,7 @@ export async function getFriendCalendarRange(
   }
 
   const [work_shifts, events] = await Promise.all([
-    sequelize.query<FriendCalendarWorkShift & { work_date: string | Date }>(
-      `
-      SELECT
-        ws.work_shift_id,
-        ws.work_date,
-        st.code AS shift_type_code,
-        st.name AS shift_type_name,
-        st.color AS shift_type_color,
-        sts.start_time,
-        sts.end_time,
-        ws.note,
-        ws.created_at,
-        ws.updated_at
-      FROM v_visible_work_shifts_for_friend ws
-      JOIN shift_type_schedules sts
-        ON sts.schedule_id = ws.schedule_id
-      JOIN shift_types st
-        ON st.shift_type_id = sts.shift_type_id
-      WHERE ws.owner_user_id = :friend_user_id
-        AND ws.viewer_user_id = :viewer_user_id
-        AND ws.work_date BETWEEN CAST(:start_date AS date) AND CAST(:end_date AS date)
-      ORDER BY ws.work_date ASC
-      `,
-      {
-        replacements: { friend_user_id, viewer_user_id, start_date, end_date },
-        type: QueryTypes.SELECT,
-      }
-    ),
+    getWorkShifts(friend_user_id, start_date, end_date),
     sequelize.query<FriendCalendarEvent>(
       `
       SELECT
@@ -356,14 +270,7 @@ export async function getFriendCalendarRange(
   ]);
 
   return {
-    work_shifts: work_shifts.map((work_shift) => ({
-      ...work_shift,
-      work_date: formatDbDate(work_shift.work_date),
-      start_time: formatDbTime(work_shift.start_time),
-      end_time: formatDbTime(work_shift.end_time),
-      note: work_shift.note ?? null,
-      shift_type_color: formatShiftTypeColor(work_shift.shift_type_color),
-    })),
+    work_shifts,
     events,
   };
 }

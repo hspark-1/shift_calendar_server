@@ -15,6 +15,8 @@ export { default as ShiftTypeSchedule } from "./ShiftTypeSchedule";
 // 근무표 및 일정
 export { default as WorkShift } from "./WorkShift";
 export { default as Event } from "./Event";
+export { default as WorkShiftMonthState } from "./WorkShiftMonthState";
+export { default as WorkShiftCacheOutbox } from "./WorkShiftCacheOutbox";
 
 // 인증 관련
 export { default as RefreshToken } from "./RefreshToken";

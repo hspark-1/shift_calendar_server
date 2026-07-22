@@ -4,6 +4,7 @@ import scheduleRoutes from "./scheduleRoutes";
 import calendarRoutes from "./calendarRoutes";
 import friendRoutes from "./friendRoutes";
 import { checkDatabaseConnection } from "../config/database";
+import { checkRedisConnection } from "../config/redis";
 
 const router = Router();
 
@@ -27,10 +28,12 @@ v1_router.get("/health/live", sendLivenessResponse);
 v1_router.get("/health/ready", async (_req, res) => {
   try {
     await checkDatabaseConnection();
+    const cache = await checkRedisConnection();
     res.json({
       success: true,
       message: "Server and database are ready",
       version: "v1",
+      cache,
       timestamp: new Date().toISOString(),
     });
   } catch {

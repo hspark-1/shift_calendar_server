@@ -14,6 +14,7 @@ import { requestContextMiddleware } from "./middlewares/requestContext";
 import routes from "./routes";
 import { errorHandler } from "./middlewares/errorHandler";
 import { logError } from "./utils/logger";
+import { disconnectRedis } from "./config/redis";
 
 const app = express();
 const port = getPositiveIntegerEnvironmentVariable("PORT", 3000);
@@ -92,7 +93,7 @@ const corsOptions = {
     "Accept",
     "Origin",
   ],
-  exposedHeaders: ["Authorization"], // 클라이언트에서 읽을 수 있는 헤더
+  exposedHeaders: ["Authorization", "ETag"], // 클라이언트에서 읽을 수 있는 헤더
   maxAge: 86400, // preflight 요청 캐시 시간 (24시간)
 };
 
@@ -189,6 +190,7 @@ async function shutdownServer(signal: string): Promise<void> {
         });
       });
     }
+    await disconnectRedis();
     await disconnectDatabase();
     clearTimeout(force_shutdown_timer);
     console.log("✅ 서버와 데이터베이스 연결을 정상 종료했습니다.");

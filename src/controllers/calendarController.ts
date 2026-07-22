@@ -4,6 +4,7 @@ import { User } from "../models";
 import * as calendarService from "../services/calendarService";
 import * as shiftTemplateService from "../services/shiftTemplateService";
 import { logError } from "../utils/logger";
+import { createWorkShiftEtag } from "../services/workShiftMonthCacheService";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -209,16 +210,28 @@ export async function getWorkShifts(
       return;
     }
 
-    const work_shifts = await calendarService.getWorkShifts(
+    const result = await calendarService.getWorkShiftsWithCacheMetadata(
       user_id,
       start_date,
       end_date,
     );
+    const etag = createWorkShiftEtag(
+      user_id,
+      start_date,
+      end_date,
+      result.revisions,
+    );
+    res.setHeader("Cache-Control", "private, no-cache");
+    res.setHeader("ETag", etag);
+    if (req.headers["if-none-match"] === etag) {
+      res.status(304).end();
+      return;
+    }
 
     res.json({
       success: true,
       data: {
-        work_shifts,
+        work_shifts: result.work_shifts,
       },
     });
   } catch (error: any) {
