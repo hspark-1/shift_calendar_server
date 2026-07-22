@@ -1,5 +1,207 @@
 # 작업 일지
 
+## 2026-07-22
+
+### [DONE] 공유 Redis 캐시 완료 감사 및 경쟁 조건 검증 보강
+
+- **목적**: 승인된 구현 계획의 각 요구사항을 현재 코드와 직접 대응시키고, 기존 테스트가 간접적으로만 검증한 다월/트랜잭션/권한/동시 worker 경로를 재현해 완료 근거 강화
+- **변경**:
+  - Redis Lua read/write/invalidate에서 손상된 snapshot revision과 비숫자 fence를 안전하게 거부·복구
+  - Sequelize `readOnly`가 실제 PostgreSQL 쓰기를 막지 않는 동작을 확인하고 월 DB 로드에 `SET TRANSACTION READ ONLY`를 명시해 `REPEATABLE READ`와 함께 적용
+  - 다월 병합·기간 필터, 공통 calendar range/day cache hit, 단건/배치 rollback, 자정 넘김, stampede lock, 실제 read/write 경합, 친구 삭제, ETag, Redis 복구, worker 동시 claim·60초 재시도·7일 정리 테스트 추가
+  - 배포 순서·통합 rollback 정적 테스트를 추가하고 API 전환 판단을 PostgreSQL readiness로 변경
+  - 1회 bootstrap은 기존 이미지에 없는 worker를 시작하지 않고, 첫 캐시 코드 자동 배포부터 API와 같은 digest의 worker를 시작하도록 스크립트·가이드 정합성 교정
+- **영향범위**: 월별 근무표 캐시와 Outbox worker의 경계 조건, API readiness 기반 배포 판단, CI 회귀 테스트와 운영 문서
+- **파일**: `src/services/workShiftMonthCacheService.ts`, `test/cacheIntegration.test.cjs`, `test/deploymentCacheRollout.test.cjs`, `deploy/shiftmate-deploy`, `deploy/shiftmate-bootstrap`, `_docs/PROJECT_CONTEXT.md`, 루트/정본 배포 가이드
+- **테스트**:
+  - `npm test`: TypeScript build, 단위·배포 정적 테스트 9건 성공(통합 테스트 진입점 1건은 의도대로 skip)
+  - 격리 PostgreSQL 16/Redis 7.4 `npm run test:integration`: 23건 전부 성공
+  - expand migration은 soft delete 포함 월 백필과 재실행 멱등성을 확인했고, 최종 스키마 SQL 전체 적용 성공
+  - Center Blue/Green Compose 9개 서비스 해석, 배포/bootstrap Bash 문법, workflow YAML, 루트/정본 가이드 byte 일치 성공
+  - 최종 Docker image build와 worker PostgreSQL·Redis health 성공; API readiness는 Redis 정상 `ready`, Redis 장애 `degraded` 모두 PostgreSQL 기준 200 확인
+  - `git diff --check` 성공
+- **롤백**: 이번 감사의 Lua 방어·PostgreSQL read-only·readiness 변경과 추가 테스트/문서를 이전 상태로 복원. 기능 전체 롤백은 아래 캐시 구현 항목의 절차를 사용
+
+### [DONE] 공유 Redis 기반 월별 근무표 캐시 구현
+
+- **목적**: 다중 API 인스턴스에서 본인·친구의 월별 근무표 조회를 공유 Redis로 재사용하고, PostgreSQL Outbox로 변경 정합성을 보장해 반복 DB 조회 비용 절감
+- **변경**:
+  - `work_shift_month_states`, `work_shift_cache_outbox` expand migration과 기존 근무표 월별 revision 1 백필 추가
+  - 월 snapshot/빈 달 캐시, 24시간 TTL+jitter, 5초 token lock, revision fence Lua, 손상 schema 제거, DB fallback 구현
+  - 단건/수정/삭제/배치 근무표 변경과 근무 타입 표시값 변경을 업무 데이터·revision·Outbox 단일 transaction으로 통합
+  - 본인/캘린더/친구 근무표 조회를 공통 월 캐시로 통합하고 친구 관계·`can_view`는 매 요청 DB 재검사
+  - `GET /work-shifts` ETag/304와 CORS 노출, readiness `cache=ready|degraded|disabled` 추가
+  - Outbox claim/월 병합/지수 재시도/stale claim 회수/7일 정리 worker 추가
+  - Center 공유 Redis와 색상별 worker, Stage API/worker/Redis 설정, health 및 통합 rollback 배포 절차 반영
+  - ADR-0020, 프로젝트 컨텍스트, 루트/정본 배포 가이드, 최종 DDL, `AGENTS.md`, 두 draw.io 동기화
+- **영향범위**: 근무표/캘린더/친구 캘린더 조회, 근무표·근무 타입 쓰기, DB 스키마, 운영 환경변수, Center/Stage Compose와 CI/CD
+- **파일**:
+  - `src/config/redis.ts`, `src/services/workShiftMonthCacheService.ts`, `src/services/workShiftCacheInvalidationService.ts`
+  - `src/workers/workShiftCacheWorker.ts`, `src/models/WorkShiftMonthState.ts`, `src/models/WorkShiftCacheOutbox.ts`
+  - `migrations/add_work_shift_month_cache_support.sql`, `migrations/final_schema.sql`, `AGENTS.md`, `schema.drawio`, `visibility_flow.drawio`
+  - `deploy/compose.production.yaml`, `deploy/shiftmate-deploy`, `deploy/shiftmate-bootstrap`, `.github/workflows/deploy-production.yml`
+  - `test/workShiftMonthCacheService.test.cjs`, `test/cacheIntegration.test.cjs`, `test/deploymentCacheRollout.test.cjs`, `test/fixtures/cacheIntegrationSchema.sql`
+- **테스트**:
+  - `npm test`: TypeScript build와 단위·배포 정적 테스트 9건 성공
+  - 격리 PostgreSQL 16/Redis 7.4 `npm run test:integration`: cache hit, 다월/read-only transaction/경합/권한/ETag/fallback/worker 포함 23건 성공
+  - 정본 schema 적용 및 expand migration 2회 연속 실행 성공; 실제 운영 DB에는 적용하지 않음
+  - 최종 Docker image build 성공, 캐시 flag `false`/`true` 양쪽 worker PostgreSQL·Redis health 성공
+  - Blue/Green Compose 양 profile 9개 서비스 config, Bash 문법, workflow YAML, draw.io XML, 가이드 일치, Markdown fence, `git diff --check` 성공
+  - `npm audit --audit-level=high`: 취약점 0건
+- **롤백**: `WORK_SHIFT_CACHE_ENABLED=false`로 API/worker 재생성 → worker 중지 → 이전 API image 배포 → 환경별 Redis namespace 폐기. 신규 DB 테이블은 이전 서버와 충돌하지 않으므로 유지하고 백업·별도 승인 후에만 삭제
+- **다음**: DB 백업 후 expand migration 적용 → Redis/worker 준비 → 캐시 비활성 이미지 배포 → Stage 활성화/관찰 → Center 활성화 순서로 운영 rollout
+
+### [DONE] Runner sudoers·Compose profile 검증 교정
+
+- **목적**: 홈서버 sudo가 인자 wildcard/정규식을 지원하지 않는 환경에서도 Runner가 검증된 배포 스크립트만 호출하게 하고, profile 기반 Center 서비스 6개를 문서 명령으로 정확히 검증
+- **변경**:
+  - sudoers 원본에서 지원되지 않는 인자 wildcard를 제거하고 root 소유 배포 스크립트의 엄격한 인자 검증을 보안 경계로 명시
+  - Center Compose 검증·장애 로그 명령에 `blue`, `green` profile 추가
+  - 루트/정본 가이드, 프로젝트 컨텍스트, ADR-0019 동기화
+- **영향범위**: Self-hosted Runner sudo 권한 설치 및 Center Compose 운영 검증
+- **테스트**:
+  - 로컬 `visudo -cf deploy/sudoers/github-runner-shiftmate` 파싱 성공
+  - `--profile blue --profile green config --services`에서 Center 서비스 6개 모두 확인
+  - 배포·bootstrap Bash 문법 및 workflow·Compose YAML 파싱 성공
+  - `DEPLOY_README.md`와 정본 가이드 내용 일치, Markdown code fence 80개 균형 확인
+  - wildcard 레거시 규칙 제거와 대상 파일 `git diff --check` 통과
+- **파일**:
+  - `deploy/sudoers/github-runner-shiftmate`
+  - `DEPLOY_README.md`
+  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **롤백**: sudoers와 가이드·설계 문서를 이전 커밋 상태로 복원
+
+### [DONE] 루트 배포 가이드 최신화
+
+- **목적**: 오래된 `DEPLOY_README.md`를 현재 Stage 1개·Center 3개 동일 이미지 자동 배포 흐름과 배포 전용 저장소 기준으로 교정
+- **변경**:
+  - 배포 저장소, 홈서버 파일 설치, Stage 설정, Center·Stage Nginx upstream, 첫 배포·롤백·장애 대응 절차를 정본 가이드와 동기화
+  - `PROJECT_CONTEXT.md`에 루트 배포 가이드의 역할·의존성·사용 예 기록
+- **영향범위**: 홈서버 CI/CD 작업자가 실행하는 배포 준비 및 검증 명령
+- **테스트**:
+  - `cmp DEPLOY_README.md _docs/CI_CD_DEPLOYMENT_GUIDE.md` 내용 일치 확인
+  - 잘못된 `git push origin main`과 애플리케이션 저장소 Runner URL 제거 확인
+  - Stage 설정 예시, Center·Stage upstream, 배포 전용 저장소 및 총 4개 API 컨테이너 검증 절차 포함 확인
+  - Markdown 코드 fence 78개가 짝수로 닫히고 대상 파일 `git diff --check` 통과
+- **파일**:
+  - `DEPLOY_README.md`
+  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/WORKLOG.md`
+- **롤백**: `DEPLOY_README.md`와 관련 문서 변경을 이전 내용으로 복원
+
+## 2026-07-21
+
+### [DONE] Stage·Center 동일 이미지 통합 자동 배포
+
+- **목적**: GitHub Actions가 한 번 빌드한 불변 GHCR digest를 Stage 1개와 Center 3개에 순차 적용하고 실패 시 두 환경을 이전 상태로 함께 복원
+- **변경**:
+  - 기존 Stage Compose와 애플리케이션 `.env`를 보존하면서 지정 서비스의 image만 덮어쓰는 root 관리 `compose.deploy.yaml` 생성 기능 추가
+  - 실제 Stage Compose 서비스명과 외부 health URL을 홈서버에서 확정하도록 `stage.deploy.env.example` 추가 및 `root:root 600` 검증 적용
+  - 배포 스크립트에 Stage 선배포, 3201 내부 health, Center Blue/Green 연속 배포, 양쪽 외부 health, 통합 rollback 추가
+  - 부분적인 `docker compose up` 실패도 복구하도록 Stage·Center 변경 플래그를 실행 전에 설정
+  - 배포·롤백 workflow timeout과 표시 문구, 홈서버 설치·검증·복구 가이드, 프로젝트 컨텍스트와 ADR-0019 갱신
+- **영향범위**:
+  - Stage 3201 컨테이너 재생성
+  - Center Blue/Green 3개 전환
+  - 운영 및 Stage rollback
+- **테스트**:
+  - `bash -n deploy/shiftmate-deploy`, `bash -n deploy/shiftmate-bootstrap` 성공
+  - Ruby YAML parser로 배포·롤백 workflow와 운영 Compose 파싱 성공
+  - `npm run build` TypeScript 컴파일 성공
+  - `--profile blue --profile green`을 명시한 `docker compose config --quiet`, `config --services`로 Center 6개 서비스 구성 검증 성공
+  - 임시 Stage Compose와 생성형 override 병합 후 최종 image가 지정 GHCR digest인지 확인
+  - Stage/Center 부분 기동, Nginx 전환, 외부 health 실패별 복원 플래그와 실행 순서 정적 검증
+- **파일**:
+  - `.github/workflows/deploy-production.yml`
+  - `.github/workflows/rollback-production.yml`
+  - `deploy/shiftmate-deploy`
+  - `deploy/stage.deploy.env.example`
+  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **롤백**:
+  - 통합 배포 스크립트와 Stage 설정을 이전 커밋으로 복원하고 생성된 Stage override 제거 후 기존 Compose 이미지로 재생성
+- **다음**:
+  - 홈서버에서 Stage 실제 Compose 서비스명과 HTTPS health URL을 확인해 `/opt/shiftmate-stage/.deploy.env`를 설정한 뒤 첫 workflow를 수동 실행
+
+### [DONE] Center·Stage Nginx upstream 이름 분리
+
+- **목적**: 운영 Center Blue/Green과 고정 Stage 프록시가 각각 `shiftmate_center_api_cluster`, `shiftmate_stage_api_cluster`를 사용하도록 Nginx upstream 이름을 명시적으로 분리
+- **변경**:
+  - Center Blue/Green 정적 snippet과 bootstrap/deploy 동적 렌더링을 `shiftmate_center_api_cluster`로 통일
+  - 기존 Stage 3201을 `shiftmate_stage_api_cluster`로 제공하는 고정 `shiftmate-stage-upstream.conf` 추가
+  - 홈서버에서 Center active snippet과 Stage fixed snippet을 각각 설치·include하고 용도별 `proxy_pass`를 사용하는 절차 추가
+  - PROJECT_CONTEXT의 파일 역할·의존성과 ADR-0019의 Nginx 라우팅 계약 갱신
+- **영향범위**:
+  - Nginx Center/Stage upstream 정의
+  - 최초 bootstrap 및 이후 Blue/Green 배포·롤백
+- **테스트**:
+  - `bash -n deploy/shiftmate-bootstrap`, `bash -n deploy/shiftmate-deploy` 성공
+  - 배포 파일에서 레거시 `shiftmate_api_cluster`가 제거되고 Center/Stage 이름만 생성되는 것을 검색으로 확인
+  - `nginx:latest`에서 Blue+Stage, Green+Stage snippet 조합 각각 `nginx -t` 성공
+- **파일**:
+  - `deploy/shiftmate-bootstrap`
+  - `deploy/shiftmate-deploy`
+  - `deploy/nginx/shiftmate-upstream-blue.conf`
+  - `deploy/nginx/shiftmate-upstream-green.conf`
+  - `deploy/nginx/shiftmate-stage-upstream.conf`
+  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **롤백**:
+  - Stage snippet/include를 제거하고 Center upstream 이름과 proxy_pass를 변경 전 이름으로 복원
+- **다음**:
+  - 홈서버 실제 Nginx 설정에서 Center/Stage server block의 `proxy_pass`를 확인한 뒤 가이드 순서로 두 snippet 설치 및 `nginx -t` 수행
+
+### [DONE] 배포 자동화 전용 저장소 분리
+
+- **목적**: GitHub Actions 및 홈서버 Blue/Green 배포 파일을 애플리케이션 저장소와 분리하여 `hspark-1/shift_calendar_server-deploy`의 `main` 브랜치에서 관리
+- **변경**:
+  - `shiftmate-cicd-bundle/repository/`의 GitHub Actions, Compose, Nginx, 서버 스크립트를 저장소 루트 `.github/workflows/`, `deploy/`로 이전
+  - 번들 README를 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`로 이전하고 배포 전용 저장소·원격 기준으로 수정
+  - `.dockerignore`에 `.github`, `deploy`를 추가해 운영 이미지 빌드 컨텍스트에서 자동화 파일 제외
+  - 존재하지 않는 `actions/checkout@v7`, `actions/setup-node@v7`을 공식 현재 major인 `@v6`으로 수정
+  - `PROJECT_CONTEXT.md`에 운영 CI/CD 파일 역할·의존성·사용 예를 추가하고 ADR-0019에 별도 배포 저장소와 Blue/Green 정책 기록
+  - 이전 완료 후 `shiftmate-cicd-bundle/` 디렉터리 제거
+- **영향범위**:
+  - GitHub Actions 배포·롤백
+  - GHCR 이미지 빌드 및 홈서버 Blue/Green 배포
+  - 배포 자동화 문서
+- **파일**:
+  - `.dockerignore`
+  - `.github/workflows/deploy-production.yml`
+  - `.github/workflows/rollback-production.yml`
+  - `deploy/compose.production.yaml`
+  - `deploy/deploy.env.example`
+  - `deploy/shiftmate-bootstrap`
+  - `deploy/shiftmate-deploy`
+  - `deploy/nginx/shiftmate-upstream-blue.conf`
+  - `deploy/nginx/shiftmate-upstream-green.conf`
+  - `deploy/sudoers/github-runner-shiftmate`
+  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `_docs/PROJECT_CONTEXT.md`
+  - `_docs/DECISIONS.md`
+  - `_docs/WORKLOG.md`
+- **테스트**:
+  - 원격 `deploy/main`이 작업 전 `791498a7af689a6275846b0f1e5fd5ad9ce4320d`임을 확인
+  - 공개 GitHub API가 배포 저장소에 404를 반환하고 인증된 `git ls-remote`는 성공하여 Private 원격 접근 상태 확인
+  - GitHub 공식 Action 저장소 기준 `actions/checkout@v6`, `actions/setup-node@v6`, `docker/login-action@v4`, `docker/setup-buildx-action@v4`, `docker/build-push-action@v7` 유효성 확인
+  - `npm run build` 성공
+  - GitHub Actions 2개와 Compose YAML 파싱 성공
+  - `bash -n deploy/shiftmate-bootstrap`, `bash -n deploy/shiftmate-deploy` 성공
+  - `docker compose ... config --quiet` 성공
+  - 배포 스크립트 실행 권한과 `shiftmate-cicd-bundle/` 제거 확인
+- **롤백**:
+  - `deploy/main`을 이번 배포 자동화 커밋의 부모로 되돌리고 필요 시 제거한 번들 구조로 파일 복원
+- **다음**:
+  - GitHub 저장소에서 Private 여부, GHCR Actions access, self-hosted runner label을 확인하고 가이드에 따라 최초 bootstrap 수행
+
 ## 2026-07-20
 
 ### [DONE] 프론트팀용 근무 타입 색상 메타데이터 API 가이드 작성
@@ -752,10 +954,10 @@
 - **요청 형식**:
   ```json
   {
-    "name": "새 이름",           // 선택적
-    "timezone": "Asia/Seoul",    // 선택적
-    "profile_image_url": "...",  // 선택적
-    "phone": "+821012345678"     // 선택적
+    "name": "새 이름", // 선택적
+    "timezone": "Asia/Seoul", // 선택적
+    "profile_image_url": "...", // 선택적
+    "phone": "+821012345678" // 선택적
   }
   ```
 - **응답 형식**:

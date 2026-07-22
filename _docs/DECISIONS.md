@@ -932,3 +932,143 @@ Flutter 색상 선택기는 기준 색상을 흰색과 혼합해 농도가 적�
 
 - 구버전 서버 롤백 기간 종료 후 `color`와 `base_color`의 쌍 제약 강화 여부 검토
 - 테마 색상 혼합 기준 변경 요구가 생기면 고정 흰색 계산 계약과 데이터 migration 재평가
+
+---
+
+## ADR-0019: 별도 배포 저장소와 GHCR 기반 Blue/Green 운영 배포
+
+### 배경(문제)
+
+홈서버의 Center Express 인스턴스 3개와 Stage 인스턴스 1개를 같은 이미지로 교체해야 하며, 빌드 실패나 health 실패가 기존 운영 상태를 남기지 않아야 합니다. Self-hosted runner에는 Docker와 Nginx를 변경할 권한이 필요하지만 저장소 워크플로가 임의 root 명령을 실행할 수 있게 해서는 안 됩니다. 또한 애플리케이션 개발 원격과 운영 배포 자동화의 변경 경계를 분리해야 합니다.
+
+### 선택지(대안)
+
+1. 별도 배포 저장소에서 애플리케이션 소스와 고정 배포 자동화를 함께 관리하고 GHCR·Blue/Green 전환 사용
+2. 애플리케이션 저장소의 push마다 홈서버에서 직접 pull·build·restart
+3. 홈서버에서 SSH 기반 수동 배포
+4. Kubernetes 또는 외부 관리형 배포 서비스 도입
+
+### 결정(무엇을 선택)
+
+**`hspark-1/shift_calendar_server-deploy`의 `main`을 운영 배포 기준으로 사용하고, commit SHA 이미지와 홈서버 Blue/Green 전환을 적용**합니다.
+
+- GitHub Actions는 수동 `workflow_dispatch`, `main`, 확인 체크를 검증
+- GitHub-hosted runner에서 Node 22 빌드 후 `linux/amd64` 이미지를 `sha-<commit>`으로 GHCR에 push
+- 홈서버 self-hosted runner의 sudoers는 root 소유 `/usr/local/sbin/shiftmate-deploy` 경로만 허용하고, 이미지·actor 인자는 스크립트가 엄격히 검증
+- pull한 하나의 불변 image digest를 기존 Stage Compose의 image override에 먼저 적용하고 3201 내부 `/health`를 확인
+- 현재 활성 색상의 반대편 Center API 인스턴스 3개에 같은 digest를 적용하고 내부 `/health`를 모두 확인
+- Nginx upstream reload 후 Center와 Stage 외부 `/api/v1/health`가 모두 성공해야 배포 상태를 확정
+- Center Blue/Green upstream 이름은 `shiftmate_center_api_cluster`, Stage 3201 고정 upstream 이름은 `shiftmate_stage_api_cluster`로 분리
+- Center 동적 upstream 교체는 Stage 고정 upstream snippet을 변경하지 않음
+- 실패 시 Stage image override와 컨테이너, Center upstream·상태 파일·신규 컨테이너를 이전 상태로 복원
+- 롤백도 과거 commit SHA를 대상으로 같은 배포 경로를 재사용
+- DB migration은 이미지 배포와 분리하여 개발자가 수동 실행
+
+### 근거(왜)
+
+- 빌드 실패는 홈서버 상태를 변경하지 않음
+- 신규 인스턴스가 준비된 후에만 트래픽을 전환하므로 중단 시간을 최소화
+- commit 태그를 pull한 뒤 digest로 고정해 실제 실행 이미지를 불변으로 유지
+- 한 번 빌드한 동일 digest를 Stage와 Center에 적용해 환경별 이미지 차이를 방지
+- self-hosted runner를 Docker 그룹에 넣지 않고 검증된 root 스크립트 하나만 허용
+- sudoers command argument wildcard·정규식 지원 여부에 의존하지 않고, 수정 불가능한 root 스크립트의 인자 개수·이미지 형식·actor 검증으로 권한 범위를 제한
+- 별도 배포 원격으로 운영 자동화 변경과 일반 개발 배포 권한을 구분
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- Stage 1개와 Center 3개의 내부 health 및 양쪽 외부 health를 모두 검증
+- 정상 상태의 Stage 1개와 Center 3개가 같은 image digest를 사용
+- 배포와 롤백의 절차 및 실패 복구 경로 통일
+- 운영 `.env`, DB 암호, JWT secret을 GitHub에 전달하지 않음
+- Blue/Green 상태와 이미지 digest를 `/opt/shiftmate/.deploy.env`에서 명시적으로 추적
+
+**트레이드오프**:
+
+- 배포 저장소의 애플리케이션 소스를 운영 배포 대상 commit과 동기화해야 함
+- 한 번에 두 색상의 컨테이너가 기동되는 동안 추가 CPU·메모리 필요
+- Stage는 단일 컨테이너 재생성이므로 배포 중 짧은 중단이 발생할 수 있음
+- 이미지 롤백은 DB schema를 되돌리지 못하므로 migration은 하위 호환 순서를 지켜야 함
+- 홈서버 runner, Nginx include, sudoers를 최초 1회 수동 구성해야 함
+- root 소유 배포 스크립트의 인자 검증이 sudo 권한 안전성의 일부이므로 스크립트 권한과 검증 로직을 함께 유지해야 함
+
+### 구현 위치
+
+- **배포 워크플로**: `.github/workflows/deploy-production.yml`
+- **롤백 워크플로**: `.github/workflows/rollback-production.yml`
+- **운영 Compose**: `deploy/compose.production.yaml`
+- **Stage 배포 설정 예시**: `deploy/stage.deploy.env.example`
+- **배포 엔진**: `deploy/shiftmate-deploy`
+- **최초 전환**: `deploy/shiftmate-bootstrap`
+- **Center Nginx upstream**: `deploy/nginx/shiftmate-upstream-blue.conf`, `deploy/nginx/shiftmate-upstream-green.conf`
+- **Stage Nginx upstream**: `deploy/nginx/shiftmate-stage-upstream.conf`
+- **Runner sudoers**: `deploy/sudoers/github-runner-shiftmate`
+- **운영 절차**: `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+
+### 추후 과제(언제 다시 평가)
+
+- 자동 테스트가 추가되면 이미지 push 전 CI 단계에 포함
+- 운영 migration 자동화가 필요해지면 expand/contract 호환성과 별도 승인 단계를 먼저 설계
+- 다중 홈서버 또는 지역 이중화가 필요해지면 현재 단일 호스트 Blue/Green 구조 재평가
+
+---
+
+## ADR-0020: 공유 Redis 월별 근무표 캐시와 PostgreSQL Outbox
+
+### 배경(문제)
+
+본인·친구 캘린더가 같은 사용자 근무표를 반복 조회할 때마다 `work_shifts`, `shift_type_schedules`, `shift_types`를 조인합니다. 운영은 API 3개와 Blue/Green 중첩 구조이므로 프로세스 메모리나 동일 볼륨 LevelDB는 인스턴스 전체에서 안전하게 공유·무효화할 수 없습니다.
+
+### 선택지(대안)
+
+1. 공유 Redis 월 snapshot + PostgreSQL revision/Outbox
+2. 인스턴스별 LevelDB와 무효화 broadcast
+3. LevelDB 전용 서비스
+4. PostgreSQL을 매 요청 직접 조회
+
+### 결정(무엇을 선택)
+
+**PostgreSQL을 원본으로 유지하고 환경별 공유 Redis에 `owner_user_id + YYYYMM` 근무표 snapshot을 저장**합니다.
+
+- 기존 기간 API를 유지하고 내부에서 월 snapshot을 병합·필터링
+- 친구 관계와 `can_view`는 매 요청 PostgreSQL에서 확인
+- 원본 변경, 월 revision 증가, Outbox 삽입을 한 transaction으로 처리
+- commit 후 best-effort 즉시 무효화하고 색상별 worker가 durable 재처리
+- revision fence와 Redis lock으로 stale 재저장과 cache stampede 방지
+- Redis 장애 시 PostgreSQL fallback, 이벤트는 기존 DB 조회 유지
+
+### 근거(왜)
+
+- 모든 API 인스턴스와 Blue/Green 양쪽이 같은 cache key와 fence를 사용
+- 캐시는 유실 가능한 최적화 계층이고 PostgreSQL 정합성과 롤백 가능성을 유지
+- Outbox가 DB commit과 Redis 장애 사이의 이벤트 유실을 복구
+- 친구 권한을 snapshot에 포함하지 않아 공개 설정 변경이 즉시 적용
+- 기존 Flutter `start_date/end_date`와 응답 body를 변경하지 않음
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 반복 월 조회의 DB 조인과 네트워크 전송을 Redis hit/ETag 304로 절감
+- 빈 달도 캐시하고 batch 변경은 월마다 한 번만 revision 증가
+- Redis/worker 장애 중에도 API 가용성을 PostgreSQL로 유지
+
+**트레이드오프**:
+
+- Redis와 worker 운영, 수동 expand migration, Outbox 지연 관측이 추가됨
+- commit과 즉시 무효화 사이의 매우 짧은 eventual consistency 구간이 존재
+- 근무 타입 표시값 변경도 참조 중인 월 cache를 무효화해야 함
+
+### 구현 위치
+
+- **캐시/Redis**: `src/config/redis.ts`, `src/services/workShiftMonthCacheService.ts`
+- **정합성/worker**: `src/services/workShiftCacheInvalidationService.ts`, `src/workers/workShiftCacheWorker.ts`
+- **DB**: `migrations/add_work_shift_month_cache_support.sql`
+- **배포**: `deploy/compose.production.yaml`, `deploy/shiftmate-deploy`
+
+### 추후 과제(언제 다시 평가)
+
+- events 조회가 실제 DB 병목으로 확인되면 기간 겹침과 visibility를 별도 설계한 뒤 캐시 범위 확대
+- 다중 홈서버/Redis HA가 필요해지면 managed Redis 또는 Sentinel/Cluster 전환 검토
+- Outbox 지연과 hit ratio를 장기 수집할 관측 시스템 도입

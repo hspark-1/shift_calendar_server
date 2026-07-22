@@ -41,6 +41,20 @@ export function getPositiveIntegerEnvironmentVariable(
   return parsed_value;
 }
 
+export function getBooleanEnvironmentVariable(
+  name: string,
+  default_value: boolean,
+): boolean {
+  const raw_value = process.env[name];
+  if (raw_value === undefined || raw_value.trim() === "") {
+    return default_value;
+  }
+
+  if (raw_value === "true") return true;
+  if (raw_value === "false") return false;
+  throw new Error(`${name}은(는) true 또는 false여야 합니다.`);
+}
+
 export function validateEnvironment(): void {
   for (const variable_name of required_environment_variables) {
     getRequiredEnvironmentVariable(variable_name);
@@ -81,6 +95,17 @@ export function validateEnvironment(): void {
   getPositiveIntegerEnvironmentVariable("SHUTDOWN_TIMEOUT_MS", 10000);
   getPositiveIntegerEnvironmentVariable("AUTH_RATE_LIMIT_WINDOW_MS", 60000);
   getPositiveIntegerEnvironmentVariable("AUTH_RATE_LIMIT_MAX", 10);
+  getPositiveIntegerEnvironmentVariable("WORK_SHIFT_CACHE_TTL_SECONDS", 86400);
+  getPositiveIntegerEnvironmentVariable("WORK_SHIFT_CACHE_TTL_JITTER_SECONDS", 3600, {
+    allow_zero: true,
+  });
+  getPositiveIntegerEnvironmentVariable("WORK_SHIFT_CACHE_LOCK_MS", 5000);
+  getPositiveIntegerEnvironmentVariable("WORK_SHIFT_CACHE_WAIT_MS", 500);
+  getPositiveIntegerEnvironmentVariable("REDIS_CONNECT_TIMEOUT_MS", 500);
+  getPositiveIntegerEnvironmentVariable("REDIS_COMMAND_TIMEOUT_MS", 100);
+  getPositiveIntegerEnvironmentVariable("CACHE_OUTBOX_POLL_MS", 1000);
+  getPositiveIntegerEnvironmentVariable("CACHE_OUTBOX_BATCH_SIZE", 100);
+  getBooleanEnvironmentVariable("WORK_SHIFT_CACHE_ENABLED", false);
 
   const db_pool_max = getPositiveIntegerEnvironmentVariable("DB_POOL_MAX", 10);
   const db_pool_min = getPositiveIntegerEnvironmentVariable(
@@ -105,5 +130,10 @@ export function validateEnvironment(): void {
     throw new Error(
       "REQUEST_BODY_LIMIT은 100kb, 1mb와 같은 양의 크기 형식이어야 합니다."
     );
+  }
+
+  if (getBooleanEnvironmentVariable("WORK_SHIFT_CACHE_ENABLED", false)) {
+    getRequiredEnvironmentVariable("REDIS_URL");
+    getRequiredEnvironmentVariable("CACHE_KEY_PREFIX");
   }
 }

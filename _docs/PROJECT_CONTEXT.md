@@ -33,6 +33,30 @@ HTTP Request
   → Response
 ```
 
+### 월별 근무표 캐시 구조
+
+```text
+본인/친구 기간 조회
+  → 친구 조회이면 friendship + can_view를 PostgreSQL에서 먼저 확인
+  → 기간을 사용자 work_date 기준 YYYY-MM로 분할
+  → 공유 Redis 월 snapshot + revision fence 조회
+  → hit: 병합/기간 필터 후 응답
+  → miss: PostgreSQL read-only repeatable-read DB 조회 → fence 확인 후 Redis 저장
+
+근무표/근무 타입 변경
+  → PostgreSQL transaction
+     ├─ 원본 데이터 변경
+     ├─ work_shift_month_states revision 증가
+     └─ work_shift_cache_outbox INSERT
+  → commit 후 Redis best-effort 즉시 무효화
+  → 색상별 cache worker가 Outbox를 멱등 재처리
+```
+
+- PostgreSQL만 원본이며 Redis 장애 시 기존 DB 조회로 fallback합니다.
+- 캐시 단위는 `owner_user_id + YYYYMM`이고 개인 일정은 캐시하지 않습니다.
+- 친구 권한은 캐시하지 않으므로 `can_view=false` 또는 친구 삭제가 다음 요청부터 즉시 적용됩니다.
+- LevelDB는 읽기 전용 다중 컨테이너와 Blue/Green 공유 정합성에 맞지 않아 사용하지 않습니다.
+
 ### 폴더 구조
 
 ```
@@ -40,6 +64,7 @@ src/
 ├── index.ts              # Express 앱 엔트리포인트
 ├── config/
 │   ├── database.ts       # Sequelize 설정
+│   ├── redis.ts          # 공유 Redis 연결, timeout, cache 상태
 │   └── environment.ts    # 필수 환경변수 및 숫자 설정 검증
 ├── routes/               # 라우터 정의
 │   ├── index.ts         # 라우터 통합
@@ -63,6 +88,8 @@ src/
 │   ├── friendService.ts
 │   ├── kakaoService.ts
 │   └── shiftTemplateService.ts
+├── workers/
+│   └── workShiftCacheWorker.ts # PostgreSQL Outbox 기반 Redis 무효화 worker
 ├── utils/               # 공통 검증/정규화 유틸
 │   ├── logger.ts        # 민감 오류 객체를 직렬화하지 않는 구조화 오류 로그
 │   └── phone.ts         # 전화번호 저장 형식 검증 및 하이픈 정규화
@@ -73,7 +100,15 @@ src/
 │   ├── RefreshToken.ts
 │   └── ... (템플릿 관련 모델들)
 └── types/
-    └── express.d.ts     # Express Request 타입 확장
+    ├── express.d.ts     # Express Request 타입 확장
+    └── workShift.ts     # DB/Redis 공통 근무표 API 모델
+
+test/
+├── workShiftMonthCacheService.test.cjs # 월 분할, key, ETag 단위 테스트
+├── cacheIntegration.test.cjs           # PostgreSQL/Redis 통합 테스트
+├── deploymentCacheRollout.test.cjs     # Redis/worker 배포·rollback 순서 정적 테스트
+└── fixtures/
+    └── cacheIntegrationSchema.sql      # 격리 테스트 DB 초기화용 최소 schema
 ```
 
 #### `src/config/environment.ts`
@@ -91,6 +126,15 @@ src/
 - **의존성**: Express Request/Response, Node.js `crypto`, 공통 환경변수 파서
 - **사용 예**: 인증 컨트롤러에서 `logError("auth_login_failed", error, req.request_id)` 호출
 
+#### 월별 근무표 캐시 모듈
+
+- **`src/services/workShiftMonthCacheService.ts` 역할**: 월 분할, snapshot/lock/revision key, cache-aside, revision fence, ETag 생성
+- **`src/services/workShiftCacheInvalidationService.ts` 역할**: 월 revision 증가와 Outbox 이벤트를 업무 transaction에 기록하고 commit 후 즉시 무효화
+- **`src/workers/workShiftCacheWorker.ts` 역할**: `FOR UPDATE SKIP LOCKED` 방식 claim, 월별 이벤트 병합, Redis 재시도와 7일 완료 이벤트 정리
+- **의존성**: PostgreSQL expand migration, 환경별 공유 Redis, `WORK_SHIFT_CACHE_ENABLED=true`
+- **사용 예**: API는 `node dist/index.js`, worker는 `node dist/workers/workShiftCacheWorker.js`, worker health는 `--healthcheck`
+- 캐시 flag가 `false`인 worker 본체는 Outbox를 claim하지 않고 대기하지만 health 명령은 PostgreSQL과 Redis를 모두 검사합니다. 활성화 시 API와 worker 컨테이너를 같은 `true` 환경으로 재생성합니다.
+
 ---
 
 ## 3. Express 백엔드 상세 문서
@@ -100,25 +144,21 @@ src/
 #### 표준 흐름
 
 1. **Router** (`src/routes/*.ts`)
-
    - HTTP 메서드와 경로 정의
    - Validation 미들웨어 적용 (express-validator)
    - 인증 미들웨어 적용 (authMiddleware)
 
 2. **Middleware**
-
    - **Validation**: `express-validator`로 요청 데이터 검증
    - **Auth**: `src/middlewares/auth.ts`에서 JWT 토큰 검증 및 사용자 정보 주입
 
 3. **Controller** (`src/controllers/*.ts`)
-
    - 요청 파라미터 추출
    - Validation 결과 확인 (`validationResult`)
    - Service 호출
    - 응답 포맷팅 및 반환
 
 4. **Service** (`src/services/*.ts`)
-
    - 비즈니스 로직 처리
    - DB 트랜잭션 관리 (필요 시)
    - Model을 통한 DB 접근
@@ -226,7 +266,7 @@ export function errorHandler(
   err: AppError,
   req: Request,
   res: Response,
-  _next: NextFunction
+  _next: NextFunction,
 ) {
   const status_code = err.status_code || 500;
   const message = err.message || "서버 내부 오류가 발생했습니다.";
@@ -263,7 +303,7 @@ router.post(
       .withMessage("근무 타입 코드를 입력하세요."),
     body("note").optional().isString(),
   ],
-  upsertWorkShift
+  upsertWorkShift,
 );
 ```
 
@@ -273,12 +313,9 @@ router.post(
 // src/routes/authRoutes.ts
 router.post(
   "/login",
-  [
-    body("email").isEmail(),
-    body("password").isString().notEmpty(),
-  ],
+  [body("email").isEmail(), body("password").isString().notEmpty()],
   validateRequestMiddleware,
-  login
+  login,
 );
 ```
 
@@ -310,7 +347,7 @@ router.post(
 export async function authMiddleware(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) {
   // 1. Authorization 헤더 확인
   const auth_header = req.headers.authorization;
@@ -403,10 +440,10 @@ export const sequelize = new Sequelize(db_name, db_user, db_password, {
   dialect: "postgres",
   logging: false, // 프로덕션에서는 false
   pool: {
-    max: db_pool_max,             // DB_POOL_MAX, 기본 10
-    min: db_pool_min,             // DB_POOL_MIN, 기본 0
-    acquire: db_pool_acquire_ms,  // DB_POOL_ACQUIRE_MS, 기본 30000
-    idle: db_pool_idle_ms,        // DB_POOL_IDLE_MS, 기본 10000
+    max: db_pool_max, // DB_POOL_MAX, 기본 10
+    min: db_pool_min, // DB_POOL_MIN, 기본 0
+    acquire: db_pool_acquire_ms, // DB_POOL_ACQUIRE_MS, 기본 30000
+    idle: db_pool_idle_ms, // DB_POOL_IDLE_MS, 기본 10000
   },
   define: {
     timestamps: true, // createdAt, updatedAt 자동 생성
@@ -564,6 +601,8 @@ const work_shifts = await WorkShift.findAll({
 - 친구 캘린더 조회는 `viewer_user_id`, `friend_user_id`, 친구 관계, `friend_level_settings` 공개 조건을 모두 확인한 뒤 동일한 근무표 필드 구조로 반환
 - 이벤트 기간 조회는 `start_at < end_date + 1 day` AND `end_at > start_date` 겹침 조건으로 처리
 - `/api` 응답은 기본적으로 `Cache-Control: private, no-store`, `Vary: Authorization` 헤더를 내려 인증 사용자별 응답 캐시 혼선을 방지
+- `GET /work-shifts`만 월 revision 조합의 opaque `ETag`와 `Cache-Control: private, no-cache`를 반환하며 `If-None-Match` 일치 시 304
+- `GET /calendar/range`, `GET /calendar/day`, 친구 캘린더 기간 조회의 근무표도 동일한 월 캐시를 사용하지만 이벤트가 섞인 응답은 `no-store` 유지
 
 **친구/공유 캘린더** (`/api/v1`):
 
@@ -650,22 +689,33 @@ catch (error) {
 
 #### 선택 환경변수
 
-| 변수명                   | 설명                                      | 기본값                  |
-| ------------------------ | ----------------------------------------- | ----------------------- |
-| `PORT`                   | 서버 포트                                 | `3000`                  |
-| `NODE_ENV`               | `development`/`test`/`production`         | `development`           |
-| `DB_SSL`                 | DB SSL 사용 여부 (`true`/`false`)         | `false`                 |
-| `DB_POOL_MAX`            | 인스턴스당 DB 최대 연결 수                | `10`                    |
-| `DB_POOL_MIN`            | 인스턴스당 DB 최소 연결 수                | `0`                     |
-| `DB_POOL_ACQUIRE_MS`     | DB 연결 획득 제한시간                     | `30000`                 |
-| `DB_POOL_IDLE_MS`        | 유휴 DB 연결 유지시간                     | `10000`                 |
-| `TRUST_PROXY_HOPS`       | 신뢰할 Nginx 프록시 hop 수                | 개발 `0`, 운영 `1`      |
-| `SHUTDOWN_TIMEOUT_MS`    | graceful shutdown 최대 대기시간           | `10000`                 |
-| `CORS_ALLOWED_ORIGINS`   | 쉼표로 구분한 정확한 허용 Origin 목록     | 환경별 기본 목록        |
-| `INSTANCE_NAME`          | health/log에서 식별할 컨테이너 이름       | `unknown`               |
-| `REQUEST_BODY_LIMIT`     | JSON/form 요청 본문 최대 크기             | `100kb`                 |
-| `AUTH_RATE_LIMIT_WINDOW_MS` | 인증 요청 제한 구간                    | `60000`                 |
-| `AUTH_RATE_LIMIT_MAX`    | 구간당 인스턴스별 인증 요청 최대 횟수     | `10`                    |
+| 변수명                                | 설명                                  | 기본값             |
+| ------------------------------------- | ------------------------------------- | ------------------ |
+| `PORT`                                | 서버 포트                             | `3000`             |
+| `NODE_ENV`                            | `development`/`test`/`production`     | `development`      |
+| `DB_SSL`                              | DB SSL 사용 여부 (`true`/`false`)     | `false`            |
+| `DB_POOL_MAX`                         | 인스턴스당 DB 최대 연결 수            | `10`               |
+| `DB_POOL_MIN`                         | 인스턴스당 DB 최소 연결 수            | `0`                |
+| `DB_POOL_ACQUIRE_MS`                  | DB 연결 획득 제한시간                 | `30000`            |
+| `DB_POOL_IDLE_MS`                     | 유휴 DB 연결 유지시간                 | `10000`            |
+| `TRUST_PROXY_HOPS`                    | 신뢰할 Nginx 프록시 hop 수            | 개발 `0`, 운영 `1` |
+| `SHUTDOWN_TIMEOUT_MS`                 | graceful shutdown 최대 대기시간       | `10000`            |
+| `CORS_ALLOWED_ORIGINS`                | 쉼표로 구분한 정확한 허용 Origin 목록 | 환경별 기본 목록   |
+| `INSTANCE_NAME`                       | health/log에서 식별할 컨테이너 이름   | `unknown`          |
+| `REQUEST_BODY_LIMIT`                  | JSON/form 요청 본문 최대 크기         | `100kb`            |
+| `AUTH_RATE_LIMIT_WINDOW_MS`           | 인증 요청 제한 구간                   | `60000`            |
+| `AUTH_RATE_LIMIT_MAX`                 | 구간당 인스턴스별 인증 요청 최대 횟수 | `10`               |
+| `WORK_SHIFT_CACHE_ENABLED`            | 월별 근무표 Redis 캐시/worker 활성화  | `false`            |
+| `REDIS_URL`                           | 비밀번호 포함 환경별 Redis 내부 URL   | 캐시 활성 시 필수  |
+| `CACHE_KEY_PREFIX`                    | Stage/Center 분리 Redis key prefix    | 캐시 활성 시 필수  |
+| `WORK_SHIFT_CACHE_TTL_SECONDS`        | snapshot 기본 TTL                     | `86400`            |
+| `WORK_SHIFT_CACHE_TTL_JITTER_SECONDS` | TTL 최대 jitter                       | `3600`             |
+| `WORK_SHIFT_CACHE_LOCK_MS`            | stampede 방지 lock 만료               | `5000`             |
+| `WORK_SHIFT_CACHE_WAIT_MS`            | lock 대기 요청의 최대 재조회 시간     | `500`              |
+| `REDIS_CONNECT_TIMEOUT_MS`            | Redis 연결 제한시간                   | `500`              |
+| `REDIS_COMMAND_TIMEOUT_MS`            | Redis 명령 제한시간                   | `100`              |
+| `CACHE_OUTBOX_POLL_MS`                | worker idle polling 간격              | `1000`             |
+| `CACHE_OUTBOX_BATCH_SIZE`             | worker 1회 claim 최대 이벤트          | `100`              |
 
 #### 환경별 차이
 
@@ -727,7 +777,11 @@ AUTH_RATE_LIMIT_MAX=10
 
 ### 테스트 원칙
 
-- **현재 미구현**: 단위 테스트/통합 테스트는 아직 작성되지 않음
+- `npm test`: TypeScript build 후 월 분할, 월 말일, cache key, ETag 단위 테스트 실행
+- `npm run test:integration`: PostgreSQL 16과 Redis 7.4를 대상으로 cache hit, 다월 병합, 빈 달, read-only repeatable-read, 손상 schema, TTL jitter, transaction rollback, 근무 타입 무효화, stampede lock, revision fence 경합, 친구 권한 재검사, ETag 304, Redis 장애 복구, Outbox 동시 claim/retry/정리를 검증
+- `test/fixtures/cacheIntegrationSchema.sql`은 통합 테스트에 필요한 정본 컬럼·제약·공개 view만 구성하는 테스트 전용 파일이며, 실행 시 대상 DB의 `public` schema를 삭제하고 재생성
+- 통합 테스트는 `RUN_CACHE_INTEGRATION=true`를 스크립트가 설정하며 CI 또는 폐기 가능한 전용 DB에서만 실행하고 운영/공유 개발 DB에는 실행 금지
+- PostgreSQL/Redis 연결 정보와 캐시 환경변수를 제공한 뒤 `npm run test:integration`으로 사용
 
 ---
 
@@ -751,6 +805,13 @@ AUTH_RATE_LIMIT_MAX=10
 - `schedule_id` (FK → shift_type_schedules)
 - `visibility_level` (항상 0)
 - `(owner_user_id, work_date)`는 unique이므로 같은 날짜 재등록은 신규 row 생성이 아니라 soft-deleted row의 `deleted_at`, `deleted_by_user_id`를 `null`로 복구
+
+#### WorkShiftMonthState / WorkShiftCacheOutbox
+
+- `work_shift_month_states`: 사용자·월별 단조 증가 revision과 원본 최종 변경 시각
+- `work_shift_cache_outbox`: 원본 변경 transaction과 함께 저장되는 월 캐시 무효화 이벤트
+- 배치 저장은 같은 월을 한 번만 증가시키고 근무 타입 표시값 변경은 실제 참조 중인 월만 증가
+- worker는 60초 지난 claim을 회수하고 1~60초 지수 backoff로 재시도하며 처리 완료 이벤트는 7일 보관
 
 #### Event (개인 일정)
 
@@ -893,6 +954,17 @@ psql -U postgres -d shift_calendar -f migrations/enforce_users_phone_format.sql
 
 기존 DB에 근무 타입 색상 기준값과 농도를 추가할 때는 두 단계 SQL을 순서대로 수동 적용합니다.
 
+기존 DB에 월별 근무표 캐시 지원 테이블을 추가할 때는 DB 백업 후 다음 expand SQL을 서버 배포 전에 수동 적용합니다.
+
+```bash
+psql -U postgres -d shift_calendar \
+  -f migrations/add_work_shift_month_cache_support.sql
+```
+
+- 기존 soft-deleted 행을 포함해 사용자·월 상태를 revision 1로 백필합니다.
+- 이전 서버가 신규 테이블을 참조하지 않으므로 Blue/Green 롤백과 호환됩니다.
+- 캐시/worker를 중단하기 전에는 두 테이블을 삭제하지 않습니다.
+
 #### `migrations/add_shift_type_color_metadata.sql`
 
 - **파일 역할**: 신규 서버 배포 전에 `shift_types.base_color`, `shift_types.color_intensity` nullable 컬럼을 확장하고 사전 색상 감사 결과를 출력
@@ -996,6 +1068,31 @@ curl --fail http://127.0.0.1:3000/health
 - Docker 내장 health check는 `PORT`의 루트 `/health`를 호출합니다.
 - migration은 이미지에 포함하거나 컨테이너 시작 시 실행하지 않습니다.
 
+### 운영 CI/CD
+
+- **배포 저장소**: `hspark-1/shift_calendar_server-deploy`의 `main`
+- **파일 역할**:
+  - `.github/workflows/deploy-production.yml`: 수동 승인, TypeScript 검증, `linux/amd64` 이미지 빌드·GHCR push, 홈서버 배포 호출
+  - `.github/workflows/rollback-production.yml`: 기존 commit SHA 이미지를 Stage와 Center에 함께 재배포
+  - `deploy/compose.production.yaml`: Blue/Green API 인스턴스 6개 정의와 기존 `shiftmate_center_internal` 연결
+  - `deploy/stage.deploy.env.example`: 홈서버 Stage Compose 서비스명과 외부 health URL의 root 전용 설정 예시
+  - `deploy/shiftmate-deploy`: 하나의 이미지 digest를 Stage에 먼저 적용한 뒤 Center 비활성 색상에 배포하고, 양쪽 health 검사·Nginx 전환·통합 실패 복원 수행
+  - `deploy/shiftmate-bootstrap`: 기존 운영 구성을 Blue/Green으로 전환하는 최초 1회용 스크립트
+  - `deploy/nginx/shiftmate-upstream-{blue,green}.conf`: Center Blue/Green 포트를 `shiftmate_center_api_cluster`로 정의
+  - `deploy/nginx/shiftmate-stage-upstream.conf`: 기존 Stage 3201을 `shiftmate_stage_api_cluster`로 정의하는 고정 snippet
+  - `deploy/sudoers/github-runner-shiftmate`: `github-runner`가 root 소유 배포 스크립트 경로만 비밀번호 없이 호출하도록 허용하며, 이미지·actor 인자는 스크립트가 검증
+  - `DEPLOY_README.md`: 저장소 루트에서 바로 확인하는 홈서버 CI/CD 실행 가이드로, 정본 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`와 동일한 절차 유지
+  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`: 홈서버 사전 구성, runner 설치, 최초 배포, 롤백 및 장애 대응 절차
+- **의존성**: Private GitHub 저장소, GHCR, `shiftmate-production` label의 전용 self-hosted runner, Docker Compose, Nginx, 기존 운영 `.env`와 외부 Docker 네트워크, `/opt/shiftmate-stage/compose.yaml`, Stage 3201 서비스 및 실제 HTTPS health URL
+- **캐시 배포 의존성**: Center/Stage 별도 Redis, Stage API/worker/Redis 서비스명, 환경별 `REDIS_URL`/`CACHE_KEY_PREFIX`, 사전 expand migration
+- **사용 예**: GitHub Actions에서 `Deploy production`을 `main`과 확인 체크로 실행하며, 배포 자동화 변경은 `git push deploy main`으로 전용 저장소에 반영
+- **문서 동기화 규칙**: 배포 절차 변경 시 `DEPLOY_README.md`와 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`를 함께 갱신하고 내용 일치를 검사
+- **원칙**: 배포·롤백은 동일한 `shiftmate-deploy` 경로를 사용하고 Stage 1개와 Center 3개는 같은 불변 GHCR digest를 실행하며 DB migration은 자동 실행하지 않음
+- **Compose profile 검증**: Center 6개 서비스는 모두 `blue` 또는 `green` profile에 속하므로 전체 구성 검사에는 두 profile을 명시
+- **Runner 권한 계약**: sudoers는 `/usr/local/sbin/shiftmate-deploy` 경로만 허용하고, root가 소유한 스크립트가 인자 개수·불변 GHCR commit 이미지·actor를 거부 우선 방식으로 검증
+- **Stage 적용 계약**: 기존 `/opt/shiftmate-stage/compose.yaml`과 애플리케이션 `.env`는 보존하고 root 관리 `compose.deploy.yaml`에서 지정 서비스의 image만 덮어씀
+- **Nginx 라우팅 계약**: 운영 proxy는 `shiftmate_center_api_cluster`, Stage proxy는 `shiftmate_stage_api_cluster`만 참조하며 배포 스크립트는 Center active upstream만 교체하고 Stage 고정 upstream은 변경하지 않음
+
 ### DB 변경
 
 - `migrations/` SQL은 개발자가 대상 DB와 롤백 방법을 확인한 뒤 직접 1회 실행
@@ -1090,6 +1187,14 @@ curl --fail http://127.0.0.1:3000/health
 - 로그인/회원가입/OAuth/토큰 갱신은 IP 기준 `AUTH_RATE_LIMIT_*` 제한 적용
 - Express 제한은 인스턴스별이므로 3개 인스턴스 전체 공통 제한은 Nginx `limit_req`에서 추가
 - 비밀번호, Authorization/OAuth code, Access/Refresh Token은 로그 필드로 기록하지 않음
+
+### 10. 월별 근무표 캐시
+
+- Redis는 외부 포트를 공개하지 않고 Stage와 Center가 서로 다른 인스턴스와 key prefix를 사용
+- Redis snapshot 오류·timeout·연결 실패는 API 오류로 바꾸지 않고 PostgreSQL fallback
+- Redis eviction은 `volatile-lru`를 사용해 TTL 없는 revision fence를 snapshot보다 우선 보존
+- readiness HTTP 상태는 PostgreSQL 기준이며 응답 `cache` 필드로 `ready/degraded/disabled`를 구분
+- cache worker가 unhealthy이거나 미처리 Outbox가 증가하면 캐시 flag를 끄고 DB 조회로 즉시 전환
 
 ---
 

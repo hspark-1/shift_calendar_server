@@ -7,6 +7,11 @@ import {
   ShiftTypeSchedule,
   WorkShift,
 } from "../models";
+import {
+  ChangedWorkShiftMonth,
+  invalidateChangedWorkShiftMonths,
+  recordWorkShiftMonthChanges,
+} from "./workShiftCacheInvalidationService";
 
 // 기본 근무 타입 정의
 interface DefaultShiftTypeInfo {
@@ -552,13 +557,15 @@ export async function updateTemplateName(
  * 현재 활성 버전 조회
  */
 async function getCurrentVersion(
-  template_id: string
+  template_id: string,
+  transaction?: Transaction,
 ): Promise<ShiftTemplateVersion> {
   const version = await ShiftTemplateVersion.findOne({
     where: {
       template_id: template_id,
     },
     order: [["effective_from", "DESC"]],
+    transaction,
   });
 
   if (!version) {
@@ -671,7 +678,10 @@ export async function createShiftType(
     }
 
     // 현재 활성 버전 조회
-    const current_version = await getCurrentVersion(template.template_id);
+    const current_version = await getCurrentVersion(
+      template.template_id,
+      transaction,
+    );
 
     // 스케줄 생성 (시간 정보가 없어도 기본값으로 생성)
     await ShiftTypeSchedule.create(
@@ -735,7 +745,8 @@ export async function updateShiftType(
   duration_minutes: number;
   updated_at: Date;
 }> {
-  return sequelize.transaction(async (transaction) => {
+  let changed_months: ChangedWorkShiftMonth[] = [];
+  const result = await sequelize.transaction(async (transaction) => {
     const color_metadata = resolveShiftTypeColor(data);
 
     // 1. 근무 타입 조회 및 소유권 확인
@@ -786,7 +797,10 @@ export async function updateShiftType(
     let crosses_midnight = false;
     let duration_minutes = 0;
 
-    const current_version = await getCurrentVersion(template.template_id);
+    const current_version = await getCurrentVersion(
+      template.template_id,
+      transaction,
+    );
 
     // 기존 스케줄 조회
     const existing_schedule = await ShiftTypeSchedule.findOne({
@@ -876,6 +890,39 @@ export async function updateShiftType(
       }
     }
 
+    const changes_cached_fields =
+      data.code !== undefined ||
+      data.name !== undefined ||
+      data.color !== undefined ||
+      data.base_color !== undefined ||
+      data.color_intensity !== undefined ||
+      data.start_time !== undefined ||
+      data.end_time !== undefined;
+
+    if (changes_cached_fields) {
+      const affected_months = await sequelize.query<{ year_month: string }>(
+        `
+        SELECT DISTINCT to_char(date_trunc('month', ws.work_date), 'YYYY-MM') AS year_month
+        FROM work_shifts ws
+        JOIN shift_type_schedules sts ON sts.schedule_id = ws.schedule_id
+        WHERE sts.shift_type_id = :shift_type_id
+          AND ws.owner_user_id = :owner_user_id
+          AND ws.deleted_at IS NULL
+        ORDER BY year_month
+        `,
+        {
+          replacements: { shift_type_id, owner_user_id: user_id },
+          type: QueryTypes.SELECT,
+          transaction,
+        },
+      );
+      changed_months = await recordWorkShiftMonthChanges(
+        user_id,
+        affected_months.map((row) => row.year_month),
+        transaction,
+      );
+    }
+
     const saved_color_metadata = getShiftTypeColorMetadata(shift_type);
 
     return {
@@ -893,6 +940,8 @@ export async function updateShiftType(
       updated_at: new Date(), // 실제로는 shift_type.updated_at을 사용해야 하지만 모델에 없음
     };
   });
+  await invalidateChangedWorkShiftMonths(user_id, changed_months);
+  return result;
 }
 
 /**

@@ -8,19 +8,19 @@ import {
   Event,
 } from "../models";
 import { sequelize } from "../config/database";
+import { WorkShiftApiModel } from "../types/workShift";
+import {
+  getWorkShiftRange,
+  WorkShiftRangeResult,
+  toYearMonth,
+} from "./workShiftMonthCacheService";
+import {
+  ChangedWorkShiftMonth,
+  invalidateChangedWorkShiftMonths,
+  recordWorkShiftMonthChanges,
+} from "./workShiftCacheInvalidationService";
 
-export interface WorkShiftApiModel {
-  work_shift_id: string;
-  work_date: string;
-  shift_type_code: string;
-  shift_type_name: string;
-  shift_type_color: string | null;
-  start_time: string | null;
-  end_time: string | null;
-  note: string | null;
-  created_at: Date;
-  updated_at: Date;
-}
+export type { WorkShiftApiModel } from "../types/workShift";
 
 export interface EventApiModel {
   event_id: string;
@@ -109,7 +109,7 @@ function formatShiftTypeColor(color: string | number | null | undefined): string
   return null;
 }
 
-function toWorkShiftApiModel(
+export function toWorkShiftApiModel(
   work_shift: WorkShift & {
     schedule?: ShiftTypeSchedule & { shift_type?: ShiftType };
   }
@@ -126,8 +126,8 @@ function toWorkShiftApiModel(
     start_time: formatDbTime(schedule?.start_time),
     end_time: formatDbTime(schedule?.end_time),
     note: work_shift.note || null,
-    created_at: work_shift.created_at!,
-    updated_at: work_shift.updated_at!,
+    created_at: work_shift.created_at!.toISOString(),
+    updated_at: work_shift.updated_at!.toISOString(),
   };
 }
 
@@ -302,10 +302,11 @@ export async function getShiftTypes(user_id: string): Promise<{
 /**
  * 기간별 근무표 조회
  */
-export async function getWorkShifts(
+export async function loadWorkShiftsFromDatabase(
   user_id: string,
   start_date: string,
-  end_date: string
+  end_date: string,
+  transaction?: Transaction,
 ): Promise<WorkShiftApiModel[]> {
   const work_shifts = await WorkShift.findAll({
     where: {
@@ -330,9 +331,35 @@ export async function getWorkShifts(
       },
     ],
     order: [["work_date", "ASC"]],
+    transaction,
   });
 
   return work_shifts.map((work_shift) => toWorkShiftApiModel(work_shift as any));
+}
+
+export async function getWorkShiftsWithCacheMetadata(
+  user_id: string,
+  start_date: string,
+  end_date: string,
+): Promise<WorkShiftRangeResult> {
+  const loader = (
+    range_start: string,
+    range_end: string,
+    transaction?: Transaction,
+  ) => loadWorkShiftsFromDatabase(user_id, range_start, range_end, transaction);
+  return getWorkShiftRange(user_id, start_date, end_date, loader, loader);
+}
+
+/**
+ * 기간별 근무표 조회
+ */
+export async function getWorkShifts(
+  user_id: string,
+  start_date: string,
+  end_date: string,
+): Promise<WorkShiftApiModel[]> {
+  return (await getWorkShiftsWithCacheMetadata(user_id, start_date, end_date))
+    .work_shifts;
 }
 
 /**
@@ -413,18 +440,7 @@ export async function getCalendarRange(
   start_date: string,
   end_date: string
 ): Promise<{
-  work_shifts: Array<{
-    work_shift_id: string;
-    work_date: string;
-    shift_type_code: string;
-    shift_type_name: string;
-    shift_type_color: string | null;
-    start_time: string | null;
-    end_time: string | null;
-    note: string | null;
-    created_at: Date;
-    updated_at: Date;
-  }>;
+  work_shifts: WorkShiftApiModel[];
   events: EventApiModel[];
 }> {
   // 병렬 쿼리 실행
@@ -458,28 +474,7 @@ export async function getDaySchedule(
   }>;
   events: EventApiModel[];
 }> {
-  // 근무표 조회
-  const work_shift = await WorkShift.findOne({
-    where: {
-      owner_user_id: user_id,
-      work_date: date,
-      deleted_at: null,
-    },
-    include: [
-      {
-        model: ShiftTypeSchedule,
-        as: "schedule",
-        required: true,
-        include: [
-          {
-            model: ShiftType,
-            as: "shift_type",
-            required: true,
-          },
-        ],
-      },
-    ],
-  });
+  const [work_shift] = await getWorkShifts(user_id, date, date);
 
   // 개인 일정 조회 (해당 날짜에 시작하는 일정)
   const start_of_day = new Date(date);
@@ -500,19 +495,15 @@ export async function getDaySchedule(
 
   const work_shifts_result = work_shift
     ? (() => {
-        const schedule = (work_shift as any).schedule as
-          | (ShiftTypeSchedule & { shift_type?: ShiftType })
-          | undefined;
-        const shift_type = schedule?.shift_type;
         return [
           {
             work_shift_id: work_shift.work_shift_id,
-            shift_type_code: shift_type?.code || "",
-            shift_type_name: shift_type?.name || "",
-            shift_type_color: formatShiftTypeColor(shift_type?.color),
-            start_time: formatDbTime(schedule?.start_time),
-            end_time: formatDbTime(schedule?.end_time),
-            note: work_shift.note || null,
+            shift_type_code: work_shift.shift_type_code,
+            shift_type_name: work_shift.shift_type_name,
+            shift_type_color: work_shift.shift_type_color,
+            start_time: work_shift.start_time,
+            end_time: work_shift.end_time,
+            note: work_shift.note,
           },
         ];
       })()
@@ -536,89 +527,82 @@ export async function upsertWorkShift(
   shift_type_code: string,
   note?: string | null
 ): Promise<WorkShift> {
-  // 1. shift_type_code로 shift_type_id 조회
-  const shift_type = await ShiftType.findOne({
-    where: {
-      code: shift_type_code,
-      deleted_at: null,
-    },
-    include: [
-      {
-        model: ShiftTemplate,
-        as: "template",
-        where: {
-          owner_user_id: user_id,
-          deleted_at: null,
+  let changed_months: ChangedWorkShiftMonth[] = [];
+  const work_shift = await sequelize.transaction(async (transaction) => {
+    const shift_type = await ShiftType.findOne({
+      where: { code: shift_type_code, deleted_at: null },
+      include: [
+        {
+          model: ShiftTemplate,
+          as: "template",
+          where: { owner_user_id: user_id, deleted_at: null },
+          required: true,
         },
-        required: true,
-      },
-    ],
-  });
-
-  if (!shift_type) {
-    throw new Error("SHIFT_TYPE_NOT_FOUND");
-  }
-
-  // 2. 현재 활성 템플릿 버전의 schedule_id 조회
-  const template = await ShiftTemplate.findOne({
-    where: {
-      owner_user_id: user_id,
-      deleted_at: null,
-    },
-  });
-
-  if (!template) {
-    throw new Error("TEMPLATE_NOT_FOUND");
-  }
-
-  const latest_version = await ShiftTemplateVersion.findOne({
-    where: {
-      template_id: template.template_id,
-    },
-    order: [["effective_from", "DESC"]],
-  });
-
-  if (!latest_version) {
-    throw new Error("TEMPLATE_NOT_FOUND");
-  }
-
-  let schedule = await ShiftTypeSchedule.findOne({
-    where: {
-      shift_type_id: shift_type.shift_type_id,
-      template_version_id: latest_version.template_version_id,
-    },
-  });
-
-  // 스케줄이 없으면 기본 스케줄 생성 (시간 정보 없이 생성된 shift_type 대응)
-  if (!schedule) {
-    schedule = await ShiftTypeSchedule.create({
-      shift_type_id: shift_type.shift_type_id,
-      template_version_id: latest_version.template_version_id,
-      start_time: null,
-      end_time: null,
-      crosses_midnight: false,
-      duration_minutes: 0,
+      ],
+      transaction,
     });
-  }
+    if (!shift_type) throw new Error("SHIFT_TYPE_NOT_FOUND");
 
-  // 3. UPSERT
-  const [work_shift] = await WorkShift.upsert(
-    {
-      owner_user_id: user_id,
-      work_date: new Date(work_date),
-      schedule_id: schedule.schedule_id,
-      note: note || null,
-      visibility_level: 0,
-      created_by_user_id: user_id,
-      deleted_at: null,
-      deleted_by_user_id: null,
-    },
-    {
-      returning: true,
-      conflictFields: ["owner_user_id", "work_date"],
+    const template = await ShiftTemplate.findOne({
+      where: { owner_user_id: user_id, deleted_at: null },
+      transaction,
+    });
+    if (!template) throw new Error("TEMPLATE_NOT_FOUND");
+
+    const latest_version = await ShiftTemplateVersion.findOne({
+      where: { template_id: template.template_id },
+      order: [["effective_from", "DESC"]],
+      transaction,
+    });
+    if (!latest_version) throw new Error("TEMPLATE_NOT_FOUND");
+
+    let schedule = await ShiftTypeSchedule.findOne({
+      where: {
+        shift_type_id: shift_type.shift_type_id,
+        template_version_id: latest_version.template_version_id,
+      },
+      transaction,
+    });
+    if (!schedule) {
+      schedule = await ShiftTypeSchedule.create(
+        {
+          shift_type_id: shift_type.shift_type_id,
+          template_version_id: latest_version.template_version_id,
+          start_time: null,
+          end_time: null,
+          crosses_midnight: false,
+          duration_minutes: 0,
+        },
+        { transaction },
+      );
     }
-  );
 
+    const [saved_work_shift] = await WorkShift.upsert(
+      {
+        owner_user_id: user_id,
+        work_date: new Date(work_date),
+        schedule_id: schedule.schedule_id,
+        note: note || null,
+        visibility_level: 0,
+        created_by_user_id: user_id,
+        deleted_at: null,
+        deleted_by_user_id: null,
+      },
+      {
+        returning: true,
+        conflictFields: ["owner_user_id", "work_date"],
+        transaction,
+      },
+    );
+    changed_months = await recordWorkShiftMonthChanges(
+      user_id,
+      [toYearMonth(work_date)],
+      transaction,
+    );
+    return saved_work_shift;
+  });
+
+  await invalidateChangedWorkShiftMonths(user_id, changed_months);
   return work_shift;
 }
 
@@ -631,94 +615,76 @@ export async function updateWorkShift(
   shift_type_code?: string,
   note?: string | null
 ): Promise<WorkShift> {
-  const work_shift = await WorkShift.findOne({
-    where: {
-      work_shift_id,
-      owner_user_id: user_id,
-      deleted_at: null,
-    },
+  let changed_months: ChangedWorkShiftMonth[] = [];
+  const work_shift = await sequelize.transaction(async (transaction) => {
+    const found_work_shift = await WorkShift.findOne({
+      where: { work_shift_id, owner_user_id: user_id, deleted_at: null },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!found_work_shift) throw new Error("WORK_SHIFT_NOT_FOUND");
+
+    const update_data: Partial<WorkShift> = {};
+    if (shift_type_code) {
+      const shift_type = await ShiftType.findOne({
+        where: { code: shift_type_code, deleted_at: null },
+        include: [
+          {
+            model: ShiftTemplate,
+            as: "template",
+            where: { owner_user_id: user_id, deleted_at: null },
+            required: true,
+          },
+        ],
+        transaction,
+      });
+      if (!shift_type) throw new Error("SHIFT_TYPE_NOT_FOUND");
+
+      const template = await ShiftTemplate.findOne({
+        where: { owner_user_id: user_id, deleted_at: null },
+        transaction,
+      });
+      if (!template) throw new Error("TEMPLATE_NOT_FOUND");
+      const latest_version = await ShiftTemplateVersion.findOne({
+        where: { template_id: template.template_id },
+        order: [["effective_from", "DESC"]],
+        transaction,
+      });
+      if (!latest_version) throw new Error("TEMPLATE_NOT_FOUND");
+
+      let schedule = await ShiftTypeSchedule.findOne({
+        where: {
+          shift_type_id: shift_type.shift_type_id,
+          template_version_id: latest_version.template_version_id,
+        },
+        transaction,
+      });
+      if (!schedule) {
+        schedule = await ShiftTypeSchedule.create(
+          {
+            shift_type_id: shift_type.shift_type_id,
+            template_version_id: latest_version.template_version_id,
+            start_time: null,
+            end_time: null,
+            crosses_midnight: false,
+            duration_minutes: 0,
+          },
+          { transaction },
+        );
+      }
+      update_data.schedule_id = schedule.schedule_id;
+    }
+    if (note !== undefined) update_data.note = note;
+    await found_work_shift.update(update_data, { transaction });
+    changed_months = await recordWorkShiftMonthChanges(
+      user_id,
+      [toYearMonth(formatDbDate(found_work_shift.work_date))],
+      transaction,
+    );
+    return found_work_shift;
   });
 
-  if (!work_shift) {
-    throw new Error("WORK_SHIFT_NOT_FOUND");
-  }
-
-  const update_data: Partial<WorkShift> = {};
-
-  if (shift_type_code) {
-    // shift_type_code로 schedule_id 찾기
-    const shift_type = await ShiftType.findOne({
-      where: {
-        code: shift_type_code,
-        deleted_at: null,
-      },
-      include: [
-        {
-          model: ShiftTemplate,
-          as: "template",
-          where: {
-            owner_user_id: user_id,
-            deleted_at: null,
-          },
-          required: true,
-        },
-      ],
-    });
-
-    if (!shift_type) {
-      throw new Error("SHIFT_TYPE_NOT_FOUND");
-    }
-
-    const template = await ShiftTemplate.findOne({
-      where: {
-        owner_user_id: user_id,
-        deleted_at: null,
-      },
-    });
-
-    if (!template) {
-      throw new Error("TEMPLATE_NOT_FOUND");
-    }
-
-    const latest_version = await ShiftTemplateVersion.findOne({
-      where: {
-        template_id: template.template_id,
-      },
-      order: [["effective_from", "DESC"]],
-    });
-
-    if (!latest_version) {
-      throw new Error("TEMPLATE_NOT_FOUND");
-    }
-
-    let schedule = await ShiftTypeSchedule.findOne({
-      where: {
-        shift_type_id: shift_type.shift_type_id,
-        template_version_id: latest_version.template_version_id,
-      },
-    });
-
-    // 스케줄이 없으면 기본 스케줄 생성 (시간 정보 없이 생성된 shift_type 대응)
-    if (!schedule) {
-      schedule = await ShiftTypeSchedule.create({
-        shift_type_id: shift_type.shift_type_id,
-        template_version_id: latest_version.template_version_id,
-        start_time: null,
-        end_time: null,
-        crosses_midnight: false,
-        duration_minutes: 0,
-      });
-    }
-
-    update_data.schedule_id = schedule.schedule_id;
-  }
-
-  if (note !== undefined) {
-    update_data.note = note;
-  }
-
-  await work_shift.update(update_data);
-
+  await invalidateChangedWorkShiftMonths(user_id, changed_months);
   return work_shift;
 }
 
@@ -729,22 +695,25 @@ export async function deleteWorkShift(
   user_id: string,
   work_shift_id: string
 ): Promise<void> {
-  const work_shift = await WorkShift.findOne({
-    where: {
-      work_shift_id,
-      owner_user_id: user_id,
-      deleted_at: null,
-    },
+  let changed_months: ChangedWorkShiftMonth[] = [];
+  await sequelize.transaction(async (transaction) => {
+    const work_shift = await WorkShift.findOne({
+      where: { work_shift_id, owner_user_id: user_id, deleted_at: null },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!work_shift) throw new Error("WORK_SHIFT_NOT_FOUND");
+    await work_shift.update(
+      { deleted_at: new Date(), deleted_by_user_id: user_id },
+      { transaction },
+    );
+    changed_months = await recordWorkShiftMonthChanges(
+      user_id,
+      [toYearMonth(formatDbDate(work_shift.work_date))],
+      transaction,
+    );
   });
-
-  if (!work_shift) {
-    throw new Error("WORK_SHIFT_NOT_FOUND");
-  }
-
-  await work_shift.update({
-    deleted_at: new Date(),
-    deleted_by_user_id: user_id,
-  });
+  await invalidateChangedWorkShiftMonths(user_id, changed_months);
 }
 
 /**
@@ -811,6 +780,7 @@ export async function batchUpsertWorkShifts(
   // 3. 트랜잭션 시작
   const transaction = await sequelize.transaction();
   let is_committed = false;
+  let changed_months: ChangedWorkShiftMonth[] = [];
 
   try {
     const saved_work_shifts: WorkShift[] = [];
@@ -916,9 +886,16 @@ export async function batchUpsertWorkShifts(
       saved_work_shifts.push(work_shift);
     }
 
+    changed_months = await recordWorkShiftMonthChanges(
+      user_id,
+      work_shifts.map((work_shift) => toYearMonth(work_shift.work_date)),
+      transaction,
+    );
+
     // 5. 트랜잭션 커밋
     await transaction.commit();
     is_committed = true;
+    await invalidateChangedWorkShiftMonths(user_id, changed_months);
 
     // 6. 저장된 근무 일정 상세 정보 조회 (트랜잭션 밖에서 수행)
     const work_shift_ids = saved_work_shifts.map((ws) => ws.work_shift_id);
