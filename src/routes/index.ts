@@ -3,6 +3,7 @@ import authRoutes from "./authRoutes";
 import scheduleRoutes from "./scheduleRoutes";
 import calendarRoutes from "./calendarRoutes";
 import friendRoutes from "./friendRoutes";
+import groupRoutes from "./groupRoutes";
 import { checkDatabaseConnection } from "../config/database";
 import { checkRedisConnection } from "../config/redis";
 
@@ -48,6 +49,7 @@ v1_router.use("/auth", authRoutes);
 v1_router.use("/schedules", scheduleRoutes);
 v1_router.use("/", calendarRoutes);
 v1_router.use("/", friendRoutes); // 친구 관련 라우트
+v1_router.use("/", groupRoutes); // 그룹 관련 라우트
 
 // v1 라우터 등록
 router.use("/v1", v1_router);

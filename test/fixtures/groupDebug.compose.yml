@@ -1,0 +1,22 @@
+name: shiftmate-group-debug
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: shift_calendar_group_debug
+      POSTGRES_USER: group_debug
+      POSTGRES_PASSWORD: group_debug_local_only
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U group_debug -d shift_calendar_group_debug
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    restart: "no"

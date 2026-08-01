@@ -1,5 +1,205 @@
 # 작업 일지
 
+## 2026-08-01
+
+### [DONE] 그룹 기능 원격 재현성 및 커밋 전 검증 정리
+
+- **목적**: 그룹 P0/P1 서버 구현, PostgreSQL 16 검증 환경, OpenAPI와 프론트 연동 문서를 하나의 재현 가능한 커밋으로 정리해 `origin/develop` 반영을 준비
+- **변경**:
+  - staged/unstaged/untracked 변경 범위와 비밀값·로컬 산출물 포함 여부 감사
+  - 홈서버 Docker PostgreSQL 16 환경에 맞게 공유 환경변수 예시를 `DB_SSL=false`로 교정하고 백업 식별자는 실제 `pg_dump`/pgAdmin 백업 파일명을 사용하도록 명시
+  - gitignore 대상인 migration 파일이 원격 체크아웃에 전부 없으면 정적 테스트를 명시적으로 skip하고 일부만 있으면 실패하도록 기준선 보정
+  - 격리된 PostgreSQL 16·Redis 컨테이너에서 그룹 및 기존 캐시 통합 테스트를 실행하고 종료 후 검증 컨테이너 제거
+- **영향범위**: 그룹 기능 전체 변경의 Git 이력과 커밋 전 검증. 실제 Stage/Center DB migration 또는 API 배포는 수행하지 않음
+- **파일**: 이번 그룹 기능 관련 tracked 변경 전체. `migrations/`, `AGENTS.md`, draw.io와 `.vscode`는 기존 gitignore 정책에 따라 로컬 산출물로 유지
+- **테스트**:
+  - `npm test`: TypeScript build 성공, 13건 성공, 인프라/별도 저장소 3건 의도된 skip
+  - `npm run test:group-integration`: PostgreSQL 16에서 8건 성공
+  - `npm run test:integration`: PostgreSQL 16·Redis 7.4에서 기존 캐시 통합 23건 성공
+  - migration 파일이 없는 원격 체크아웃 모사: 그룹 단위 테스트 7건 성공, migration 정적 테스트 2건 의도된 skip
+  - `npm audit --audit-level=high`: high 이상 취약점 0건
+- **롤백**: 커밋 후 문제가 발견되면 새 revert 커밋으로 되돌린다. 실제 DB는 이번 작업에서 변경하지 않음
+- **다음**: 커밋과 `origin/develop` push 후 Stage DB 백업·migration·P0 이미지 배포를 별도 승인 절차로 수행
+
+### [DONE] 프론트팀용 그룹 API 연동 가이드 작성
+
+- **목적**: Flutter 프론트팀이 그룹 목록·상세·캘린더·초대·관리 화면을 실제 서버 API에 연결할 수 있도록 배포 단계, 인증, 요청/응답 DTO, 오류 처리와 화면별 호출 흐름을 하나의 전달 문서로 제공
+- **변경**:
+  - 실제 `groupRoutes`, `groupController`, `groupService`, 공통 타입과 OpenAPI를 기준으로 P0/P1 endpoint 계약 정리
+  - Flutter 전용 DTO/상태 모델, `owner_user_id`·`calendar_access` 보존 규칙, 페이지네이션·날짜·색상·nullable 처리 기준 추가
+  - 초대 수락/거절과 알림 카드의 즉시 갱신, 역할별 UI 노출 및 오류 코드별 UX 처리 기준 추가
+  - 화면별 호출·갱신 흐름, Dio datasource 경계, 더미 제거 전 Stage 인수 테스트 체크리스트 추가
+  - 서버 운영 가이드와 PROJECT_CONTEXT에 프론트 가이드 역할·의존성·사용 예를 연결하고 기존 Swagger 미구현 설명을 그룹 전용 OpenAPI 구현 상태로 교정
+- **영향범위**: 문서만 변경하며 서버 API·DB 스키마·배포 동작에는 영향 없음
+- **파일**: `_docs/GROUP_FRONTEND_API_GUIDE.md`, `_docs/GROUP_API_GUIDE.md`, `_docs/PROJECT_CONTEXT.md`, `_docs/WORKLOG.md`
+- **문서 checksum (SHA-256)**: `_docs/GROUP_FRONTEND_API_GUIDE.md` `59ad882c09eaca6ea8b4f0dc69696afbf71a6edf73c02a8f695d2813e4bbef07`
+- **테스트**:
+  - `npm test`: TypeScript build 성공, 13건 성공, 인프라/별도 저장소 3건 의도된 skip
+  - OpenAPI path 10개와 그룹 도메인 오류 코드 19개가 가이드에 모두 존재함을 자동 대조
+  - JSON 예제 19개 파싱, Markdown fence 84개 균형, 참조 파일 8개 존재 확인
+  - `git diff --check` 성공
+- **롤백**: 신규 프론트 가이드와 기존 문서의 연결 항목 및 본 작업 일지 항목 제거
+- **다음**: Stage Base URL·배포된 phase를 서버팀과 확정한 뒤 Flutter 더미 데이터를 API datasource로 교체
+
+## 2026-07-29
+
+### [DONE] pgAdmin용 Stage 그룹 단일 migration 쿼리 준비
+
+- **목적**: psql meta-command를 사용할 수 없는 pgAdmin Query Tool에서 기존 Stage DB에 그룹 migration을 단일 SQL로 안전하게 적용
+- **변경**:
+  - `BEGIN/COMMIT`, transaction-local timeout/search path, 실행 context, preflight, public schema DDL, strict postflight를 한 파일에 결합
+  - 파일 상단에서 실제 Stage DB 이름, 복원 가능한 백업 식별자, `APPLY_GROUP_FEATURE_TO_STAGE` 확인 문자열을 요구
+  - PostgreSQL 16·primary/write 가능 상태·권한·기반 relation/컬럼·부분 적용·index 충돌을 DDL 전에 확인
+  - transaction advisory lock 뒤 그룹 테이블 3개와 FK/CHECK/partial unique/index/COMMENT 생성
+  - commit 전에 27개 컬럼, 20개 validated 제약, 11개 valid/ready index, partial unique 속성, COMMENT, 초기 데이터 0건 강제 판정
+  - pgAdmin 실행 절차를 그룹 API/배포 가이드와 PROJECT_CONTEXT에 반영하고 정적 계약 테스트 추가
+- **영향범위**: pgAdmin migration 산출물, 그룹 배포 문서와 정적 테스트. 실제 Stage DB에는 연결하거나 적용하지 않음.
+- **파일**:
+  - `migrations/pgadmin_stage_add_group_feature.sql`
+  - `test/groupService.test.cjs`
+  - `_docs/GROUP_API_GUIDE.md`, `_docs/DEPLOYMENT_GUIDE.md`, `_docs/PROJECT_CONTEXT.md`, `_docs/WORKLOG.md`
+- **SQL checksum (SHA-256)**: `812866a06470a3c3d0d686836c874d87e8f80d229977dc726d30d15f39e1a936`
+- **실제 PostgreSQL 16 검증**:
+  - placeholder 원본 실행은 preflight에서 실패하고 연결 종료 후 영구 그룹 테이블 0개 확인
+  - 세 설정값 입력 후 단일 실행에서 27개 컬럼, 20개 제약, 11개 index, 데이터 0건을 확인하고 commit 성공
+  - 같은 SQL 재실행은 기존 그룹 relation을 감지해 DDL 전에 실패
+  - 검증용 tmpfs PostgreSQL과 network 제거
+- **테스트**: `npm test`, pgAdmin SQL 정적 계약, PostgreSQL 16 실제 apply/postflight/reapply 차단, `git diff --check`
+- **롤백**: pgAdmin 전용 SQL과 문서·테스트 항목을 제거한다. 운영 장애 시에는 이전 API 이미지를 먼저 복원하고 그룹 테이블은 유지한다.
+- **다음**: 실제 Stage DB 이름과 백업 식별자를 입력한 파일을 pgAdmin에서 전체 Execute(F5)하고 Data Output을 증거로 저장
+
+### [DONE] 기존 Stage DB 그룹 migration 실행 쿼리 준비
+
+- **목적**: 기존 Stage PostgreSQL에 그룹 스키마를 안전하게 선적용할 수 있도록 대상 DB 확인, 의존 객체·부분 적용 감사, 실제 apply, 강제 postflight 검증을 분리한 실행 쿼리를 마련
+- **변경**:
+  - `stage_group_feature_preflight.sql`: 실제 DB 이름, PostgreSQL 16, primary/write 가능 상태, schema/table 권한, `pgcrypto`, 그룹 API 기반 relation·컬럼, 부분 적용 relation과 index 이름 충돌을 read-only 감사
+  - `stage_apply_group_feature.sql`: 명시적 승인, 복원 가능한 백업 식별자, 승인된 DDL checksum, advisory lock, 5초 DDL lock timeout과 `search_path=public,pg_catalog`을 강제하고 기존 `add_group_feature.sql`을 정본으로 호출
+  - `stage_group_feature_postflight.sql`: 27개 컬럼, 20개 validated 제약, 11개 valid/ready index, partial/unique 속성, 필수 COMMENT와 API 배포 전 초기 데이터 0건을 예외 기반으로 판정
+  - PostgreSQL 16 `psql`이 `\quit 3` 인자를 무시하는 사실을 실제 실행에서 확인해 신규 guard와 기존 rollback guard를 `RAISE EXCEPTION + ON_ERROR_STOP`으로 변경
+  - 그룹 API/배포 가이드와 PROJECT_CONTEXT에 Stage 실행 명령, 실패 조건, 신규 파일 역할·의존성·사용 예 반영
+  - Stage wrapper 정적 계약 테스트 추가
+- **영향범위**: migration 실행 보조 SQL, rollback 승인 실패의 종료 코드, 그룹 배포 문서와 정적 테스트. 실제 Stage DB에는 연결하거나 적용하지 않음.
+- **파일**:
+  - `migrations/stage_group_feature_preflight.sql`
+  - `migrations/stage_apply_group_feature.sql`
+  - `migrations/stage_group_feature_postflight.sql`
+  - `migrations/rollback_group_feature.sql`
+  - `test/groupService.test.cjs`
+  - `_docs/GROUP_API_GUIDE.md`, `_docs/DEPLOYMENT_GUIDE.md`, `_docs/PROJECT_CONTEXT.md`, `_docs/WORKLOG.md`
+- **SQL checksum (SHA-256)**:
+  - `add_group_feature.sql`: `0f5e86cbd607257d23a91581f8abc20a77390ff7273c9a3d96df4a4f7046f92a`
+  - `rollback_group_feature.sql`: `42887d46435d8ff00b5f82af202712c8b41c9f9d8cbd1f1a741a5fc52fb5043a`
+  - `stage_group_feature_preflight.sql`: `0e27ecd6e753042d1185f3dfd4aa6a91053095057fbc13513d15ceff9608df20`
+  - `stage_apply_group_feature.sql`: `f94dfab277d4e9a392176a4741fcd2cac7c871269d24da0bbd783d9a2969aa74`
+  - `stage_group_feature_postflight.sql`: `762bea586ac187ae5b6eb1b2a36783c0ee6a719f5dd11192fdd0c7d784fe7778`
+- **실제 PostgreSQL 16 검증**:
+  - 승인 누락, 잘못된 `expected_database`, 기존 그룹 테이블 재적용을 각각 DDL 전에 종료 코드 3으로 차단
+  - read-only preflight 단독 성공 및 정상 wrapper의 preflight → apply → strict postflight 성공
+  - 초기 `search_path=pg_catalog` 연결에서도 public에 테이블 생성, 27개 컬럼·20개 제약·11개 index·COMMENT·데이터 0건 확인
+  - rollback 승인 누락이 종료 코드 3을 반환하고 기존 그룹 테이블을 유지함을 확인
+  - 검증용 tmpfs PostgreSQL 컨테이너와 network 제거
+- **테스트**:
+  - `npm test`: 13건 성공, 인프라/별도 저장소 3건 의도된 skip
+  - `npm run test:group-integration`: migration apply/rollback/reapply 포함 8건 성공
+  - `git diff --check` 성공
+- **롤백**: 신규 Stage SQL 3개와 문서·정적 테스트를 제거하고 rollback guard를 이전 형태로 복원한다. 운영 장애 시에는 SQL rollback이 아니라 이전 API 이미지를 먼저 복원하고 그룹 테이블은 유지한다.
+- **다음**: Stage 백업 식별자와 실제 DB 이름을 확인한 뒤 read-only preflight 결과를 먼저 검토하고, 별도 승인 후 wrapper를 1회 수동 실행
+
+### [DONE] 그룹 실제 동작 검증 체크리스트 및 디버깅 준비
+
+- **목적**: 그룹 기능을 문서·정적 테스트 수준이 아니라 실제 PostgreSQL/Express 런타임과 디버거에서 재현·검증할 수 있는 기준과 안전한 실행 환경을 마련
+- **변경**:
+  - migration, P0/P1 API, transaction·잠금 경쟁, 공개 ACL·날짜 경계·3-query aggregate, 알림·OpenAPI·로그·롤백을 Local/Stage 증거로 판정하는 실제 동작 체크리스트 추가
+  - PostgreSQL 16을 `127.0.0.1:55432`와 tmpfs로만 실행하는 그룹 디버그 Compose와 up/down npm script 추가
+  - 그룹 integration은 명시적 reset 승인, 고정 host·port·DB·user가 모두 일치할 때만 파괴적 fixture에 진입하도록 보호
+  - fixture setup 실패 시 생성되지 않은 HTTP server를 닫아 2차 오류가 발생하지 않도록 teardown 보정
+  - VS Code/DebugMCP에 build source map 기반 `Debug group integration (isolated PostgreSQL 16)` 구성과 D1~D5 line-content/locals/watch 시나리오 추가
+  - PROJECT_CONTEXT와 그룹 API 가이드에 신규 파일 역할·의존성·실행·정리 순서 반영
+- **영향범위**: 그룹 검증 문서, 로컬 디버그 PostgreSQL, 그룹 integration 실행 안전장치. 그룹 공개 API와 운영 DB 스키마 동작은 변경하지 않음.
+- **파일**:
+  - `_docs/GROUP_RUNTIME_VERIFICATION_CHECKLIST.md`
+  - `test/fixtures/groupDebug.compose.yml`
+  - `test/groupIntegration.test.cjs`
+  - `package.json`
+  - `.vscode/launch.json`(gitignore 대상 로컬 디버그 설정)
+  - `_docs/PROJECT_CONTEXT.md`, `_docs/GROUP_API_GUIDE.md`, `_docs/WORKLOG.md`
+- **검증 산출물 checksum (SHA-256)**:
+  - `_docs/GROUP_RUNTIME_VERIFICATION_CHECKLIST.md`: `60397230757b83eaf7c0fd0ecef81c87c8ba4a57078e5910ac7483c910aea5f0`
+  - `test/fixtures/groupDebug.compose.yml`: `43c0e68755e6562d706868530b6be1223aeaa307e7393510083c69d2d903586a`
+  - `.vscode/launch.json`: `8a684c381cde58a8d3ec902ae8e23ec98bb2d4dd00d63e16d206a07d83af6ccc`
+- **실제 동작 확인**:
+  - reset 승인 누락과 DB 이름 불일치에서 각각 DB module import·연결 전에 명시적 실패 확인
+  - DB 식별값 `shift_calendar_group_debug/group_debug`, PostgreSQL `16.14`, publish `127.0.0.1:55432` 확인
+  - DebugMCP가 `src/services/groupService.ts:739`에 source-map breakpoint로 도달해 `Atomic Failure`와 `Ward Team` 입력의 actor, creator/final timezone, invitee locals 확인
+  - 중단점 2개 제거, 디버그 세션 정상 종료, 종료 후 통합 테스트 재통과 및 tmpfs 컨테이너·전용 network 제거
+- **테스트**:
+  - `npm test`: 12건 성공, 인프라/별도 저장소 3건 의도된 skip
+  - `npm run test:group-integration`: 디버깅 전·후 각 8건 전부 성공
+  - launch JSON parse, Compose config, TypeScript build, `git diff --check` 성공
+- **롤백**: 신규 체크리스트·Compose 파일·npm script·launch 구성을 제거하고 integration guard/teardown을 이전 상태로 복원한다. DB는 `npm run debug:group-db:down`으로 제거한다.
+- **다음**: 체크리스트 D2~D5에 따라 초대 수락 lock 경쟁, ACL query 결과, 소유권 이전, 그룹 삭제 transaction을 DebugMCP로 각각 추적하고 Stage P0 실제 요청·20명/100일 측정 증거를 기록
+
+### [DONE] 그룹 기능 DB Migration 및 P0/P1 서버 API 구현
+
+- **목적**: Flutter 그룹 목록·상세·캘린더 화면의 더미 데이터를 제거하고, 기존 친구 공개 규칙을 재사용하는 그룹 관리·초대·캘린더 API를 단계 배포 가능한 형태로 제공
+- **변경**:
+  - `groups`, `group_members`, `group_invitations` expand migration에 부분 적용 preflight, FK/CHECK/partial unique/index/COMMENT와 postflight 감사를 추가하고 명시적 데이터 폐기 승인 rollback SQL 작성
+  - Group/GroupMember/GroupInvitation 모델, 공통 DTO·캘린더 직렬화 유틸, 기존 Controller–Service–Model 구조의 P0 7개 및 P1 관리 endpoint 구현
+  - 그룹 row 선잠금, 동시 초대 수락, 20명 제한, 만료·재초대, soft-delete 재가입, 역할·소유권 이전·삭제 transaction invariant 적용
+  - friendship·소유자→조회자 `can_view`와 기존 visibility view를 재사용하고 멤버/근무/이벤트 최대 3-query aggregate 구현
+  - 기존 notifications의 그룹 초대·수락·거절·취소·만료 terminal 상태, 그룹 전용 개인정보 비기록 구조화 로그 추가
+  - `API_DOCS_ENABLED=true`에서 그룹 OpenAPI 3.0.3 JSON과 Swagger UI를 노출하고 high 취약점이 생기지 않도록 dependency 잠금 갱신
+  - 배포 파일이 별도 저장소로 모두 이동한 경우 정적 테스트를 명시적으로 skip하고 일부만 존재하면 실패하도록 기준선 보정
+  - ADR-0021, PROJECT_CONTEXT, 그룹 API/배포 가이드, 최종 DDL, AGENTS DDL, schema/visibility draw.io 동기화
+- **영향범위**: PostgreSQL 스키마, Express 그룹 API, 알림, 환경변수, API 문서, 테스트·운영 문서
+- **파일**:
+  - DB/모델: `migrations/add_group_feature.sql`, `migrations/rollback_group_feature.sql`, `migrations/final_schema.sql`, `src/models/Group.ts`, `src/models/GroupMember.ts`, `src/models/GroupInvitation.ts`
+  - API: `src/types/group.ts`, `src/utils/calendarSerialization.ts`, `src/services/groupService.ts`, `src/controllers/groupController.ts`, `src/routes/groupRoutes.ts`, `src/openapi.ts`, `src/openapi/groupOpenApi.json`
+  - 테스트: `test/groupService.test.cjs`, `test/groupIntegration.test.cjs`, `test/fixtures/groupIntegrationBaseSchema.sql`, `test/deploymentCacheRollout.test.cjs`
+  - 문서/설정: `.env.example`, `_docs/GROUP_API_GUIDE.md`, `_docs/PROJECT_CONTEXT.md`, `_docs/DECISIONS.md`, `_docs/DEPLOYMENT_GUIDE.md`, `AGENTS.md`, `schema.drawio`, `visibility_flow.drawio`
+- **운영 로컬 산출물 checksum (SHA-256)**:
+  - `migrations/add_group_feature.sql`: `0f5e86cbd607257d23a91581f8abc20a77390ff7273c9a3d96df4a4f7046f92a`
+  - `migrations/rollback_group_feature.sql`: `42887d46435d8ff00b5f82af202712c8b41c9f9d8cbd1f1a741a5fc52fb5043a`
+  - `migrations/final_schema.sql`: `589ab0e967340aec161f2cecd0007bcffd50b9d6912b2d18d0c4565256e9a083`
+  - `AGENTS.md`: `bdb3e02b572ffaaf6920d1888af0808435610204937cf488ae55e2fd41677fd3`
+  - `schema.drawio`: `968b25cc7f3f53cde6b8dbbc296f8bb917333a5f45b884baa061a6c4cc520afb`
+  - `visibility_flow.drawio`: `4ae55697affc7f87dfe5397bf19bffcf90417e3c78f09429a739f9b34e301561`
+- **적용 대상/결과**: 실제 Stage/Center DB에는 적용하지 않음. 폐기 가능한 로컬 PostgreSQL 16 컨테이너에 expand apply → 기존 객체 preflight 중단 → rollback → reapply와 `final_schema.sql` 전체 적용을 확인한 뒤 컨테이너·임시 데이터를 삭제
+- **테스트**:
+  - `npm test`: build 성공, 그룹/캐시 단위 12건 성공, 격리 인프라 진입점 2건과 별도 배포 저장소 정적 테스트 1건은 의도대로 skip
+  - PostgreSQL 16 `npm run test:group-integration`: migration, 원자성, partial unique, 동시 수락, 제한·만료, P1 관리, OpenAPI/인증/권한/개인정보 계약, 20명·100일·timezone 경계·soft-delete·3-query 공개 회귀 8건 성공
+  - PostgreSQL 16/Redis 7.4 `npm run test:integration`: 기존 월 캐시·Outbox 회귀 23건 성공
+  - `npm audit --audit-level=high`: 취약점 0건
+  - OpenAPI JSON parse, draw.io 2개 XML parse, `git diff --check` 성공
+- **롤백**: 이전 API 이미지를 먼저 복원하고 신규 그룹 테이블은 유지한다. 그룹 데이터 폐기가 별도 승인된 경우에만 백업·명시적 확인 후 rollback SQL을 실행
+- **다음**: Stage DB 백업 → checksum 대조 → migration preflight/apply/postflight → P0 이미지 배포와 Swagger·20명/100일 측정 → Flutter 계약 확인 → P1/Center 배포
+
+## 2026-07-23
+
+### [DONE] 공유 Redis 월별 근무표 캐시 전략 FigJam 기록
+
+- **목적**: 본인·친구 캘린더 조회가 동일한 사용자·월 snapshot을 사용하는 흐름과 쓰기·Outbox 무효화 정합성을 한눈에 확인할 수 있도록 시각화
+- **변경**:
+  - `근무표 캐시 조회 전략`: 인증·날짜 validation, 친구 권한 DB 검사, 월 분할, Redis hit/miss·stampede lock·DB fallback, revision fence, 개인 일정 비캐시, ETag 범위 시각화
+  - `근무표 캐시 쓰기 및 무효화 전략`: 근무표·근무 타입 변경 월 결정, 원본·revision·Outbox 단일 transaction, commit 후 즉시 무효화, worker claim·재시도·회수·정리 시각화
+  - `PROJECT_CONTEXT.md`에 [ShiftMate 근무표 캐시 전략 FigJam](https://www.figma.com/board/7U2SsaPGC6I670W7DQnEP1) 정본 링크 추가
+- **영향범위**: Figma 외부 문서와 프로젝트 문서 링크만 변경하며 API·DB·Redis 동작에는 영향 없음
+- **파일**: Figma FigJam, `_docs/PROJECT_CONTEXT.md`, `_docs/WORKLOG.md`
+- **테스트**: Figma API에서 첫 다이어그램 생성과 같은 파일의 두 번째 다이어그램 추가 성공, 흐름을 현재 코드·ADR-0020·프로젝트 컨텍스트와 대조, `git diff --check` 확인
+- **롤백**: 생성한 FigJam 파일을 삭제하고 `PROJECT_CONTEXT.md` 링크 및 이 작업 일지 항목을 제거
+
+### [DONE] 월별 근무표 캐시 운영 확인·Stage 로컬 디버깅 문서 보강
+
+- **목적**: 인증 실패 요청의 캐시 미생성, 본인·친구 조회의 동일 월 key 공유, 로컬 API의 Stage 자원 연결 시 Outbox worker 위험을 운영자가 오해하지 않도록 확인 절차와 안전 경계를 문서화
+- **변경**:
+  - `PROJECT_CONTEXT.md`에 캐시 적용 API, 소유자·월 key 공유, events 비캐시, `401`/`400` 미생성, `DBSIZE` 해석 계약 추가
+  - Stage PostgreSQL·Redis를 SSH tunnel로 사용하는 로컬 API는 별도 prefix와 읽기 전용 DB 계정을 사용하고 local worker를 실행하지 않는 안전 경계 추가
+  - `DEPLOYMENT_GUIDE.md`에 Redis/cache 환경변수, readiness 상태, 인증 조회·snapshot·Outbox 검증 및 장애 확인 절차 추가
+- **영향범위**: 문서만 변경하며 API·DB·Redis·배포 동작에는 영향 없음
+- **파일**: `_docs/PROJECT_CONTEXT.md`, `_docs/DEPLOYMENT_GUIDE.md`, `_docs/WORKLOG.md`
+- **테스트**: Markdown fence 균형, 캐시 key·라우트·환경변수·worker 실행 명령을 현재 코드와 대조, `git diff --check` 성공
+- **롤백**: 이번 문서 섹션과 작업 일지 항목만 제거
+
 ## 2026-07-22
 
 ### [DONE] 공유 Redis 캐시 완료 감사 및 경쟁 조건 검증 보강

@@ -1072,3 +1072,67 @@ Flutter 색상 선택기는 기준 색상을 흰색과 혼합해 농도가 적�
 - events 조회가 실제 DB 병목으로 확인되면 기간 겹침과 visibility를 별도 설계한 뒤 캐시 범위 확대
 - 다중 홈서버/Redis HA가 필요해지면 managed Redis 또는 Sentinel/Cluster 전환 검토
 - Outbox 지연과 hit ratio를 장기 수집할 관측 시스템 도입
+
+---
+
+## ADR-0021: 기존 친구 ACL을 재사용하는 그룹 aggregate와 P0/P1 단계 배포
+
+### 배경(문제)
+
+Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 서버 계약으로 교체해야 합니다. 그룹 가입 자체가 개인 캘린더 공개 권한을 넓혀서는 안 되며, 최대 20명·100일 조회에서 멤버별 API/SQL 반복이나 기존 owner별 Redis snapshot miss N+1도 피해야 합니다.
+
+### 선택지(대안)
+
+1. 그룹은 멤버십만 관리하고 기존 `friendships + friend_level_settings`를 재사용하며 PostgreSQL set-based aggregate 조회
+2. 그룹 가입 시 별도 그룹 캘린더 ACL 자동 생성
+3. 그룹 소유 캘린더·일정·근무 테이블 신설
+4. 멤버마다 기존 친구 캘린더 API와 Redis 월 snapshot을 반복 호출
+
+### 결정(무엇을 선택)
+
+**그룹은 `groups`, `group_members`, `group_invitations`만 소유하고 개인 캘린더는 기존 친구 ACL로 공개하며, 캘린더 aggregate는 고정 3개 PostgreSQL query로 조회**합니다.
+
+- 본인은 전체 공개, 다른 멤버는 friendship 존재·`can_view=true`일 때 `VISIBLE`, 그 외 `DENIED`
+- visible 이벤트는 기존 `friend_level >= visibility_level`, 근무는 고정 visibility 0 규칙 적용
+- 그룹 캘린더에서는 owner별 Redis v1 snapshot을 사용하지 않음
+- DB 스키마는 P1까지 한 번에 expand하고 P0 7개 endpoint를 먼저 배포한 뒤 같은 스키마에서 P1 관리 endpoint 배포
+- 모든 그룹 쓰기는 Sequelize transaction을 사용하고 기존 그룹 변경은 group row를 먼저 잠금
+- 비멤버·삭제 그룹은 `404 GROUP_NOT_FOUND`, 활성 멤버의 역할 부족만 `403 GROUP_PERMISSION_DENIED`
+- 초대와 처리 결과는 기존 `notifications`를 source of truth인 받은 초대 API와 함께 사용
+
+### 근거(왜)
+
+- 그룹 참여가 사용자 개인 공개 정책을 암묵적으로 변경하지 않음
+- 멤버·근무·이벤트 3개 set-based query로 멤버 수에 따른 N+1 제거
+- 기존 개인/친구 캘린더 캐시의 owner별 월 key 계약과 무효화 구조를 변경하지 않음
+- expand migration을 서버보다 먼저 적용할 수 있고 이전 API는 신규 테이블을 참조하지 않아 하위 호환
+- Flutter가 필요한 읽기/초대 계약을 P0에서 먼저 검증하고 관리 기능 위험을 P1로 분리
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 개인 캘린더 공개 의미와 그룹 멤버십 책임 분리
+- `DENIED` 멤버를 유지하면서 숨겨진 row 및 개수 비노출
+- 그룹 row 잠금으로 멤버 제한, 동시 수락, 역할, 소유권 이전 직렬화
+- 이전 API 이미지 우선 복원 후 신규 테이블을 유지하는 운영 롤백 가능
+
+**트레이드오프**:
+
+- 그룹 aggregate는 Redis hit 이점을 사용하지 않고 매 요청 PostgreSQL을 조회
+- 그룹 멤버라도 친구가 아니거나 `can_view=false`면 캘린더가 비공개
+- 초대 만료는 읽기·재초대·응답 시 정리되며 별도 정기 batch는 이번 범위에 없음
+
+### 구현 위치
+
+- **DB**: `migrations/add_group_feature.sql`, `migrations/rollback_group_feature.sql`
+- **모델/서비스**: `src/models/Group*.ts`, `src/services/groupService.ts`
+- **HTTP**: `src/routes/groupRoutes.ts`, `src/controllers/groupController.ts`
+- **계약 문서**: `src/openapi/groupOpenApi.json`, `_docs/GROUP_API_GUIDE.md`
+- **테스트**: `test/groupService.test.cjs`, `test/groupIntegration.test.cjs`
+
+### 추후 과제(언제 다시 평가)
+
+- Stage 측정에서 그룹 aggregate DB query time이 병목일 때만 set-based multi-owner cache 설계
+- 외부 push 인프라가 도입되면 `invitation_id` idempotency key 기반 비동기 발송 추가
+- 20명·100일 한도나 그룹별 공개 정책 요구가 변경될 때 스키마와 개인정보 노출 위험 재평가

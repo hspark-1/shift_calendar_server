@@ -26,6 +26,14 @@ export { default as FriendRequest, FriendRequestStatus } from "./FriendRequest";
 export { default as Friendship } from "./Friendship";
 export { default as FriendLevelSetting } from "./FriendLevelSetting";
 
+// 그룹 관련
+export { default as Group } from "./Group";
+export { default as GroupMember, GroupRole } from "./GroupMember";
+export {
+  default as GroupInvitation,
+  GroupInvitationStatus,
+} from "./GroupInvitation";
+
 // 알림 관련
 export {
   default as Notification,

@@ -4,10 +4,32 @@ const path = require("node:path");
 const test = require("node:test");
 
 const repository_root = path.resolve(__dirname, "..");
+const deployment_files = [
+  "deploy/compose.production.yaml",
+  "deploy/shiftmate-deploy",
+  "deploy/shiftmate-bootstrap",
+  ".github/workflows/deploy-production.yml",
+];
+const present_deployment_files = deployment_files.filter((relative_path) =>
+  fs.existsSync(path.join(repository_root, relative_path)),
+);
 
 function readRepositoryFile(relative_path) {
   return fs.readFileSync(path.join(repository_root, relative_path), "utf8");
 }
+
+if (present_deployment_files.length === 0) {
+  test.skip(
+    "배포 정적 테스트: 별도 배포 저장소로 이동한 파일이 현재 저장소에 없어 건너뜀",
+    () => {},
+  );
+} else {
+  test(
+    "배포 정적 테스트 파일은 전부 존재하거나 전부 별도 저장소에 있어야 한다",
+    () => {
+      assert.deepEqual(present_deployment_files, deployment_files);
+    },
+  );
 
 test("Center Compose는 공유 Redis와 색상별 worker를 외부 포트 없이 정의한다", () => {
   const compose = readRepositoryFile("deploy/compose.production.yaml");
@@ -101,3 +123,4 @@ test("CI는 PostgreSQL·Redis 통합 테스트를 이미지 빌드 전에 실행
   assert.ok(integration_test > redis_service);
   assert.ok(image_build > integration_test);
 });
+}

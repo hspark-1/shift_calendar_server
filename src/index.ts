@@ -15,6 +15,7 @@ import routes from "./routes";
 import { errorHandler } from "./middlewares/errorHandler";
 import { logError } from "./utils/logger";
 import { disconnectRedis } from "./config/redis";
+import { registerApiDocs } from "./openapi";
 
 const app = express();
 const port = getPositiveIntegerEnvironmentVariable("PORT", 3000);
@@ -138,6 +139,7 @@ if (node_env === "development") {
 }
 
 // 라우트 설정
+registerApiDocs(app);
 app.use("/api", routes);
 
 // 에러 핸들러
@@ -202,11 +204,14 @@ async function shutdownServer(signal: string): Promise<void> {
   }
 }
 
-process.once("SIGTERM", () => {
-  void shutdownServer("SIGTERM");
-});
-process.once("SIGINT", () => {
-  void shutdownServer("SIGINT");
-});
+export { app };
 
-startServer();
+if (require.main === module) {
+  process.once("SIGTERM", () => {
+    void shutdownServer("SIGTERM");
+  });
+  process.once("SIGINT", () => {
+    void shutdownServer("SIGINT");
+  });
+  void startServer();
+}

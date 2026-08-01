@@ -8,6 +8,9 @@
     "build": "tsc",
     "test": "npm run build && node --test test/*.test.cjs",
     "test:integration": "RUN_CACHE_INTEGRATION=true node --test test/cacheIntegration.test.cjs",
+    "debug:group-db:up": "docker compose -f test/fixtures/groupDebug.compose.yml up -d --wait",
+    "debug:group-db:down": "docker compose -f test/fixtures/groupDebug.compose.yml down --volumes --remove-orphans",
+    "test:group-integration": "npm run build && RUN_GROUP_INTEGRATION=true GROUP_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/groupIntegration.test.cjs",
     "start": "node dist/index.js",
     "start:cache-worker": "node dist/workers/workShiftCacheWorker.js"
   },
@@ -33,7 +36,8 @@
     "pg-hstore": "^2.3.4",
     "qs": "^6.15.3",
     "redis": "6.1.0",
-    "sequelize": "^6.37.8"
+    "sequelize": "^6.37.8",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -43,6 +47,7 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.10.3",
     "@types/qs": "^6.14.0",
+    "@types/swagger-ui-express": "^4.1.8",
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"

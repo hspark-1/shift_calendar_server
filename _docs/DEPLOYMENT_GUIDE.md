@@ -29,6 +29,18 @@ INSTANCE_NAME=shiftmate-api-1
 REQUEST_BODY_LIMIT=100kb
 AUTH_RATE_LIMIT_WINDOW_MS=60000
 AUTH_RATE_LIMIT_MAX=10
+WORK_SHIFT_CACHE_ENABLED=false # migration/Redis/worker 확인 후 true
+REDIS_URL=                     # redis://:<password>@<service>:6379
+REDIS_PASSWORD=                # Redis Compose와 REDIS_URL에 같은 값 사용
+CACHE_KEY_PREFIX=              # Stage/Center에서 서로 다른 값
+WORK_SHIFT_CACHE_TTL_SECONDS=86400
+WORK_SHIFT_CACHE_TTL_JITTER_SECONDS=3600
+WORK_SHIFT_CACHE_LOCK_MS=5000
+WORK_SHIFT_CACHE_WAIT_MS=500
+REDIS_CONNECT_TIMEOUT_MS=500
+REDIS_COMMAND_TIMEOUT_MS=100
+CACHE_OUTBOX_POLL_MS=1000
+CACHE_OUTBOX_BATCH_SIZE=100
 NAVER_CLIENT_ID=               # 네이버 로그인 사용 시
 NAVER_CLIENT_SECRET=           # 네이버 로그인 사용 시
 KAKAO_CLIENT_ID=               # 카카오 로그인 사용 시
@@ -214,11 +226,11 @@ DB_SSL=false
 TRUST_PROXY_HOPS=0
 ```
 
-### 프로덕션 환경
+### 프로덕션 환경(현재 홈서버 내부 Docker PostgreSQL 16)
 
 ```env
 NODE_ENV=production
-DB_SSL=true    # RDS 등 외부 DB 사용 시
+DB_SSL=false   # 홈서버 내부 Docker PostgreSQL 16
 TRUST_PROXY_HOPS=1
 CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
 DB_POOL_MAX=10
@@ -228,6 +240,8 @@ REQUEST_BODY_LIMIT=100kb
 AUTH_RATE_LIMIT_WINDOW_MS=60000
 AUTH_RATE_LIMIT_MAX=10
 ```
+
+PostgreSQL 접속 경로에 TLS를 별도로 구성한 경우에만 `DB_SSL=true`로 변경합니다.
 
 `DB_SYNC=true`는 개발/운영 구분 없이 허용하지 않습니다.
 
@@ -420,6 +434,64 @@ curl http://localhost:3000/api/v1/auth/profile \
   -H "Authorization: Bearer {access_token}"
 ```
 
+readiness는 HTTP 상태뿐 아니라 응답의 `cache` 값을 확인합니다.
+
+- `ready`: Redis 캐시 사용 가능
+- `degraded`: Redis 장애로 PostgreSQL fallback 중
+- `disabled`: `WORK_SHIFT_CACHE_ENABLED=false`
+
+### 월별 근무표 캐시 확인
+
+1. `WORK_SHIFT_CACHE_ENABLED=true` 적용 후 API와 worker를 함께 재생성합니다.
+2. `GET /api/v1/health/ready`에서 `cache=ready`를 확인합니다.
+3. 유효한 Bearer access token과 `start_date/end_date`를 포함해 자기 또는 친구 캘린더를 조회합니다.
+4. Redis에서는 `KEYS *` 대신 환경 prefix로 `SCAN`합니다.
+
+```bash
+curl -i \
+  -H "Authorization: Bearer {access_token}" \
+  "http://localhost:3000/api/v1/work-shifts?start_date=2026-07-01&end_date=2026-07-31"
+```
+
+snapshot key 형식:
+
+```text
+{CACHE_KEY_PREFIX}:work-shifts:v1:{owner_user_id}:{YYYYMM}
+```
+
+- 자기 조회와 친구 조회는 같은 소유자·월 key를 공유합니다.
+- 빈 달도 빈 배열 snapshot으로 저장합니다.
+- 이미 존재하는 key의 재조회는 `DBSIZE`를 늘리지 않습니다.
+- 개인 일정 `events`는 Redis 캐시 대상이 아닙니다.
+- cache worker는 snapshot을 생성하지 않고 변경된 월의 snapshot을 무효화합니다.
+
+Outbox 적체 확인:
+
+```sql
+SELECT
+  COUNT(*) FILTER (WHERE processed_at IS NULL) AS pending,
+  MAX(now() - created_at)
+    FILTER (WHERE processed_at IS NULL) AS oldest_pending_age
+FROM work_shift_cache_outbox;
+```
+
+### 로컬 API에서 Stage DB·Redis 확인
+
+- Stage Redis에 외부 포트를 열지 않고 SSH local forwarding으로 PostgreSQL·Redis에 접근합니다.
+- `.env.stage.local`에 터널 포트와 Stage 자격증명을 저장하고 `CACHE_KEY_PREFIX=shiftmate:stage-local:<개발자>`처럼 실제 Stage와 다른 namespace를 사용합니다.
+- Node 22에서는 다음처럼 별도 환경파일로 API만 실행합니다.
+
+```bash
+node \
+  --env-file=.env.stage.local \
+  --inspect \
+  -r ts-node/register \
+  src/index.ts
+```
+
+- 로컬 API의 쓰기 요청은 실제 Stage DB를 변경하므로 읽기 전용 DB 계정과 기존 Stage access token을 우선 사용합니다.
+- **Stage DB를 바라보는 로컬 환경에서 `npm run start:cache-worker`를 실행하면 안 됩니다.** 로컬 worker가 Stage Outbox를 claim해 실제 Stage namespace의 무효화 이벤트를 유실시킬 수 있습니다.
+
 ---
 
 ## 트러블슈팅
@@ -458,6 +530,29 @@ curl http://localhost:3000/api/v1/auth/profile \
 2. 서버가 재시작되었는가?
 3. `.env` 파일이 올바른 위치에 있는가? (프로젝트 루트)
 
+### 문제: 근무표를 조회했는데 Redis key가 없음
+
+**확인 사항**:
+
+1. access log의 상태가 `200`인가? `401`은 인증 단계, `400`은 날짜 validation 단계에서 종료되어 캐시를 생성하지 않습니다.
+2. 요청에 `Authorization: Bearer ...`, `start_date`, `end_date`가 모두 있는가?
+3. readiness 응답이 단순 HTTP 200이 아니라 `cache=ready`인가?
+4. API 컨테이너가 변경된 `.env`로 재생성되었는가?
+5. API의 `REDIS_URL`이 지금 확인 중인 Redis 인스턴스를 가리키는가?
+6. `CACHE_KEY_PREFIX`를 포함한 `SCAN` 결과를 확인했는가?
+
+친구가 기존 소유자·월 snapshot을 재사용하면 정상적으로 캐시 hit가 발생해도 `DBSIZE`는 증가하지 않습니다.
+
+### 문제: Redis는 정상인데 Outbox pending이 계속 증가함
+
+**확인 사항**:
+
+1. cache worker 컨테이너가 API와 같은 image/env를 사용하는가?
+2. worker health가 PostgreSQL과 Redis 모두에 대해 성공하는가?
+3. `WORK_SHIFT_CACHE_ENABLED=true`가 API와 worker에 함께 적용됐는가?
+4. `last_error_code`, `attempt_count`, `next_attempt_at`, `claimed_at`을 조회했는가?
+5. 같은 Stage DB를 바라보는 로컬 worker가 실행 중이지 않은가?
+
 ---
 
 ## 보안 체크리스트
@@ -490,5 +585,48 @@ curl http://localhost:3000/api/v1/auth/profile \
 
 ---
 
-**문서 버전**: 1.1
-**최종 업데이트**: 2026-07-19
+## 그룹 기능 P0/P1 배포
+
+### 환경변수
+
+```env
+GROUP_MEMBER_LIMIT=20
+GROUP_INVITATION_TTL_DAYS=7
+GROUP_CALENDAR_MAX_RANGE_DAYS=100
+# Local/Stage=true, Center=false
+API_DOCS_ENABLED=false
+```
+
+### Stage P0
+
+1. Stage PostgreSQL 백업과 복원 가능 여부를 확인합니다.
+2. pgAdmin Query Tool을 사용하면 `migrations/pgadmin_stage_add_group_feature.sql` 상단의 DB명·백업 식별자·확인 문자열을 입력하고 전체 SQL을 한 번에 실행합니다.
+3. psql을 사용하면 실제 Stage DB 이름을 `expected_database`로 전달해 `migrations/stage_group_feature_preflight.sql`을 read-only 실행하고 결과를 보관합니다.
+4. `migrations/add_group_feature.sql`의 SHA-256이 승인값 `0f5e86cbd607257d23a91581f8abc20a77390ff7273c9a3d96df4a4f7046f92a`인지 확인합니다.
+5. psql 경로에서는 백업 식별자, checksum, 명시적 승인을 전달해 `migrations/stage_apply_group_feature.sql`만 수동 실행합니다.
+6. 두 실행 경로 모두 postflight의 27개 컬럼, 20개 제약, 11개 index, COMMENT, 신규 데이터 0건을 확인하고 전체 출력을 WORKLOG에 기록합니다.
+7. P0 API 이미지를 배포합니다. Swagger는 Stage에서만 `API_DOCS_ENABLED=true`로 재생성해 `/api-docs/openapi.json`과 실제 P0 계약을 확인합니다.
+8. SELF, level 2, `can_view=false`, 친구 아님, soft-delete fixture를 확인합니다.
+9. 20명·100일 요청의 DB query time, 전체 duration, 비압축 응답 byte와 query count 3 이하를 기록합니다.
+10. Flutter가 Stage 계약을 확인한 뒤 그룹 더미 데이터를 제거합니다.
+
+구체적인 psql 명령과 실패 조건은 `_docs/GROUP_API_GUIDE.md`의 `Stage 실행`을 사용합니다. `final_schema.sql`과 `groupIntegrationBaseSchema.sql`은 Stage에서 실행하지 않습니다.
+
+### P1과 Center
+
+P1은 신규 migration 없이 같은 스키마에서 관리 path를 활성화합니다. Stage 역할 변경·제거·나가기·소유권 이전·삭제를 검증한 다음 Center DB 백업과 migration 적용 후 기존 Blue/Green 경로로 배포합니다. 이전 API는 그룹 테이블을 참조하지 않으므로 migration 선적용은 하위 호환입니다.
+
+### 롤백
+
+장애 시 이전 API 이미지를 먼저 복원하고 그룹 테이블은 유지합니다. 신규 그룹 데이터 폐기가 명시적으로 승인된 경우에만 DB 백업과 데이터 건수 확인 후 다음을 실행합니다.
+
+```bash
+psql "$DATABASE_URL" \
+  -v confirm_group_feature_drop=true \
+  -f migrations/rollback_group_feature.sql
+```
+
+외부 push 전송은 현재 배포 범위에 없으며 DB 초대·알림이 source of truth입니다.
+
+**문서 버전**: 1.4
+**최종 업데이트**: 2026-07-29

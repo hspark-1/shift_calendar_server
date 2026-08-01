@@ -105,7 +105,11 @@ export function validateEnvironment(): void {
   getPositiveIntegerEnvironmentVariable("REDIS_COMMAND_TIMEOUT_MS", 100);
   getPositiveIntegerEnvironmentVariable("CACHE_OUTBOX_POLL_MS", 1000);
   getPositiveIntegerEnvironmentVariable("CACHE_OUTBOX_BATCH_SIZE", 100);
+  getPositiveIntegerEnvironmentVariable("GROUP_MEMBER_LIMIT", 20);
+  getPositiveIntegerEnvironmentVariable("GROUP_INVITATION_TTL_DAYS", 7);
+  getPositiveIntegerEnvironmentVariable("GROUP_CALENDAR_MAX_RANGE_DAYS", 100);
   getBooleanEnvironmentVariable("WORK_SHIFT_CACHE_ENABLED", false);
+  getBooleanEnvironmentVariable("API_DOCS_ENABLED", false);
 
   const db_pool_max = getPositiveIntegerEnvironmentVariable("DB_POOL_MAX", 10);
   const db_pool_min = getPositiveIntegerEnvironmentVariable(

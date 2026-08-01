@@ -45,3 +45,39 @@ export function logError(
     })
   );
 }
+
+export interface GroupLogEvent {
+  request_id?: string;
+  actor_user_id: string;
+  group_id?: string;
+  action: string;
+  result: "success" | "denied" | "error";
+  duration_ms: number;
+  range_days?: number;
+  member_count?: number;
+  row_count?: number;
+  response_bytes?: number;
+}
+
+export function logGroupEvent(event: GroupLogEvent): void {
+  const output = {
+    level: event.result === "error" ? "error" : "info",
+    context: "group_api",
+    request_id: event.request_id ?? null,
+    actor_user_id: event.actor_user_id,
+    group_id: event.group_id ?? null,
+    action: event.action,
+    result: event.result,
+    duration_ms: event.duration_ms,
+    range_days: event.range_days ?? null,
+    member_count: event.member_count ?? null,
+    row_count: event.row_count ?? null,
+    response_bytes: event.response_bytes ?? null,
+  };
+
+  if (event.result === "error") {
+    console.error(JSON.stringify(output));
+    return;
+  }
+  console.log(JSON.stringify(output));
+}

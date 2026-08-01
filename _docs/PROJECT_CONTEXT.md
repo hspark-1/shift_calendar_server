@@ -14,6 +14,7 @@
 - 근무표 생성/수정/삭제
 - 개인 일정(Event) 관리
 - 친구 관계 및 일정 공유
+- 그룹 멤버·초대 관리와 기존 친구 공개 규칙 기반 그룹 캘린더
 
 ---
 
@@ -56,6 +57,16 @@ HTTP Request
 - 캐시 단위는 `owner_user_id + YYYYMM`이고 개인 일정은 캐시하지 않습니다.
 - 친구 권한은 캐시하지 않으므로 `can_view=false` 또는 친구 삭제가 다음 요청부터 즉시 적용됩니다.
 - LevelDB는 읽기 전용 다중 컨테이너와 Blue/Green 공유 정합성에 맞지 않아 사용하지 않습니다.
+- 시각화 정본은 [ShiftMate 근무표 캐시 전략 FigJam](https://www.figma.com/board/7U2SsaPGC6I670W7DQnEP1)입니다. 본인·친구 조회의 공통 월 snapshot 흐름과 PostgreSQL transaction·Outbox 기반 무효화 흐름을 각각 확인할 수 있습니다.
+
+#### 캐시 적용 요청과 key 공유 계약
+
+- `GET /work-shifts`, `GET /calendar/range`, `GET /calendar/day`의 근무표는 로그인 사용자의 월 snapshot을 사용합니다.
+- `GET /friends/:friend_user_id/calendar/range`의 근무표는 friendship과 `can_view`를 PostgreSQL에서 확인한 뒤 친구 소유자의 같은 월 snapshot을 사용합니다.
+- snapshot key는 `{CACHE_KEY_PREFIX}:work-shifts:v1:{owner_user_id}:{YYYYMM}`입니다. 조회자 ID를 포함하지 않으므로 소유자 본인과 여러 친구의 조회가 같은 key를 재사용합니다.
+- 캘린더 응답 중 `events`는 캐시 대상이 아니며 본인 일정은 `events`, 친구 일정은 `v_visible_events_for_friend`에서 매번 조회합니다.
+- 인증 또는 날짜 validation이 먼저 실패한 `401`/`400` 요청은 캐시 서비스에 진입하지 않으므로 Redis key를 생성하지 않습니다.
+- `DBSIZE`는 요청 횟수가 아니라 현재 key 수입니다. 이미 존재하는 소유자·월 snapshot의 재조회는 `DBSIZE`를 증가시키지 않습니다.
 
 ### 폴더 구조
 
@@ -627,8 +638,8 @@ const work_shifts = await WorkShift.findAll({
 
 #### Swagger/OpenAPI
 
-- **현재 미구현**: Swagger 문서화는 아직 추가되지 않음
-- **추후 계획**: `/api-docs` 경로에 Swagger UI 추가 예정
+- **그룹 API 구현됨**: `API_DOCS_ENABLED=true`일 때 `/api-docs`와 `/api-docs/openapi.json` 노출
+- **범위 제한**: 현재 OpenAPI 3.0.3 문서는 그룹 P0/P1와 공통 bearer/error/pagination schema만 포함하며 기존 API 전체 문서는 아직 미포함
 
 ### 3.7 로깅/모니터링
 
@@ -716,6 +727,10 @@ catch (error) {
 | `REDIS_COMMAND_TIMEOUT_MS`            | Redis 명령 제한시간                   | `100`              |
 | `CACHE_OUTBOX_POLL_MS`                | worker idle polling 간격              | `1000`             |
 | `CACHE_OUTBOX_BATCH_SIZE`             | worker 1회 claim 최대 이벤트          | `100`              |
+| `GROUP_MEMBER_LIMIT`                  | 그룹 최대 활성 멤버                   | `20`               |
+| `GROUP_INVITATION_TTL_DAYS`           | 그룹 초대 만료 일수                   | `7`                |
+| `GROUP_CALENDAR_MAX_RANGE_DAYS`       | 그룹 캘린더 양 끝 포함 최대 일수      | `100`              |
+| `API_DOCS_ENABLED`                    | `/api-docs`와 원본 OpenAPI 노출        | `false`            |
 
 #### 환경별 차이
 
@@ -727,11 +742,11 @@ DB_SSL=false
 TRUST_PROXY_HOPS=0
 ```
 
-**스테이징/프로덕션**:
+**스테이징/프로덕션(현재 홈서버 내부 Docker PostgreSQL 16)**:
 
 ```env
 NODE_ENV=production
-DB_SSL=true
+DB_SSL=false
 TRUST_PROXY_HOPS=1
 CORS_ALLOWED_ORIGINS=https://shift-calendar.co.kr
 INSTANCE_NAME=shiftmate-api-1
@@ -739,6 +754,8 @@ REQUEST_BODY_LIMIT=100kb
 AUTH_RATE_LIMIT_WINDOW_MS=60000
 AUTH_RATE_LIMIT_MAX=10
 ```
+
+`DB_SSL=true`는 PostgreSQL 접속 경로에 TLS가 실제로 구성된 경우에만 사용합니다. 현재 홈서버 내부 Docker 네트워크의 PostgreSQL 16 연결은 `DB_SSL=false`가 기준입니다.
 
 `JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다.
 
@@ -778,6 +795,7 @@ AUTH_RATE_LIMIT_MAX=10
 ### 테스트 원칙
 
 - `npm test`: TypeScript build 후 월 분할, 월 말일, cache key, ETag 단위 테스트 실행
+- 그룹 migration·Stage wrapper 정적 테스트는 gitignore 대상인 운영 로컬 SQL 6개가 전부 있으면 실행하고, 전부 없으면 원격 체크아웃으로 판단해 명시적으로 skip하며 일부만 존재하면 실패
 - `npm run test:integration`: PostgreSQL 16과 Redis 7.4를 대상으로 cache hit, 다월 병합, 빈 달, read-only repeatable-read, 손상 schema, TTL jitter, transaction rollback, 근무 타입 무효화, stampede lock, revision fence 경합, 친구 권한 재검사, ETag 304, Redis 장애 복구, Outbox 동시 claim/retry/정리를 검증
 - `test/fixtures/cacheIntegrationSchema.sql`은 통합 테스트에 필요한 정본 컬럼·제약·공개 view만 구성하는 테스트 전용 파일이며, 실행 시 대상 DB의 `public` schema를 삭제하고 재생성
 - 통합 테스트는 `RUN_CACHE_INTEGRATION=true`를 스크립트가 설정하며 CI 또는 폐기 가능한 전용 DB에서만 실행하고 운영/공유 개발 DB에는 실행 금지
@@ -1026,6 +1044,15 @@ npm start
 
 개발 실행은 `ts-node/register`를 사용하므로 `tsconfig.json`의 `ts-node.files=true`가 `src/types/express.d.ts` 로딩을 보장합니다.
 
+### Stage 자원을 사용하는 로컬 API 디버깅 원칙
+
+- 개발 PC에서 Stage PostgreSQL·Redis를 확인할 때는 외부 포트를 공개하지 않고 SSH local forwarding을 사용합니다.
+- 기존 `.env`를 덮어쓰지 않고 gitignore 대상인 `.env.stage.local`에 터널의 `127.0.0.1` 포트와 Stage 접속 정보를 둔 뒤 `node --env-file=.env.stage.local -r ts-node/register src/index.ts`로 API만 실행합니다.
+- Redis key 충돌을 막기 위해 `CACHE_KEY_PREFIX=shiftmate:stage-local:<개발자>`처럼 실제 Stage의 `shiftmate:stage`와 다른 prefix를 사용합니다.
+- 로컬 API의 POST/PUT/DELETE는 실제 Stage DB를 변경할 수 있으므로 읽기 전용 DB 계정과 기존 Stage access token을 우선 사용합니다.
+- **Stage DB를 바라보는 로컬 환경에서는 cache worker를 실행하지 않습니다.** 로컬 worker가 Stage Outbox를 claim하고 로컬 prefix만 무효화한 뒤 처리 완료로 표시하면 실제 Stage cache 무효화 이벤트가 유실될 수 있습니다.
+- 컨테이너 IP 기반 SSH 터널은 Stage 컨테이너 재생성 후 IP를 다시 확인해야 합니다.
+
 ### Express Docker 이미지
 
 #### 파일 역할
@@ -1102,7 +1129,8 @@ curl --fail http://127.0.0.1:3000/health
 
 ### Swagger/Postman
 
-- **Swagger**: 현재 미구현
+- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹 API 전용 `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
+- **Flutter 그룹 연동 가이드**: `_docs/GROUP_FRONTEND_API_GUIDE.md`
 - **근무 타입 색상 API 가이드**: `_docs/SHIFT_TYPE_COLOR_API_GUIDE.md`
   - **파일 역할**: Flutter 프론트팀에 `color`, `base_color`, `color_intensity` 요청/응답, 레거시 fallback, 오류 코드, 미리보기 계산 및 연동 체크리스트 제공
   - **의존성**: 서버의 `GET/POST/PUT /shift-types` 계약과 `shift_types` 색상 메타데이터 migration
@@ -1194,7 +1222,99 @@ curl --fail http://127.0.0.1:3000/health
 - Redis snapshot 오류·timeout·연결 실패는 API 오류로 바꾸지 않고 PostgreSQL fallback
 - Redis eviction은 `volatile-lru`를 사용해 TTL 없는 revision fence를 snapshot보다 우선 보존
 - readiness HTTP 상태는 PostgreSQL 기준이며 응답 `cache` 필드로 `ready/degraded/disabled`를 구분
+- Redis snapshot은 인증과 날짜 validation을 통과한 근무표 조회에서만 생성되며 `401`/`400` 응답은 생성하지 않음
+- 본인과 친구 조회는 조회자별 key가 아니라 소유자·월 key를 공유하므로 요청마다 `DBSIZE`가 증가하지 않음
 - cache worker가 unhealthy이거나 미처리 Outbox가 증가하면 캐시 flag를 끄고 DB 조회로 즉시 전환
+- Stage DB를 공유하는 로컬 디버깅에서는 worker를 실행하지 않고 별도 cache prefix를 사용
+
+### 11. 그룹 기능과 캘린더 aggregate
+
+```text
+P0/P1 그룹 요청
+  → groupRoutes (authMiddleware + express-validator)
+  → groupController (공통 success/error wrapper, 안전한 구조화 로그)
+  → groupService (Sequelize transaction + group row 선잠금)
+  → Group / GroupMember / GroupInvitation / Notification / PostgreSQL view
+```
+
+- 그룹은 별도 캘린더·일정·근무를 소유하지 않습니다. `group_members`는 구성과 역할만 나타냅니다.
+- 그룹 가입은 친구 관계나 `friend_level_settings`를 만들거나 변경하지 않습니다.
+- 본인 캘린더는 `SELF`, 다른 활성 멤버는 friendship과 소유자→조회자 `can_view=true`일 때 `VISIBLE`, 그 외 `DENIED`입니다.
+- `VISIBLE` 이벤트는 기존 `friend_level >= visibility_level`, 근무는 `visibility_level=0` 규칙을 그대로 사용합니다.
+- `DENIED` 멤버는 응답에 남지만 그 멤버의 row와 숨겨진 개수는 반환하지 않습니다.
+- 그룹 캘린더는 멤버/접근 상태, visible work shifts, visible events를 최대 3개 set-based query로 조회합니다.
+- owner별 월 Redis v1은 그룹 aggregate에서 사용하지 않습니다. Stage 측정으로 병목이 확인될 때만 multi-owner cache를 별도 설계합니다.
+- 모든 기존 그룹 쓰기는 group row를 먼저 `FOR UPDATE`로 잠근 뒤 멤버 제한·역할·초대 상태를 재확인합니다.
+- 비멤버와 삭제 그룹은 모두 `404 GROUP_NOT_FOUND`, 활성 멤버의 역할 부족만 `403 GROUP_PERMISSION_DENIED`입니다.
+- `groups.updated_at`은 그룹 정보·가입·제거·나가기·역할·소유권 변경 시 갱신하고 초대 생성·취소만으로는 변경하지 않습니다.
+
+#### 그룹 파일 역할·의존성·사용 예
+
+- **`migrations/add_group_feature.sql`**
+  - 역할: 기존 DB에 그룹 3개 테이블을 추가하고 preflight/postflight 감사를 출력하는 expand migration
+  - 의존성: PostgreSQL 16, 기존 `users`, `pgcrypto`
+  - 사용 예: DB 백업 후 `psql ... -f migrations/add_group_feature.sql`
+- **`migrations/rollback_group_feature.sql`**
+  - 역할: 데이터 건수를 출력하고 명시적 승인 변수 뒤에만 그룹 테이블을 역순 삭제
+  - 의존성: 그룹 데이터 폐기 별도 승인과 DB 백업
+  - 사용 예: `psql ... -v confirm_group_feature_drop=true -f migrations/rollback_group_feature.sql`
+- **`migrations/stage_group_feature_preflight.sql`**
+  - 역할: 기존 Stage DB 식별, PostgreSQL 16/write 가능 상태, 권한, 그룹 API 기반 relation·컬럼, 부분 적용·index 이름 충돌을 read-only 감사
+  - 의존성: 실제 Stage DB 이름을 전달하는 `expected_database` psql 변수
+  - 사용 예: 백업 전에 단독 실행하고 감사 출력을 보관
+- **`migrations/stage_apply_group_feature.sql`**
+  - 역할: Stage 승인·백업 식별자·정본 checksum과 advisory lock을 확인하고 preflight → `add_group_feature.sql` → strict postflight 실행
+  - 의존성: 세 필수 psql 변수와 승인된 `add_group_feature.sql` SHA-256
+  - 사용 예: Stage 백업/복원 확인 뒤 개발자가 1회 수동 실행
+- **`migrations/stage_group_feature_postflight.sql`**
+  - 역할: 27개 컬럼, 20개 제약, 11개 index와 partial/unique 속성, 필수 COMMENT, 선택적 초기 데이터 0건을 예외 기반으로 판정
+  - 의존성: 적용 완료된 그룹 3개 테이블과 `expected_database`
+  - 사용 예: apply wrapper 내부 자동 실행 또는 사후 read-only 재감사
+- **`migrations/pgadmin_stage_add_group_feature.sql`**
+  - 역할: psql meta-command 없이 Stage preflight, public schema 그룹 DDL, strict postflight를 단일 transaction으로 실행하는 pgAdmin Query Tool 전용 SQL
+  - 의존성: 파일 상단에 입력하는 실제 Stage DB 이름, 복원 가능한 백업 식별자, 확인 문자열
+  - 사용 예: 세 설정값을 변경하고 pgAdmin에서 전체 파일을 Execute(F5)
+- **`src/models/Group.ts`, `GroupMember.ts`, `GroupInvitation.ts`**
+  - 역할: 최종 DDL의 그룹·멤버십 이력·초대 상태 Sequelize 매핑
+  - 의존성: `src/config/database.ts`, 기존 `users`
+  - 사용 예: `groupService` transaction에서 row lock·create/update
+- **`src/types/group.ts`**
+  - 역할: GroupSummary/Detail/Invitation/CalendarRange 공통 응답 타입
+  - 의존성: 그룹 역할·초대 상태 union type
+  - 사용 예: 서비스 반환 타입과 Flutter/OpenAPI 계약 대조
+- **`src/utils/calendarSerialization.ts`**
+  - 역할: DB date/time과 `#AARRGGBB`, UTC ISO 직렬화
+  - 의존성: 없음
+  - 사용 예: 개인/그룹 근무표가 같은 표시 형식을 사용
+- **`src/services/groupService.ts`**
+  - 역할: 그룹 transaction, 권한, 초대·알림, 3-query 캘린더 aggregate
+  - 의존성: Sequelize 모델, 기존 visibility view, 환경변수
+  - 사용 예: Controller 외부에서 actor ID와 검증된 DTO를 전달
+- **`src/controllers/groupController.ts`, `src/routes/groupRoutes.ts`**
+  - 역할: JWT actor, express-validator, HTTP wrapper/error code와 P0/P1 path
+  - 의존성: `authMiddleware`, `groupService`
+  - 사용 예: `/api/v1/groups`, `/api/v1/group-invitations/*`
+- **`src/openapi.ts`, `src/openapi/groupOpenApi.json`**
+  - 역할: `API_DOCS_ENABLED=true`일 때 그룹 OpenAPI 3.0.3 JSON과 Swagger UI 노출
+  - 의존성: `swagger-ui-express`
+  - 사용 예: Local/Stage `/api-docs`, `/api-docs/openapi.json`
+- **`test/groupService.test.cjs`, `test/groupIntegration.test.cjs`**
+  - 역할: 순수 규칙·OpenAPI·migration 정적 계약과 PostgreSQL 16 동시성/공개 회귀 검증
+  - 의존성: build된 `dist`, 통합 테스트는 격리 PostgreSQL
+  - 사용 예: `npm test`, `npm run test:group-integration`
+- **`test/fixtures/groupDebug.compose.yml`**
+  - 역할: 그룹 통합 테스트와 DebugMCP 검증 전용 PostgreSQL 16을 `127.0.0.1:55432`에 tmpfs로 기동
+  - 의존성: Docker Compose, 고정 DB `shift_calendar_group_debug`, 로컬 전용 자격증명
+  - 사용 예: `npm run debug:group-db:up`으로 기동하고 검증 후 `npm run debug:group-db:down`으로 제거
+- **`_docs/GROUP_RUNTIME_VERIFICATION_CHECKLIST.md`**
+  - 역할: migration, P0/P1 HTTP, transaction/lock, 공개 ACL, 3-query aggregate, 알림·로그·롤백의 실제 실행 판정과 디버거 시나리오
+  - 의존성: 격리 PostgreSQL 16, VS Code/DebugMCP, 그룹 integration fixture
+  - 사용 예: Local 증거와 Stage 증거를 분리해 항목별 `[x]` 및 실행 기록을 남김
+- **`_docs/GROUP_FRONTEND_API_GUIDE.md`**
+  - 역할: Flutter 프론트팀에 그룹 P0/P1 요청·응답 DTO, 화면별 호출 흐름, `owner_user_id`/`calendar_access` 상태 보존, 오류 UX와 Stage 인수 체크리스트 제공
+  - 의존성: Stage 그룹 migration/API 배포, 기존 JWT refresh·공통 AppError·Dio 계층
+  - 사용 예: 그룹 화면의 더미 datasource를 실제 API로 교체하고 DTO/domain state/widget 테스트를 작성할 때 기준 문서로 사용
+- 서버 상세 endpoint·migration·역할은 `_docs/GROUP_API_GUIDE.md`, Flutter 연동은 `_docs/GROUP_FRONTEND_API_GUIDE.md`, 실제 동작 판정은 `_docs/GROUP_RUNTIME_VERIFICATION_CHECKLIST.md`, 설계 근거는 ADR-0021을 정본으로 사용합니다.
 
 ---
 
