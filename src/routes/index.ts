@@ -4,6 +4,7 @@ import scheduleRoutes from "./scheduleRoutes";
 import calendarRoutes from "./calendarRoutes";
 import friendRoutes from "./friendRoutes";
 import groupRoutes from "./groupRoutes";
+import deviceRoutes from "./deviceRoutes";
 import { checkDatabaseConnection } from "../config/database";
 import { checkRedisConnection } from "../config/redis";
 
@@ -50,6 +51,7 @@ v1_router.use("/schedules", scheduleRoutes);
 v1_router.use("/", calendarRoutes);
 v1_router.use("/", friendRoutes); // 친구 관련 라우트
 v1_router.use("/", groupRoutes); // 그룹 관련 라우트
+v1_router.use("/", deviceRoutes); // 푸시 기기 등록 라우트
 
 // v1 라우터 등록
 router.use("/v1", v1_router);

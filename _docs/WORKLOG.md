@@ -1,5 +1,27 @@
 # 작업 일지
 
+## 2026-08-03
+
+### [DONE] Push Worker 기반 푸시 알림 구현
+
+- **목적**: 도메인 알림과 같은 트랜잭션에 push job을 기록하고 별도 worker가 수신자의 최신 활성 Android/iOS 기기 한 대에 FCM 알림을 전달한다.
+- **변경**:
+  - `user_devices`, `push_jobs`, `push_deliveries` expand migration·Sequelize 모델·최종 schema·draw.io를 추가하고 과거 알림은 backfill하지 않도록 고정
+  - 인증 `PUT /api/v1/devices/current` 멱등 upsert, 환경별 설치/target 격리, target 충돌 재귀속, raw target 비노출 OpenAPI 구현
+  - logout의 선택 `installation_id`, logout-all의 refresh token·기기 동시 비활성화를 같은 transaction으로 연결
+  - 친구/그룹 6개 결과 알림을 공통 `notifications + push_jobs` transaction 서비스로 통합하고 응답/취소/만료 원본 job을 best-effort 취소
+  - PostgreSQL `SKIP LOCKED` lease worker, 최신 한 대 고정·token 재조회·무-fallback, sendEach payload, retry/jitter/TTL/영구 오류/30일 정리와 readiness 구현
+  - Node 22 `firebase-admin 13.10.0` 고정, push worker 실행 명령·DB pool 2·credential 경로·독립 feature flag와 운영 문서/ADR-0022 추가
+- **영향범위**: 알림 생성 transaction, 인증 logout, DB migration, 독립 worker 및 배포 구성. 기존 알림 조회 API와 인앱 원본 역할은 유지한다.
+- **파일**: `migrations/add_push_notification_support.sql`, `src/models/{UserDevice,PushJob,PushDelivery}.ts`, `src/services/{deviceService,notificationService,firebasePushProvider}.ts`, `src/workers/pushWorker.ts`, `src/routes/deviceRoutes.ts`, `src/openapi/deviceOpenApi.json`, `test/push*.test.cjs`, `_docs/PUSH_NOTIFICATION_GUIDE.md`
+- **테스트**:
+  - `npm test`: 18 pass, 4 skip, 0 fail
+  - 격리 PostgreSQL 16 `npm run test:push-integration`: 7 pass, 0 fail. migration 무-backfill/인덱스, 기기 멱등·target 재귀속, transaction rollback, 최신 기기·token refresh, 무-fallback, 동시 claim·lease 복구, 영구 오류/logout 검증
+  - `xmllint --noout schema.drawio`, TypeScript build, `git diff --check` 통과
+  - `npm audit`: high/critical 0, moderate 8. 모두 고정한 Firebase Admin의 간접 의존성이며 자동 해소는 14.2.0 major 변경을 요구하므로 ADR-0022 후속 검토로 기록
+- **롤백**: `PUSH_JOB_ENQUEUE_ENABLED=false` → worker 중지 → 이전 API 이미지 복귀 순서로 수행하고 신규 테이블과 기록은 보존한다.
+- **다음**: 환경별 Firebase/APNs credential과 실제 Stage 앱을 준비한 뒤 6개 알림, 최신 한 대 전환, 권한/환경/logout/stale job 시나리오를 실기기 E2E로 확인한다.
+
 ## 2026-08-01
 
 ### [DONE] 그룹 기능 원격 재현성 및 커밋 전 검증 정리

@@ -37,6 +37,10 @@ import {
   formatShiftTypeColor,
   toUtcIso,
 } from "../utils/calendarSerialization";
+import {
+  cancelPendingPushForNotification,
+  createNotificationWithPushJob,
+} from "./notificationService";
 
 export const GroupErrorCodes = {
   INVALID_GROUP_NAME: "INVALID_GROUP_NAME",
@@ -292,6 +296,12 @@ async function updateInvitationNotification(
   );
   if (!notification) return null;
 
+  await cancelPendingPushForNotification(
+    notification.notification_id,
+    `GROUP_INVITATION_${status}`,
+    transaction,
+  );
+
   notification.notification_type =
     status === "EXPIRED" ? "GROUP_INVITATION" : `GROUP_INVITATION_${status}`;
   notification.payload = {
@@ -311,7 +321,7 @@ async function createInvitationNotification(
   inviter: User,
   transaction: Transaction,
 ): Promise<void> {
-  await Notification.create(
+  await createNotificationWithPushJob(
     {
       user_id: invitation.invitee_user_id,
       notification_type: "GROUP_INVITATION",
@@ -332,7 +342,7 @@ async function createInvitationNotification(
         { type: "reject", label: "거절" },
       ],
     },
-    { transaction },
+    transaction,
   );
 }
 
@@ -343,7 +353,7 @@ async function createInvitationResultNotification(
   transaction: Transaction,
 ): Promise<void> {
   const accepted = status === "ACCEPTED";
-  await Notification.create(
+  await createNotificationWithPushJob(
     {
       user_id: invitation.inviter_user_id,
       notification_type: `GROUP_INVITATION_${status}`,
@@ -361,7 +371,7 @@ async function createInvitationResultNotification(
       },
       actions: [],
     },
-    { transaction },
+    transaction,
   );
 }
 

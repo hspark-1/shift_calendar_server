@@ -11,6 +11,10 @@ import { NotificationAction, NotificationType } from "../models/Notification";
 import { logError } from "../utils/logger";
 import { normalizePhoneNumber } from "../utils/phone";
 import { getWorkShifts } from "./calendarService";
+import {
+  cancelPendingPushForNotification,
+  createNotificationWithPushJob,
+} from "./notificationService";
 
 // ============================================================
 // 에러 코드 상수
@@ -743,36 +747,36 @@ export async function cancelFriendRequest(
   status: string;
   responded_at: Date;
 }> {
-  // 1. 요청 조회
-  const request = await FriendRequest.findByPk(request_id);
+  return sequelize.transaction(async (transaction) => {
+    const request = await FriendRequest.findByPk(request_id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
-  if (!request) {
-    throw new Error(FriendErrorCodes.REQUEST_NOT_FOUND);
-  }
+    if (!request) {
+      throw new Error(FriendErrorCodes.REQUEST_NOT_FOUND);
+    }
+    if (request.requester_user_id !== user_id) {
+      throw new Error(FriendErrorCodes.NOT_REQUESTER);
+    }
+    if (request.status !== "PENDING") {
+      throw new Error(FriendErrorCodes.NOT_PENDING);
+    }
 
-  // 2. 현재 사용자가 requester인지 확인
-  if (request.requester_user_id !== user_id) {
-    throw new Error(FriendErrorCodes.NOT_REQUESTER);
-  }
+    const responded_at = new Date();
+    await request.update(
+      { status: "CANCELED", responded_at },
+      { transaction },
+    );
+    await cancelFriendRequestNotification(
+      request.addressee_user_id,
+      request_id,
+      responded_at,
+      transaction,
+    );
 
-  // 3. 상태가 PENDING인지 확인
-  if (request.status !== "PENDING") {
-    throw new Error(FriendErrorCodes.NOT_PENDING);
-  }
-
-  const responded_at = new Date();
-
-  // 4. 상태 업데이트
-  await request.update({
-    status: "CANCELED",
-    responded_at,
+    return { request_id, status: "CANCELED", responded_at };
   });
-
-  return {
-    request_id,
-    status: "CANCELED",
-    responded_at,
-  };
 }
 
 // ============================================================
@@ -920,7 +924,7 @@ async function createFriendRequestNotification(
   requester_user_id: string,
   transaction: Transaction
 ): Promise<void> {
-  await Notification.create(
+  await createNotificationWithPushJob(
     {
       user_id,
       notification_type: "FRIEND_REQUEST",
@@ -937,7 +941,7 @@ async function createFriendRequestNotification(
         { type: "reject", label: "거절" },
       ],
     },
-    { transaction }
+    transaction,
   );
 }
 
@@ -984,6 +988,12 @@ async function updateFriendRequestNotificationStatus(
     return null;
   }
 
+  await cancelPendingPushForNotification(
+    notification.notification_id,
+    `FRIEND_REQUEST_${action.toUpperCase()}`,
+    transaction,
+  );
+
   const is_accepted = action === "accept";
   const request_status = is_accepted ? "ACCEPTED" : "REJECTED";
   const notification_type = is_accepted
@@ -1023,9 +1033,9 @@ async function createFriendAcceptedNotification(
   accepter_name: string,
   accepter_profile_image: string | null,
   accepter_user_id: string,
-  transaction?: Transaction
+  transaction: Transaction
 ): Promise<void> {
-  await Notification.create(
+  await createNotificationWithPushJob(
     {
       user_id,
       notification_type: "FRIEND_ACCEPTED",
@@ -1040,7 +1050,7 @@ async function createFriendAcceptedNotification(
         { type: "navigate", label: "친구 목록 보기", route: "/friends" },
       ],
     },
-    { transaction }
+    transaction,
   );
 }
 
@@ -1052,9 +1062,9 @@ async function createFriendRejectedNotification(
   rejecter_name: string,
   rejecter_profile_image: string | null,
   rejecter_user_id: string,
-  transaction?: Transaction
+  transaction: Transaction
 ): Promise<void> {
-  await Notification.create(
+  await createNotificationWithPushJob(
     {
       user_id,
       notification_type: "FRIEND_REJECTED",
@@ -1067,7 +1077,58 @@ async function createFriendRejectedNotification(
       },
       actions: [],
     },
-    { transaction }
+    transaction,
+  );
+}
+
+async function cancelFriendRequestNotification(
+  user_id: string,
+  request_id: string,
+  responded_at: Date,
+  transaction: Transaction,
+): Promise<void> {
+  const [notification_ref] = await sequelize.query<{ notification_id: string }>(
+    `
+      SELECT notification_id
+      FROM notifications
+      WHERE user_id = :user_id
+        AND notification_type = 'FRIEND_REQUEST'
+        AND payload->>'request_id' = :request_id
+      ORDER BY created_at DESC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    {
+      replacements: { user_id, request_id },
+      type: QueryTypes.SELECT,
+      transaction,
+    },
+  );
+  if (!notification_ref) return;
+
+  const notification = await Notification.findByPk(
+    notification_ref.notification_id,
+    { transaction, lock: transaction.LOCK.UPDATE },
+  );
+  if (!notification) return;
+
+  await cancelPendingPushForNotification(
+    notification.notification_id,
+    "FRIEND_REQUEST_CANCELED",
+    transaction,
+  );
+  await notification.update(
+    {
+      payload: {
+        ...notification.payload,
+        request_status: "CANCELED",
+        responded_at: responded_at.toISOString(),
+      },
+      actions: [],
+      is_read: true,
+      read_at: notification.read_at ?? responded_at,
+    },
+    { transaction },
   );
 }
 

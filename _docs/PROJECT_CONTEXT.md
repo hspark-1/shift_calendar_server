@@ -15,6 +15,7 @@
 - 개인 일정(Event) 관리
 - 친구 관계 및 일정 공유
 - 그룹 멤버·초대 관리와 기존 친구 공개 규칙 기반 그룹 캘린더
+- Push Worker 기반 Android/iOS 알림 전달
 
 ---
 
@@ -59,6 +60,21 @@ HTTP Request
 - LevelDB는 읽기 전용 다중 컨테이너와 Blue/Green 공유 정합성에 맞지 않아 사용하지 않습니다.
 - 시각화 정본은 [ShiftMate 근무표 캐시 전략 FigJam](https://www.figma.com/board/7U2SsaPGC6I670W7DQnEP1)입니다. 본인·친구 조회의 공통 월 snapshot 흐름과 PostgreSQL transaction·Outbox 기반 무효화 흐름을 각각 확인할 수 있습니다.
 
+### 푸시 알림 구조
+
+```text
+친구/그룹 도메인 transaction
+  → notifications + push_jobs 원자적 기록
+  → Push Worker가 job claim
+  → 수신자의 같은 환경 최신 활성 기기 한 대를 delivery로 고정
+  → FCM 전송 및 성공/재시도/종료 상태 기록
+```
+
+- `notifications`는 기존 인앱 알림 화면의 원본이며, push 전용 컬럼을 추가하지 않습니다.
+- push 전달 상태와 기기 정보는 `push_jobs`, `push_deliveries`, `user_devices`에 분리합니다.
+- API 서버는 FCM을 직접 호출하지 않으며, 기능 활성화 이후 같은 transaction에서 생성된 job만 worker가 처리합니다.
+- 상세 계약과 운영 절차는 `_docs/PUSH_NOTIFICATION_GUIDE.md`를 따릅니다.
+
 #### 캐시 적용 요청과 key 공유 계약
 
 - `GET /work-shifts`, `GET /calendar/range`, `GET /calendar/day`의 근무표는 로그인 사용자의 월 snapshot을 사용합니다.
@@ -76,10 +92,12 @@ src/
 ├── config/
 │   ├── database.ts       # Sequelize 설정
 │   ├── redis.ts          # 공유 Redis 연결, timeout, cache 상태
-│   └── environment.ts    # 필수 환경변수 및 숫자 설정 검증
+│   ├── environment.ts    # 필수 환경변수 및 숫자 설정 검증
+│   └── push.ts           # push worker 환경·재시도·TTL 설정
 ├── routes/               # 라우터 정의
 │   ├── index.ts         # 라우터 통합
 │   ├── authRoutes.ts    # 인증 관련 라우트
+│   ├── deviceRoutes.ts  # 현재 설치 기기 등록/동기화
 │   ├── calendarRoutes.ts # 캘린더/근무표 라우트
 │   └── scheduleRoutes.ts # 스케줄 라우트 (레거시)
 ├── middlewares/
@@ -96,11 +114,15 @@ src/
 ├── services/            # 비즈니스 로직
 │   ├── authService.ts
 │   ├── calendarService.ts
+│   ├── deviceService.ts # 설치/FCM target 멱등 동기화
 │   ├── friendService.ts
+│   ├── notificationService.ts # 인앱 알림 + push job 원자적 생성
+│   ├── firebasePushProvider.ts # FCM provider adapter
 │   ├── kakaoService.ts
 │   └── shiftTemplateService.ts
 ├── workers/
-│   └── workShiftCacheWorker.ts # PostgreSQL Outbox 기반 Redis 무효화 worker
+│   ├── workShiftCacheWorker.ts # PostgreSQL Outbox 기반 Redis 무효화 worker
+│   └── pushWorker.ts     # lease claim, 최신 기기 선택, FCM 전송 worker
 ├── utils/               # 공통 검증/정규화 유틸
 │   ├── logger.ts        # 민감 오류 객체를 직렬화하지 않는 구조화 오류 로그
 │   └── phone.ts         # 전화번호 저장 형식 검증 및 하이픈 정규화
@@ -145,6 +167,14 @@ test/
 - **의존성**: PostgreSQL expand migration, 환경별 공유 Redis, `WORK_SHIFT_CACHE_ENABLED=true`
 - **사용 예**: API는 `node dist/index.js`, worker는 `node dist/workers/workShiftCacheWorker.js`, worker health는 `--healthcheck`
 - 캐시 flag가 `false`인 worker 본체는 Outbox를 claim하지 않고 대기하지만 health 명령은 PostgreSQL과 Redis를 모두 검사합니다. 활성화 시 API와 worker 컨테이너를 같은 `true` 환경으로 재생성합니다.
+
+#### Push Worker 모듈
+
+- **`src/services/notificationService.ts` 역할**: 기존 인앱 알림과 제목·본문 snapshot을 가진 push job을 도메인 transaction에 함께 기록
+- **`src/services/deviceService.ts` 역할**: 인증 사용자 설치의 권한·FCM token·활성 상태를 환경별로 멱등 동기화
+- **`src/workers/pushWorker.ts` 역할**: `FOR UPDATE SKIP LOCKED` lease claim, 최신 활성 기기 고정 선택, FCM 전송·재시도·만료·정리
+- **의존성**: PostgreSQL push migration, 환경별 Firebase service account, `PUSH_JOB_ENQUEUE_ENABLED`와 `PUSH_WORKER_ENABLED`
+- **사용 예**: API는 `npm start`, worker는 `npm run start:push-worker`; 초기 배포에서는 두 flag를 모두 `false`로 유지합니다.
 
 ---
 

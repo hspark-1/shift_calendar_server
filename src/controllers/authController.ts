@@ -164,7 +164,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
 // 로그아웃 (현재 기기)
 export async function logout(req: Request, res: Response): Promise<void> {
   try {
-    const { refresh_token } = req.body;
+    const { refresh_token, installation_id } = req.body;
 
     if (!refresh_token) {
       res
@@ -173,7 +173,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const revoked = await revokeRefreshToken(refresh_token);
+    const revoked = await revokeRefreshToken(refresh_token, installation_id);
 
     if (!revoked) {
       // 이미 무효화된 토큰이거나 존재하지 않는 경우에도 성공으로 처리

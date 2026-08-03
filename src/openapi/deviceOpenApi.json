@@ -1,0 +1,83 @@
+{
+  "paths": {
+    "/devices/current": {
+      "put": {
+        "tags": ["Devices"],
+        "summary": "현재 설치의 푸시 기기 정보 동기화",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CurrentDeviceRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "동기화된 안전한 기기 메타데이터. provider target은 반환하지 않는다.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CurrentDeviceResponse" }
+              }
+            }
+          },
+          "400": { "description": "입력값 검증 실패" },
+          "401": { "description": "인증 실패" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CurrentDeviceRequest": {
+        "type": "object",
+        "required": [
+          "installation_id",
+          "platform",
+          "push_permission_enabled",
+          "app_version"
+        ],
+        "properties": {
+          "installation_id": { "type": "string", "format": "uuid" },
+          "platform": { "type": "string", "enum": ["ANDROID", "IOS"] },
+          "provider_target": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 4096,
+            "writeOnly": true
+          },
+          "push_permission_enabled": { "type": "boolean" },
+          "app_version": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      },
+      "CurrentDeviceResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "data": {
+            "type": "object",
+            "required": [
+              "device_id",
+              "installation_id",
+              "platform",
+              "push_permission_enabled",
+              "is_active",
+              "last_seen_at"
+            ],
+            "properties": {
+              "device_id": { "type": "string", "format": "uuid" },
+              "installation_id": { "type": "string", "format": "uuid" },
+              "platform": { "type": "string", "enum": ["ANDROID", "IOS"] },
+              "push_permission_enabled": { "type": "boolean" },
+              "is_active": { "type": "boolean" },
+              "last_seen_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

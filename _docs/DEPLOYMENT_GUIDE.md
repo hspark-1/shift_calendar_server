@@ -626,7 +626,54 @@ psql "$DATABASE_URL" \
   -f migrations/rollback_group_feature.sql
 ```
 
-외부 push 전송은 현재 배포 범위에 없으며 DB 초대·알림이 source of truth입니다.
+DB 초대·알림은 Push Worker 활성 여부와 관계없이 source of truth입니다.
 
-**문서 버전**: 1.4
-**최종 업데이트**: 2026-07-29
+---
+
+## Push Worker 단계 배포
+
+### 사전 준비
+
+- Stage/Production Firebase project와 Android/iOS 앱 등록
+- Apple Developer APNs key와 Firebase 연결
+- 환경별 최소 권한 service account를 `/run/secrets/firebase.json`에 read-only mount
+- `migrations/add_push_notification_support.sql` 적용 전 DB 백업과 전체 API+worker pool 연결 여유 확인
+- Flutter iOS 최소 15.0, Android 최소 API 24 빌드 준비 (`flutter_local_notifications 22.2.0`의 공식 최소)
+
+### 기본 환경변수
+
+```env
+PUSH_JOB_ENQUEUE_ENABLED=false
+PUSH_WORKER_ENABLED=false
+PUSH_APP_ENVIRONMENT=STAGE
+GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/firebase.json
+FIREBASE_PROJECT_ID=<stage-firebase-project-id>
+PUSH_JOB_POLL_MS=1000
+PUSH_JOB_BATCH_SIZE=20
+PUSH_JOB_LEASE_SECONDS=120
+PUSH_MAX_ATTEMPTS=6
+PUSH_JOB_TTL_SECONDS=3600
+PUSH_TERMINAL_RETENTION_DAYS=30
+DB_POOL_MAX=2
+```
+
+실제 project ID는 환경 secret에서 주입하고 문서 예시값을 그대로 사용하지 않습니다. Production은 `PUSH_APP_ENVIRONMENT=PROD`와 별도 DB·service account·Firebase project를 사용합니다.
+
+### 활성화
+
+1. expand migration을 적용하고 `user_devices`, `push_jobs`, `push_deliveries` 제약/인덱스와 기존 알림 무-backfill을 확인합니다.
+2. API와 push worker 이미지를 두 flag가 `false`인 상태로 배포합니다.
+3. `node dist/workers/pushWorker.js --healthcheck`로 DB와 credential access token readiness를 확인합니다.
+4. Stage Flutter 실기기에서 `PUT /api/v1/devices/current` 등록과 환경값을 확인합니다.
+5. API의 `PUSH_JOB_ENQUEUE_ENABLED=true`를 먼저 적용한 뒤 job이 쌓이는지 확인합니다.
+6. worker의 `PUSH_WORKER_ENABLED=true`를 적용하고 6개 알림 타입 E2E를 수행합니다.
+7. Production 앱 배포 후 기기 등록 기간을 확보하고 같은 순서를 반복합니다.
+
+### 활성화 기준과 rollback
+
+정상 부하에서 oldest pending job 60초 미만, 환경 간 오발송 0건, 중복 job 0건, raw target/title/body/payload 로그 0건이어야 합니다. 장애 시 enqueue를 먼저 끄고 worker를 중지한 다음 이전 API 이미지를 복원합니다. 신규 테이블과 job은 보존하며 별도 데이터 폐기 승인 없이 drop하지 않습니다.
+
+상세 worker·API·보안 계약은 `_docs/PUSH_NOTIFICATION_GUIDE.md`를 참조합니다.
+
+**문서 버전**: 1.6
+**최종 업데이트**: 2026-08-03

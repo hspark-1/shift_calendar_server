@@ -144,6 +144,10 @@ router.post(
       .isString()
       .notEmpty()
       .withMessage("Refresh 토큰이 필요합니다."),
+    body("installation_id")
+      .optional()
+      .isUUID()
+      .withMessage("installation_id는 UUID여야 합니다."),
   ],
   validateRequestMiddleware,
   logout

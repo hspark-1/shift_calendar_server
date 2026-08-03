@@ -108,8 +108,29 @@ export function validateEnvironment(): void {
   getPositiveIntegerEnvironmentVariable("GROUP_MEMBER_LIMIT", 20);
   getPositiveIntegerEnvironmentVariable("GROUP_INVITATION_TTL_DAYS", 7);
   getPositiveIntegerEnvironmentVariable("GROUP_CALENDAR_MAX_RANGE_DAYS", 100);
+  getPositiveIntegerEnvironmentVariable("PUSH_JOB_POLL_MS", 1000);
+  getPositiveIntegerEnvironmentVariable("PUSH_JOB_BATCH_SIZE", 20);
+  getPositiveIntegerEnvironmentVariable("PUSH_JOB_LEASE_SECONDS", 120);
+  getPositiveIntegerEnvironmentVariable("PUSH_MAX_ATTEMPTS", 6);
+  getPositiveIntegerEnvironmentVariable("PUSH_JOB_TTL_SECONDS", 3600);
+  getPositiveIntegerEnvironmentVariable("PUSH_TERMINAL_RETENTION_DAYS", 30);
   getBooleanEnvironmentVariable("WORK_SHIFT_CACHE_ENABLED", false);
+  getBooleanEnvironmentVariable("PUSH_JOB_ENQUEUE_ENABLED", false);
+  getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false);
   getBooleanEnvironmentVariable("API_DOCS_ENABLED", false);
+
+  const push_app_environment = process.env.PUSH_APP_ENVIRONMENT?.trim();
+  if (
+    push_app_environment !== undefined &&
+    !["STAGE", "PROD"].includes(push_app_environment)
+  ) {
+    throw new Error("PUSH_APP_ENVIRONMENT는 STAGE 또는 PROD여야 합니다.");
+  }
+
+  if (getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false)) {
+    getRequiredEnvironmentVariable("FIREBASE_PROJECT_ID");
+    getRequiredEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
+  }
 
   const db_pool_max = getPositiveIntegerEnvironmentVariable("DB_POOL_MAX", 10);
   const db_pool_min = getPositiveIntegerEnvironmentVariable(

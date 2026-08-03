@@ -4,6 +4,10 @@ import { Op, Transaction } from "sequelize";
 import { User, RefreshToken } from "../models";
 import { sequelize } from "../config/database";
 import { getRequiredEnvironmentVariable } from "../config/environment";
+import {
+  unbindAllUserDevices,
+  unbindDeviceForLogout,
+} from "./deviceService";
 
 interface TokenPayload {
   user_id: string; // UUID
@@ -166,36 +170,51 @@ export async function rotateRefreshToken(
 
 // 단일 refresh_token 무효화 (로그아웃)
 export async function revokeRefreshToken(
-  refresh_token: string
+  refresh_token: string,
+  installation_id?: string,
 ): Promise<boolean> {
   const token_hash = hashToken(refresh_token);
 
-  const [affected_count] = await RefreshToken.update(
-    { revoked_at: new Date() },
-    {
-      where: {
-        token_hash,
-        revoked_at: null,
-      },
-    }
-  );
+  return sequelize.transaction(async (transaction) => {
+    const stored_token = await RefreshToken.findOne({
+      where: { token_hash },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!stored_token) return false;
 
-  return affected_count === 1;
+    const was_active = stored_token.revoked_at === null;
+    if (was_active) {
+      stored_token.revoked_at = new Date();
+      await stored_token.save({ transaction });
+    }
+    if (installation_id) {
+      await unbindDeviceForLogout(
+        stored_token.user_id,
+        installation_id,
+        transaction,
+      );
+    }
+    return was_active;
+  });
 }
 
 // 사용자의 모든 refresh_token 무효화 (모든 기기 로그아웃)
 export async function revokeAllUserTokens(user_id: string): Promise<number> {
-  const [affected_count] = await RefreshToken.update(
-    { revoked_at: new Date() },
-    {
-      where: {
-        user_id,
-        revoked_at: null,
+  return sequelize.transaction(async (transaction) => {
+    const [affected_count] = await RefreshToken.update(
+      { revoked_at: new Date() },
+      {
+        where: {
+          user_id,
+          revoked_at: null,
+        },
+        transaction,
       },
-    }
-  );
-
-  return affected_count;
+    );
+    await unbindAllUserDevices(user_id, transaction);
+    return affected_count;
+  });
 }
 
 // 만료된 토큰 정리 (배치 작업용)

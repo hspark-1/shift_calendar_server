@@ -1136,3 +1136,67 @@ Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 �
 - Stage 측정에서 그룹 aggregate DB query time이 병목일 때만 set-based multi-owner cache 설계
 - 외부 push 인프라가 도입되면 `invitation_id` idempotency key 기반 비동기 발송 추가
 - 20명·100일 한도나 그룹별 공개 정책 요구가 변경될 때 스키마와 개인정보 노출 위험 재평가
+
+---
+
+## ADR-0022: notifications 원본과 PostgreSQL lease Push Worker 분리
+
+### 배경(문제)
+
+친구 요청·그룹 초대를 앱이 열려 있지 않을 때도 알려야 하지만, 도메인 transaction 안에서 FCM을 직접 호출하면 외부 장애가 API 응답과 DB 정합성에 결합됩니다. 한 사용자의 여러 설치 중 어느 기기에 보낼지, token refresh·logout·재시도·환경 격리도 일관된 정책이 필요합니다.
+
+### 선택지(대안)
+
+1. `notifications + push_jobs` 원자 기록 후 PostgreSQL lease worker가 최신 활성 기기 한 대에 전송
+2. API 서비스가 transaction 완료 후 FCM 직접 호출
+3. 모든 활성 기기에 fan-out
+4. Firebase topic 기반 사용자 구독
+
+### 결정(무엇을 선택)
+
+**인앱 `notifications`를 원본으로 유지하고 같은 transaction에 `push_jobs` snapshot을 기록한 뒤, 독립 Push Worker가 `LATEST_ACTIVE` 기기 한 대를 최초 1회 선택해 FCM으로 전송**합니다.
+
+- API 서버는 FCM을 호출하지 않음
+- `FOR UPDATE SKIP LOCKED`와 lease로 다중 worker claim
+- 재시도는 같은 device에 고정하고 전송 직전 최신 target 재조회
+- 같은 job의 차순위 기기 fallback 없음
+- 10초 지수 backoff+jitter, 15분 상한, 6회/1시간 TTL
+- Stage/Production DB·Firebase project·credential·기기 데이터를 분리
+- exactly-once가 아닌 at-least-once를 명시하고 collapse ID+클라이언트 중복 제거 사용
+
+### 근거(왜)
+
+- 도메인 작업과 job 생성 사이 유실 구간을 DB transaction으로 제거
+- Firebase 장애가 친구/그룹 API 성공 여부를 직접 결정하지 않음
+- `last_seen_at` 기반 한 대 정책으로 중복 노출을 줄이면서 사용자의 현재 기기 변경을 다음 알림부터 반영
+- delivery 고정으로 일시 오류 재시도 중 여러 기기에 중복 발송되는 것을 방지
+- provider adapter와 `target_type`으로 향후 FID 등 확장 경계를 유지
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 인앱 원본과 push snapshot의 원자성
+- lease 만료 복구, retry/TTL/영구 target 비활성화의 명시적 운영 상태
+- 환경별 설치/target 유일성과 raw target 비노출
+- enqueue/worker 독립 flag를 통한 단계 활성화와 안전한 애플리케이션 rollback
+
+**트레이드오프**:
+
+- worker와 Firebase credential 운영, 신규 테이블/지표가 필요
+- FCM 성공 후 DB 반영 전 프로세스 종료 시 중복 가능
+- 선택 기기 오류 시 같은 알림을 다른 기기로 보내지 않아 해당 push는 유실될 수 있음
+- 고정된 `firebase-admin 13.10.0`의 간접 의존성에 moderate audit advisory가 있으며, 사용자 지정 버전 계약 때문에 14.x 전환은 별도 검증이 필요
+
+### 구현 위치
+
+- **DB**: `migrations/add_push_notification_support.sql`, `migrations/final_schema.sql`, `schema.drawio`
+- **서비스/모델**: `src/services/notificationService.ts`, `src/services/deviceService.ts`, `src/models/UserDevice.ts`, `src/models/PushJob.ts`, `src/models/PushDelivery.ts`
+- **Worker/provider**: `src/workers/pushWorker.ts`, `src/services/firebasePushProvider.ts`
+- **HTTP/계약**: `src/routes/deviceRoutes.ts`, `src/openapi/deviceOpenApi.json`, `_docs/PUSH_NOTIFICATION_GUIDE.md`
+
+### 추후 과제(언제 다시 평가)
+
+- 실제 운영 중 한 기기 정책으로 중요 알림 유실이 허용되지 않으면 알림별 fan-out 정책을 별도 ADR로 검토
+- Firebase Admin 14.x와 Node 호환성 검증 후 audit advisory 해소를 위해 pinned 버전 변경 검토
+- FID 기반 전송이 안정화되면 provider adapter와 `target_type`을 확장
