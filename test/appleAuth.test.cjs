@@ -24,7 +24,7 @@ process.env.APPLE_KEY_ID = "KEYID12345";
 process.env.APPLE_IOS_CLIENT_ID = "com.hspark.shiftmate";
 process.env.APPLE_SERVICE_ID = "com.hspark.shiftmate.stage.web";
 process.env.APPLE_REDIRECT_URI =
-  "https://stage-api.shiftmate.co.kr/api/v1/auth/apple/callback";
+  "https://stage-api.example.com/api/v1/auth/apple/callback";
 process.env.APPLE_PRIVATE_KEY_PATH = private_key_path;
 process.env.APPLE_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 process.env.APPLE_CHALLENGE_TTL_SECONDS = "300";
@@ -78,7 +78,7 @@ test("iOS와 Android client_id/redirect_uri를 서버 환경설정에서만 결�
   assert.deepEqual(service.resolveAppleClient("android"), {
     client_id: "com.hspark.shiftmate.stage.web",
     redirect_uri:
-      "https://stage-api.shiftmate.co.kr/api/v1/auth/apple/callback",
+      "https://stage-api.example.com/api/v1/auth/apple/callback",
   });
   assert.throws(
     () => service.resolveAppleClient("web"),

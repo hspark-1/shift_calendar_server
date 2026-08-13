@@ -2,6 +2,16 @@
 
 ## 2026-08-13
 
+### [DONE] Apple 공개 문서와 migration 테스트 경계 복구
+
+- **목적**: 현재 작업트리의 Apple 문서·테스트 변경을 공개 `develop` 정책과 깨끗한 원격 체크아웃에서 재현 가능한 상태로 정리
+- **변경**: 범용 Apple migration 계약과 Portal 절차는 유지하고 환경별 pgAdmin 파일·운영 식별자·누락 파일 의존성은 제거
+- **영향범위**: Apple 운영 가이드, migration 정적 테스트, gitignore와 작업 기록. 런타임 코드와 DB에는 영향 없음
+- **파일**: `_docs/{APPLE_SIGN_IN_SERVER_GUIDE,WORKLOG}.md`, `test/appleAuth.test.cjs`
+- **테스트**: `npm test` 36 pass, 5개의 명시적 integration skip, 0 fail. `git diff --check`와 운영 DB명·백업 증거·Team ID·환경 도메인·호스트 경로 패턴 검사 통과
+- **롤백**: 본 정리 커밋을 revert
+- **다음**: 환경별 pgAdmin wrapper와 실제 배포값은 비공개 운영 저장소에서 별도로 유지
+
 ### [DONE] 공개 저장소 운영 식별자 정리
 
 - **목적**: 기존 공개 `develop` 문서와 테스트에 남아 있는 비공개 배포 저장소·호스트 경로·환경별 식별자를 현재 branch tip에서 제거
