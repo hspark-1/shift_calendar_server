@@ -57,6 +57,7 @@ ShiftType.init(
         model: "shift_templates",
         key: "template_id",
       },
+      onDelete: "CASCADE",
     },
     code: {
       type: DataTypes.TEXT,

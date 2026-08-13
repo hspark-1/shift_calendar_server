@@ -41,6 +41,7 @@ ShiftTemplate.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     name: {
       type: DataTypes.TEXT,

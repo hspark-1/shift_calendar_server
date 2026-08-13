@@ -14,6 +14,10 @@ import { WorkShiftApiModel } from "../types/workShift";
 const schema_version = 1;
 
 const read_snapshot_script = `
+if redis.call('EXISTS', KEYS[3]) == 1 then
+  redis.call('DEL', KEYS[1])
+  return false
+end
 local snapshot = redis.call('GET', KEYS[1])
 if not snapshot then return false end
 local fence = redis.call('GET', KEYS[2])
@@ -34,6 +38,7 @@ return snapshot
 `;
 
 const write_snapshot_script = `
+if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end
 local fence = redis.call('GET', KEYS[2])
 local snapshot_revision = tonumber(ARGV[2])
 if not snapshot_revision then return 0 end
@@ -132,7 +137,14 @@ export function getWorkShiftCacheKeys(owner_user_id: string, year_month: string)
     snapshot_key,
     revision_key: `${snapshot_key}:revision`,
     lock_key: `${snapshot_key}:lock`,
+    deletion_tombstone_key: getAccountDeletionCacheTombstoneKey(owner_user_id),
   };
+}
+
+export function getAccountDeletionCacheTombstoneKey(
+  owner_user_id: string,
+): string {
+  return `${getKeyPrefix()}:account-deleted:v1:${owner_user_id}`;
 }
 
 function isValidSnapshot(
@@ -192,7 +204,11 @@ async function readSnapshot(
   const keys = getWorkShiftCacheKeys(owner_user_id, year_month);
   const raw = await withRedisCommandTimeout(
     client.eval(read_snapshot_script, {
-      keys: [keys.snapshot_key, keys.revision_key],
+      keys: [
+        keys.snapshot_key,
+        keys.revision_key,
+        keys.deletion_tombstone_key,
+      ],
       arguments: [],
     }),
   );
@@ -274,7 +290,11 @@ async function writeSnapshot(
   );
   await withRedisCommandTimeout(
     client.eval(write_snapshot_script, {
-      keys: [keys.snapshot_key, keys.revision_key],
+      keys: [
+        keys.snapshot_key,
+        keys.revision_key,
+        keys.deletion_tombstone_key,
+      ],
       arguments: [JSON.stringify(snapshot), snapshot.revision, String(ttl_seconds)],
     }),
   );
@@ -433,6 +453,58 @@ export async function invalidateWorkShiftMonth(
         arguments: [revision],
       }),
     );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function purgeDeletedUserWorkShiftCache(
+  owner_user_id: string,
+  cache_year_months: string[],
+): Promise<boolean> {
+  if (!process.env.REDIS_URL?.trim()) {
+    return true;
+  }
+  const client = await getRedisClient({ force_connection: true });
+  if (!client) return false;
+
+  const tombstone_key = getAccountDeletionCacheTombstoneKey(owner_user_id);
+  const tombstone_ttl_seconds =
+    getPositiveIntegerEnvironmentVariable("WORK_SHIFT_CACHE_TTL_SECONDS", 86400) +
+    getPositiveIntegerEnvironmentVariable(
+      "WORK_SHIFT_CACHE_TTL_JITTER_SECONDS",
+      3600,
+      { allow_zero: true },
+    ) +
+    Math.ceil(
+      getPositiveIntegerEnvironmentVariable("WORK_SHIFT_CACHE_LOCK_MS", 5000) /
+        1000,
+    ) +
+    300;
+
+  try {
+    await withRedisCommandTimeout(
+      client.set(tombstone_key, "1", { EX: tombstone_ttl_seconds }),
+    );
+    const exact_keys = cache_year_months.flatMap((value) => {
+      const keys = getWorkShiftCacheKeys(owner_user_id, value.slice(0, 7));
+      return [keys.snapshot_key, keys.revision_key, keys.lock_key];
+    });
+    if (exact_keys.length > 0) {
+      await withRedisCommandTimeout(client.del(exact_keys));
+    }
+
+    const pattern = `${getKeyPrefix()}:work-shifts:v1:${owner_user_id}:*`;
+    for await (const keys of client.scanIterator({
+      MATCH: pattern,
+      COUNT: 100,
+    })) {
+      const matched_keys = Array.isArray(keys) ? keys : [keys];
+      if (matched_keys.length > 0) {
+        await withRedisCommandTimeout(client.del(matched_keys));
+      }
+    }
     return true;
   } catch {
     return false;

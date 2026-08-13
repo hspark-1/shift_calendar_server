@@ -16,6 +16,8 @@ interface UserAttributes {
   password?: string | null;
   phone?: string | null; // 전화번호: 000-000-0000 또는 000-0000-0000
   created_at?: Date;
+  account_status?: "ACTIVE" | "DELETION_PENDING";
+  deletion_requested_at?: Date | null;
 }
 
 interface UserCreationAttributes
@@ -31,6 +33,8 @@ interface UserCreationAttributes
     | "password"
     | "phone"
     | "created_at"
+    | "account_status"
+    | "deletion_requested_at"
   > {}
 
 class User
@@ -49,6 +53,8 @@ class User
   declare password: string | null | undefined;
   declare phone: string | null | undefined;
   declare created_at: Date | undefined;
+  declare account_status: "ACTIVE" | "DELETION_PENDING";
+  declare deletion_requested_at: Date | null | undefined;
 
   // 비밀번호 검증 메서드 (패스워드 인증 추가 시 사용)
   public async validatePassword(input_password: string): Promise<boolean> {
@@ -127,6 +133,15 @@ User.init(
       type: DataTypes.DATE,
       allowNull: false,
       defaultValue: DataTypes.NOW,
+    },
+    account_status: {
+      type: DataTypes.TEXT,
+      allowNull: false,
+      defaultValue: "ACTIVE",
+    },
+    deletion_requested_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
   },
   {

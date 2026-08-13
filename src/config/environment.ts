@@ -76,7 +76,12 @@ export function getAppleTokenEncryptionKey(): Buffer {
 }
 
 export function validateAppleAuthEnvironment(): void {
-  if (!getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false)) return;
+  if (
+    !getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false) &&
+    !getBooleanEnvironmentVariable("ACCOUNT_DELETION_WORKER_ENABLED", false)
+  ) {
+    return;
+  }
 
   const team_id = getRequiredEnvironmentVariable("APPLE_TEAM_ID");
   const key_id = getRequiredEnvironmentVariable("APPLE_KEY_ID");
@@ -200,6 +205,12 @@ export function validateEnvironment(): void {
   getPositiveIntegerEnvironmentVariable("PUSH_MAX_ATTEMPTS", 6);
   getPositiveIntegerEnvironmentVariable("PUSH_JOB_TTL_SECONDS", 3600);
   getPositiveIntegerEnvironmentVariable("PUSH_TERMINAL_RETENTION_DAYS", 30);
+  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_REAUTH_SECONDS", 600);
+  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_POLL_MS", 1000);
+  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_BATCH_SIZE", 10);
+  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_LEASE_SECONDS", 120);
+  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_MAX_ATTEMPTS", 12);
+  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_RETENTION_DAYS", 30);
   const apple_challenge_ttl_seconds = getPositiveIntegerEnvironmentVariable(
     "APPLE_CHALLENGE_TTL_SECONDS",
     300,
@@ -223,6 +234,8 @@ export function validateEnvironment(): void {
   getBooleanEnvironmentVariable("API_DOCS_ENABLED", false);
   getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false);
   getBooleanEnvironmentVariable("GOOGLE_AUTH_ENABLED", false);
+  getBooleanEnvironmentVariable("ACCOUNT_DELETION_ENABLED", false);
+  getBooleanEnvironmentVariable("ACCOUNT_DELETION_WORKER_ENABLED", false);
   validateGoogleAuthEnvironment();
 
   const push_app_environment = process.env.PUSH_APP_ENVIRONMENT?.trim();
@@ -236,6 +249,10 @@ export function validateEnvironment(): void {
   if (getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false)) {
     getRequiredEnvironmentVariable("FIREBASE_PROJECT_ID");
     getRequiredEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
+  }
+
+  if (getBooleanEnvironmentVariable("ACCOUNT_DELETION_WORKER_ENABLED", false)) {
+    getRequiredEnvironmentVariable("KAKAO_ADMIN_KEY");
   }
 
   const db_pool_max = getPositiveIntegerEnvironmentVariable("DB_POOL_MAX", 10);

@@ -525,7 +525,7 @@ interface GroupDetailHeaderRow {
   name: string;
   timezone: string;
   my_role: GroupRole;
-  created_by_user_id: string;
+  created_by_user_id: string | null;
   created_at: Date;
   updated_at: Date;
 }

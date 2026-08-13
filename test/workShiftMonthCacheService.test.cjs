@@ -35,6 +35,7 @@ test("사용자와 월이 분리된 snapshot/revision/lock 키를 만든다", ()
     snapshot_key: "shiftmate:test:work-shifts:v1:user-1:202607",
     revision_key: "shiftmate:test:work-shifts:v1:user-1:202607:revision",
     lock_key: "shiftmate:test:work-shifts:v1:user-1:202607:lock",
+    deletion_tombstone_key: "shiftmate:test:account-deleted:v1:user-1",
   });
 });
 

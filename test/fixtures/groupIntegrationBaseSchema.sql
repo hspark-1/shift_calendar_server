@@ -16,6 +16,8 @@ CREATE TABLE users (
   naver_id text UNIQUE,
   password text,
   phone text UNIQUE,
+  account_status text NOT NULL DEFAULT 'ACTIVE',
+  deletion_requested_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

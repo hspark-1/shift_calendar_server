@@ -8,7 +8,7 @@ interface ShiftTemplateVersionAttributes {
   template_id: string; // UUID
   version_no: number;
   effective_from: Date; // DATE 타입
-  created_by_user_id: string; // UUID
+  created_by_user_id: string | null; // UUID
   created_at?: Date;
 }
 
@@ -29,7 +29,7 @@ class ShiftTemplateVersion
   declare template_id: string;
   declare version_no: number;
   declare effective_from: Date;
-  declare created_by_user_id: string;
+  declare created_by_user_id: string | null;
   declare created_at: Date | undefined;
 }
 
@@ -47,6 +47,7 @@ ShiftTemplateVersion.init(
         model: "shift_templates",
         key: "template_id",
       },
+      onDelete: "CASCADE",
     },
     version_no: {
       type: DataTypes.INTEGER,
@@ -62,11 +63,12 @@ ShiftTemplateVersion.init(
     },
     created_by_user_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
       references: {
         model: "users",
         key: "user_id",
       },
+      onDelete: "SET NULL",
     },
     created_at: {
       type: DataTypes.DATE,

@@ -47,6 +47,7 @@ Friendship.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     user_id_b: {
       type: DataTypes.UUID,
@@ -56,6 +57,7 @@ Friendship.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     created_at: {
       type: DataTypes.DATE,

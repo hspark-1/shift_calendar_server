@@ -1,5 +1,37 @@
 # 작업 일지
 
+## 2026-08-14
+
+### [DONE] 회원 탈퇴 서버 기능 구현
+
+- **목적**: 승인된 회원 탈퇴 설계를 실제 migration, API, worker, provider 연동, Redis purge와 회귀 테스트로 구현한다.
+- **변경**:
+  - `users.account_status/deletion_requested_at`, 삭제 요청·provider task 테이블, 소유 FK `CASCADE`/감사 FK `SET NULL`의 preflight/apply/postflight/승인형 rollback과 정본 DDL 추가
+  - JWT `auth_time` 10분 재인증, `DELETE /api/v1/auth/account`, 접수 즉시 Refresh Token revoke·기기 unbind·일반 API 차단, 상태 조회/OpenAPI 구현
+  - Apple refresh token revoke·Kakao Admin Key unlink, lease/backoff/max-attempt worker, ADMIN 우선 그룹 OWNER 승계/단독 그룹 삭제, DB 물리 purge 구현
+  - Redis 삭제 tombstone으로 in-flight cache 재생성을 차단하고 사용자 월 key를 exact delete + SCAN purge하도록 추가
+  - 완료 request의 `user_id`를 null로 익명화하고 30일 보존 후 cleanup
+- **영향범위**: 인증 API·JWT, 사용자 FK, 그룹 응답 nullable 감사 필드, 신규 worker와 secret/환경변수, PostgreSQL·Redis·외부 OAuth 연동.
+- **파일**: `src/{config/accountDeletion.ts,models/AccountDeletion*,services/accountDeletion*,workers/accountDeletionWorker.ts,openapi/accountDeletionOpenApi.json}` 및 인증·캐시·모델 연계 파일, `migrations/{account_deletion_*,add_account_deletion_support,rollback_account_deletion_support,final_schema}.sql`, `test/accountDeletion*.test.cjs`, 기존 PostgreSQL `test/fixtures/*Schema.sql`, `schema.drawio`, `.env.example`, `_docs/{ACCOUNT_DELETION_SERVER_DESIGN,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`
+- **테스트**: `npm test` 54 pass, 명시적 통합 6 skip, 0 fail. TypeScript build, OpenAPI JSON parse, draw.io XML parse, `git diff --check` 통과. 로컬 Docker daemon 미실행으로 신규 PostgreSQL 통합 시나리오는 실행하지 못했으며 `npm run test:account-deletion-integration`으로 격리 DB에서 실행 가능.
+- **롤백**: `ACCOUNT_DELETION_ENABLED=false`, `ACCOUNT_DELETION_WORKER_ENABLED=false`로 접수/처리를 먼저 멈추고 이전 이미지를 배포한다. 요청/task과 pending user가 0건인 경우에만 승인형 rollback SQL을 사용하며 이미 물리 삭제된 데이터는 복구하지 않는다.
+- **다음**: Stage DB 백업·preflight/apply/postflight 후 worker secret을 주입하고 provider mock, Redis 장애, 실제 Apple/Kakao 계정 E2E를 통과한 뒤만 플래그를 활성화한다.
+
+### [DONE] 회원 탈퇴 서버 개발 설계
+
+- **목적**: 현재 인증·OAuth·친구·그룹·캘린더·알림·캐시 데이터 구조를 기준으로 안전하고 재시도 가능한 회원 탈퇴 서버 계약을 확정한다.
+- **변경**:
+  - 최근 재인증과 명시적 확인을 거쳐 `202 Accepted`로 접수하고 즉시 일반 API·세션을 차단하는 계약 확정
+  - PostgreSQL lease worker가 Apple revoke·Kakao unlink, 그룹 OWNER 자동 승계, DB 물리 삭제, Redis tombstone/purge를 멱등 처리하도록 설계
+  - 사용자 소유 FK는 CASCADE, 감사자 FK는 nullable SET NULL로 변경하고 알림/push JSON snapshot까지 삭제 범위에 포함
+  - Google/Naver는 현재 서버에 revoke token이 없음을 확인하고 클라이언트 disconnect와 내부 계정 삭제를 분리
+  - 구현 예정 파일, migration preflight/postflight, 통합·장애·Stage E2E와 비가역 rollback 원칙 문서화
+- **영향범위**: 설계 문서와 프로젝트 컨텍스트·ADR·작업 일지. 런타임 코드, DB schema, draw.io와 운영 환경은 변경하지 않았다.
+- **파일**: `_docs/{ACCOUNT_DELETION_SERVER_DESIGN,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`
+- **테스트**: 현재 코드·`migrations/final_schema.sql`·두 draw.io의 사용자 FK/인증/cache 구조를 대조하고 공식 Apple/Kakao/Google/Naver 문서를 확인했다. Markdown diff whitespace와 draw.io XML parse를 검증했다.
+- **롤백**: 이번 문서 변경을 revert한다. 구현·운영 데이터 변경은 없으므로 별도 DB rollback은 필요 없다.
+- **다음**: 설계의 개인정보 보존 기간·완료 SLA를 승인한 뒤 migration/preflight → model/service/worker → OpenAPI → 격리 PostgreSQL/Redis 통합 테스트 순서로 구현한다.
+
 ## 2026-08-13
 
 ### [DONE] Apple 공개 문서와 migration 테스트 경계 복구

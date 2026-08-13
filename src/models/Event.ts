@@ -5,7 +5,7 @@ import User from "./User";
 interface EventAttributes {
   event_id: string; // UUID
   owner_user_id: string; // UUID
-  created_by_user_id: string; // UUID
+  created_by_user_id: string | null; // UUID
   title: string;
   memo?: string | null;
   place?: string | null;
@@ -39,7 +39,7 @@ class Event
 {
   declare event_id: string;
   declare owner_user_id: string;
-  declare created_by_user_id: string;
+  declare created_by_user_id: string | null;
   declare title: string;
   declare memo: string | null | undefined;
   declare place: string | null | undefined;
@@ -67,14 +67,16 @@ Event.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     created_by_user_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
       references: {
         model: "users",
         key: "user_id",
       },
+      onDelete: "SET NULL",
     },
     title: {
       type: DataTypes.TEXT,
@@ -130,6 +132,7 @@ Event.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "SET NULL",
     },
   },
   {
@@ -177,4 +180,3 @@ Event.belongsTo(User, {
 });
 
 export default Event;
-

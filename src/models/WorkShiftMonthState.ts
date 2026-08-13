@@ -31,6 +31,7 @@ WorkShiftMonthState.init(
       allowNull: false,
       primaryKey: true,
       references: { model: "users", key: "user_id" },
+      onDelete: "CASCADE",
     },
     year_month: {
       type: DataTypes.DATEONLY,

@@ -16,8 +16,13 @@ import {
   appleCallback,
   appleLogin,
   googleLoginWithToken,
+  deleteAccount,
+  accountDeletionStatus,
 } from "../controllers/authController";
-import { authMiddleware } from "../middlewares/auth";
+import {
+  accountDeletionStatusAuthMiddleware,
+  authMiddleware,
+} from "../middlewares/auth";
 import { authRateLimitMiddleware } from "../middlewares/rateLimit";
 import { validateRequestMiddleware } from "../middlewares/validateRequest";
 import { normalizePhoneNumber } from "../utils/phone";
@@ -39,6 +44,25 @@ function validateApplePlatform(
     error: {
       code: "APPLE_INVALID_PLATFORM",
       message: "platform은 ios 또는 android여야 합니다.",
+    },
+    request_id: req.request_id,
+  });
+}
+
+function validateAccountDeletionConfirmation(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (req.body?.confirmation === true) {
+    next();
+    return;
+  }
+  res.status(400).json({
+    success: false,
+    error: {
+      code: "ACCOUNT_DELETION_CONFIRMATION_REQUIRED",
+      message: "회원 탈퇴 확인이 필요합니다.",
     },
     request_id: req.request_id,
   });
@@ -338,6 +362,20 @@ router.post(
   ],
   validateRequestMiddleware,
   updateProfile
+);
+
+router.delete(
+  "/account",
+  authRateLimitMiddleware,
+  authMiddleware,
+  validateAccountDeletionConfirmation,
+  deleteAccount,
+);
+
+router.get(
+  "/account-deletion",
+  accountDeletionStatusAuthMiddleware,
+  accountDeletionStatus,
 );
 
 export default router;

@@ -8,7 +8,7 @@ interface GroupMemberAttributes {
   group_id: string;
   user_id: string;
   role: GroupRole;
-  added_by_user_id: string;
+  added_by_user_id: string | null;
   joined_at: Date;
   updated_at: Date;
   removed_at: Date | null;
@@ -34,7 +34,7 @@ class GroupMember
   declare group_id: string;
   declare user_id: string;
   declare role: GroupRole;
-  declare added_by_user_id: string;
+  declare added_by_user_id: string | null;
   declare joined_at: Date;
   declare updated_at: Date;
   declare removed_at: Date | null;
@@ -57,6 +57,7 @@ GroupMember.init(
       type: DataTypes.UUID,
       allowNull: false,
       references: { model: "users", key: "user_id" },
+      onDelete: "CASCADE",
     },
     role: {
       type: DataTypes.TEXT,
@@ -65,8 +66,9 @@ GroupMember.init(
     },
     added_by_user_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
       references: { model: "users", key: "user_id" },
+      onDelete: "SET NULL",
     },
     joined_at: {
       type: DataTypes.DATE,
@@ -83,6 +85,7 @@ GroupMember.init(
       type: DataTypes.UUID,
       allowNull: true,
       references: { model: "users", key: "user_id" },
+      onDelete: "SET NULL",
     },
   },
   {

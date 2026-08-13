@@ -52,11 +52,20 @@ CREATE TABLE users (
   naver_id text,
   phone text,
   password text,
+  account_status text NOT NULL DEFAULT 'ACTIVE',
+  deletion_requested_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_users_email UNIQUE (email),
   CONSTRAINT ck_users_phone_format CHECK (
     phone IS NULL OR phone ~ '^[0-9]{3}-[0-9]{3,4}-[0-9]{4}$'
+  ),
+  CONSTRAINT ck_users_account_status CHECK (
+    account_status IN ('ACTIVE', 'DELETION_PENDING')
+  ),
+  CONSTRAINT ck_users_deletion_pair CHECK (
+    (account_status = 'ACTIVE' AND deletion_requested_at IS NULL)
+    OR (account_status = 'DELETION_PENDING' AND deletion_requested_at IS NOT NULL)
   )
 );
 
@@ -65,6 +74,7 @@ CREATE UNIQUE INDEX idx_users_apple_id ON users(apple_id) WHERE apple_id IS NOT 
 CREATE UNIQUE INDEX idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
 CREATE UNIQUE INDEX idx_users_naver_id ON users(naver_id) WHERE naver_id IS NOT NULL;
 CREATE UNIQUE INDEX idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
+CREATE INDEX idx_users_account_status ON users(account_status, deletion_requested_at);
 
 COMMENT ON TABLE users IS '앱 사용자. 사용자 1명당 캘린더 1개(=모든 일정/근무 owner_user_id=user_id)';
 COMMENT ON COLUMN users.user_id IS '사용자 PK(UUID)';
@@ -76,6 +86,8 @@ COMMENT ON COLUMN users.google_id IS 'Google OIDC subject(sub). 검증된 ID Tok
 COMMENT ON COLUMN users.naver_id IS '네이버 OAuth 사용자 ID';
 COMMENT ON COLUMN users.phone IS '전화번호. 000-000-0000 또는 000-0000-0000 형식으로 저장(친구 검색용)';
 COMMENT ON COLUMN users.password IS '패스워드 인증용 bcrypt 해시 (OAuth 사용자는 null)';
+COMMENT ON COLUMN users.account_status IS 'ACTIVE 또는 DELETION_PENDING. 탈퇴 접수 즉시 일반 인증을 차단한다.';
+COMMENT ON COLUMN users.deletion_requested_at IS '회원 탈퇴가 접수된 시각. ACTIVE이면 null';
 
 -- =========================================================
 -- 3) FRIEND REQUESTS
@@ -89,8 +101,8 @@ CREATE TABLE friend_requests (
   created_at timestamptz NOT NULL DEFAULT now(),
   responded_at timestamptz,
 
-  CONSTRAINT fk_friend_requests_requester FOREIGN KEY (requester_user_id) REFERENCES users(user_id),
-  CONSTRAINT fk_friend_requests_addressee FOREIGN KEY (addressee_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_friend_requests_requester FOREIGN KEY (requester_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  CONSTRAINT fk_friend_requests_addressee FOREIGN KEY (addressee_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT ck_friend_requests_status CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED', 'CANCELED')),
   CONSTRAINT ck_friend_requests_not_self CHECK (requester_user_id <> addressee_user_id)
 );
@@ -116,8 +128,8 @@ CREATE TABLE friendships (
   created_at timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT pk_friendships PRIMARY KEY (user_id_a, user_id_b),
-  CONSTRAINT fk_friendships_a FOREIGN KEY (user_id_a) REFERENCES users(user_id),
-  CONSTRAINT fk_friendships_b FOREIGN KEY (user_id_b) REFERENCES users(user_id),
+  CONSTRAINT fk_friendships_a FOREIGN KEY (user_id_a) REFERENCES users(user_id) ON DELETE CASCADE,
+  CONSTRAINT fk_friendships_b FOREIGN KEY (user_id_b) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT ck_friendships_order CHECK (user_id_a < user_id_b)
 );
 
@@ -140,8 +152,8 @@ CREATE TABLE friend_level_settings (
   updated_at timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT pk_friend_level_settings PRIMARY KEY (owner_user_id, friend_user_id),
-  CONSTRAINT fk_fls_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
-  CONSTRAINT fk_fls_friend FOREIGN KEY (friend_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_fls_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  CONSTRAINT fk_fls_friend FOREIGN KEY (friend_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT ck_fls_level CHECK (friend_level >= 0),
   CONSTRAINT ck_fls_not_self CHECK (owner_user_id <> friend_user_id)
 );
@@ -164,7 +176,7 @@ CREATE TABLE shift_templates (
   created_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz,
 
-  CONSTRAINT fk_shift_templates_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_shift_templates_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT uq_shift_templates_name UNIQUE (owner_user_id, name)
 );
 
@@ -180,11 +192,11 @@ CREATE TABLE shift_template_versions (
 
   version_no int NOT NULL,
   effective_from date NOT NULL DEFAULT CURRENT_DATE,
-  created_by_user_id uuid NOT NULL,
+  created_by_user_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
 
-  CONSTRAINT fk_shift_versions_template FOREIGN KEY (template_id) REFERENCES shift_templates(template_id),
-  CONSTRAINT fk_shift_versions_creator FOREIGN KEY (created_by_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_shift_versions_template FOREIGN KEY (template_id) REFERENCES shift_templates(template_id) ON DELETE CASCADE,
+  CONSTRAINT fk_shift_versions_creator FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT uq_shift_versions_no UNIQUE (template_id, version_no),
   CONSTRAINT uq_shift_versions_effective UNIQUE (template_id, effective_from),
   CONSTRAINT ck_shift_versions_no CHECK (version_no > 0)
@@ -209,7 +221,7 @@ CREATE TABLE shift_types (
   created_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz,
 
-  CONSTRAINT fk_shift_types_template FOREIGN KEY (template_id) REFERENCES shift_templates(template_id),
+  CONSTRAINT fk_shift_types_template FOREIGN KEY (template_id) REFERENCES shift_templates(template_id) ON DELETE CASCADE,
   CONSTRAINT ck_shift_types_color_intensity CHECK (color_intensity BETWEEN 0 AND 100),
   CONSTRAINT ck_shift_types_base_color_format CHECK (
     base_color IS NULL
@@ -237,8 +249,8 @@ CREATE TABLE shift_type_schedules (
 
   created_at timestamptz NOT NULL DEFAULT now(),
 
-  CONSTRAINT fk_shift_schedules_type FOREIGN KEY (shift_type_id) REFERENCES shift_types(shift_type_id),
-  CONSTRAINT fk_shift_schedules_version FOREIGN KEY (template_version_id) REFERENCES shift_template_versions(template_version_id),
+  CONSTRAINT fk_shift_schedules_type FOREIGN KEY (shift_type_id) REFERENCES shift_types(shift_type_id) ON DELETE CASCADE,
+  CONSTRAINT fk_shift_schedules_version FOREIGN KEY (template_version_id) REFERENCES shift_template_versions(template_version_id) ON DELETE CASCADE,
   CONSTRAINT uq_shift_schedules UNIQUE (template_version_id, shift_type_id),
   CONSTRAINT ck_shift_schedule_time_required CHECK (
     (start_time IS NULL AND end_time IS NULL)
@@ -263,7 +275,7 @@ CREATE TABLE events (
   event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 
   owner_user_id uuid NOT NULL,
-  created_by_user_id uuid NOT NULL,
+  created_by_user_id uuid,
 
   title text NOT NULL,
   memo text,
@@ -280,9 +292,9 @@ CREATE TABLE events (
   deleted_at timestamptz,
   deleted_by_user_id uuid,
 
-  CONSTRAINT fk_events_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
-  CONSTRAINT fk_events_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(user_id),
-  CONSTRAINT fk_events_deleted_by FOREIGN KEY (deleted_by_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_events_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  CONSTRAINT fk_events_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
+  CONSTRAINT fk_events_deleted_by FOREIGN KEY (deleted_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT ck_events_time CHECK (start_at < end_at),
   CONSTRAINT ck_events_visibility CHECK (visibility_level >= 0)
 );
@@ -310,17 +322,17 @@ CREATE TABLE work_shifts (
   note text,
 
   visibility_level smallint NOT NULL DEFAULT 0,
-  created_by_user_id uuid NOT NULL,
+  created_by_user_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
 
   deleted_at timestamptz,
   deleted_by_user_id uuid,
 
-  CONSTRAINT fk_work_shifts_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_work_shifts_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT fk_work_shifts_schedule FOREIGN KEY (schedule_id) REFERENCES shift_type_schedules(schedule_id),
-  CONSTRAINT fk_work_shifts_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(user_id),
-  CONSTRAINT fk_work_shifts_deleted_by FOREIGN KEY (deleted_by_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_work_shifts_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
+  CONSTRAINT fk_work_shifts_deleted_by FOREIGN KEY (deleted_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT uq_work_shifts_one_per_day UNIQUE (owner_user_id, work_date),
   CONSTRAINT ck_work_shifts_visibility_fixed CHECK (visibility_level = 0)
 );
@@ -341,7 +353,7 @@ CREATE TABLE work_shift_month_states (
   last_modified_at timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT pk_work_shift_month_states PRIMARY KEY (owner_user_id, year_month),
-  CONSTRAINT fk_work_shift_month_states_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_work_shift_month_states_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT ck_work_shift_month_states_first_day CHECK (year_month = date_trunc('month', year_month)::date),
   CONSTRAINT ck_work_shift_month_states_revision CHECK (revision > 0)
 );
@@ -360,7 +372,7 @@ CREATE TABLE work_shift_cache_outbox (
   processed_at timestamptz,
   last_error_code text,
 
-  CONSTRAINT fk_work_shift_cache_outbox_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+  CONSTRAINT fk_work_shift_cache_outbox_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT ck_work_shift_cache_outbox_type CHECK (event_type = 'WORK_SHIFT_MONTH_CHANGED'),
   CONSTRAINT ck_work_shift_cache_outbox_first_day CHECK (year_month = date_trunc('month', year_month)::date),
   CONSTRAINT ck_work_shift_cache_outbox_revision CHECK (revision > 0),
@@ -473,6 +485,81 @@ COMMENT ON TABLE oauth_login_challenges IS
   '소셜 로그인 전 일회성 state/nonce hash. 원문 credential은 저장하지 않는다.';
 COMMENT ON TABLE oauth_authorizations IS
   '외부 OAuth 연결과 계정 삭제용 refresh token 암호문. 앱 JWT refresh_tokens와 분리한다.';
+
+-- =========================================================
+-- 10-B) ACCOUNT DELETION REQUESTS / PROVIDER TASKS
+-- =========================================================
+CREATE TABLE account_deletion_requests (
+  deletion_request_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid,
+  status text NOT NULL DEFAULT 'PENDING',
+  cache_year_months date[] NOT NULL DEFAULT ARRAY[]::date[],
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  available_at timestamptz NOT NULL DEFAULT now(),
+  claimed_at timestamptz,
+  claim_token uuid,
+  attempt_count integer NOT NULL DEFAULT 0,
+  db_purged_at timestamptz,
+  cache_purged_at timestamptz,
+  completed_at timestamptz,
+  last_error_code text,
+
+  CONSTRAINT ck_account_deletion_requests_status CHECK (
+    status IN ('PENDING', 'PROCESSING', 'RETRY', 'CACHE_PURGE_PENDING', 'COMPLETED', 'FAILED')
+  ),
+  CONSTRAINT ck_account_deletion_requests_attempt_count CHECK (attempt_count >= 0),
+  CONSTRAINT ck_account_deletion_requests_claim_pair CHECK (
+    (claimed_at IS NULL AND claim_token IS NULL)
+    OR (claimed_at IS NOT NULL AND claim_token IS NOT NULL)
+  ),
+  CONSTRAINT ck_account_deletion_requests_completion CHECK (
+    (status = 'COMPLETED' AND completed_at IS NOT NULL AND user_id IS NULL)
+    OR (status <> 'COMPLETED' AND completed_at IS NULL)
+  )
+);
+
+CREATE UNIQUE INDEX uq_account_deletion_requests_active_user
+ON account_deletion_requests(user_id)
+WHERE user_id IS NOT NULL AND completed_at IS NULL;
+
+CREATE INDEX idx_account_deletion_requests_claimable
+ON account_deletion_requests(available_at, requested_at)
+WHERE status IN ('PENDING', 'PROCESSING', 'RETRY', 'CACHE_PURGE_PENDING');
+
+CREATE TABLE account_deletion_provider_tasks (
+  provider_task_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deletion_request_id uuid NOT NULL,
+  provider text NOT NULL,
+  status text NOT NULL DEFAULT 'PENDING',
+  attempt_count integer NOT NULL DEFAULT 0,
+  available_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz,
+  last_error_code text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT fk_account_deletion_provider_tasks_request
+    FOREIGN KEY (deletion_request_id)
+    REFERENCES account_deletion_requests(deletion_request_id)
+    ON DELETE CASCADE,
+  CONSTRAINT uq_account_deletion_provider_tasks_request_provider
+    UNIQUE (deletion_request_id, provider),
+  CONSTRAINT ck_account_deletion_provider_tasks_provider
+    CHECK (provider IN ('APPLE', 'KAKAO')),
+  CONSTRAINT ck_account_deletion_provider_tasks_status CHECK (
+    status IN ('PENDING', 'PROCESSING', 'RETRY', 'COMPLETED', 'FAILED')
+  ),
+  CONSTRAINT ck_account_deletion_provider_tasks_attempt_count CHECK (attempt_count >= 0),
+  CONSTRAINT ck_account_deletion_provider_tasks_completion CHECK (
+    (status = 'COMPLETED' AND completed_at IS NOT NULL)
+    OR (status <> 'COMPLETED' AND completed_at IS NULL)
+  )
+);
+
+COMMENT ON TABLE account_deletion_requests IS
+  '외부 revoke, DB purge, Redis purge를 재시도하는 회원 탈퇴 원본 작업';
+COMMENT ON TABLE account_deletion_provider_tasks IS
+  '회원 탈퇴 요청의 Apple revoke/Kakao unlink 멱등 진행 상태';
 
 -- =========================================================
 -- 11) TRIGGER
@@ -601,16 +688,16 @@ CREATE TABLE groups (
   group_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   timezone text NOT NULL,
-  created_by_user_id uuid NOT NULL,
+  created_by_user_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz,
   deleted_by_user_id uuid,
 
   CONSTRAINT fk_groups_created_by
-    FOREIGN KEY (created_by_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT fk_groups_deleted_by
-    FOREIGN KEY (deleted_by_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (deleted_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT ck_groups_name
     CHECK (char_length(btrim(name)) BETWEEN 1 AND 50),
   CONSTRAINT ck_groups_deleted_pair
@@ -638,7 +725,7 @@ CREATE TABLE group_members (
   group_id uuid NOT NULL,
   user_id uuid NOT NULL,
   role text NOT NULL DEFAULT 'MEMBER',
-  added_by_user_id uuid NOT NULL,
+  added_by_user_id uuid,
   joined_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   removed_at timestamptz,
@@ -647,11 +734,11 @@ CREATE TABLE group_members (
   CONSTRAINT fk_group_members_group
     FOREIGN KEY (group_id) REFERENCES groups(group_id),
   CONSTRAINT fk_group_members_user
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT fk_group_members_added_by
-    FOREIGN KEY (added_by_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (added_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT fk_group_members_removed_by
-    FOREIGN KEY (removed_by_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (removed_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT ck_group_members_role
     CHECK (role IN ('OWNER', 'ADMIN', 'MEMBER')),
   CONSTRAINT ck_group_members_removed_pair
@@ -699,9 +786,9 @@ CREATE TABLE group_invitations (
   CONSTRAINT fk_group_invitations_group
     FOREIGN KEY (group_id) REFERENCES groups(group_id),
   CONSTRAINT fk_group_invitations_inviter
-    FOREIGN KEY (inviter_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (inviter_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT fk_group_invitations_invitee
-    FOREIGN KEY (invitee_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (invitee_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT ck_group_invitations_status
     CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED', 'CANCELED', 'EXPIRED')),
   CONSTRAINT ck_group_invitations_not_self
@@ -850,7 +937,7 @@ CREATE TABLE push_deliveries (
   CONSTRAINT fk_push_deliveries_job
     FOREIGN KEY (push_job_id) REFERENCES push_jobs(push_job_id) ON DELETE CASCADE,
   CONSTRAINT fk_push_deliveries_device
-    FOREIGN KEY (device_id) REFERENCES user_devices(device_id),
+    FOREIGN KEY (device_id) REFERENCES user_devices(device_id) ON DELETE CASCADE,
   CONSTRAINT uq_push_deliveries_job_device UNIQUE (push_job_id, device_id),
   CONSTRAINT uq_push_deliveries_job UNIQUE (push_job_id),
   CONSTRAINT ck_push_deliveries_status CHECK (

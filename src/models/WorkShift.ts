@@ -10,7 +10,7 @@ interface WorkShiftAttributes {
   schedule_id: string; // UUID
   note?: string | null;
   visibility_level: number; // 항상 0
-  created_by_user_id: string; // UUID
+  created_by_user_id: string | null; // UUID
   created_at?: Date;
   updated_at?: Date;
   deleted_at?: Date | null;
@@ -39,7 +39,7 @@ class WorkShift
   declare schedule_id: string;
   declare note: string | null | undefined;
   declare visibility_level: number;
-  declare created_by_user_id: string;
+  declare created_by_user_id: string | null;
   declare created_at: Date | undefined;
   declare updated_at: Date | undefined;
   declare deleted_at: Date | null | undefined;
@@ -60,6 +60,7 @@ WorkShift.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     work_date: {
       type: DataTypes.DATEONLY,
@@ -84,11 +85,12 @@ WorkShift.init(
     },
     created_by_user_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
       references: {
         model: "users",
         key: "user_id",
       },
+      onDelete: "SET NULL",
     },
     created_at: {
       type: DataTypes.DATE,
@@ -111,6 +113,7 @@ WorkShift.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "SET NULL",
     },
   },
   {
@@ -160,4 +163,3 @@ ShiftTypeSchedule.hasMany(WorkShift, {
 });
 
 export default WorkShift;
-

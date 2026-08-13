@@ -56,6 +56,7 @@ ShiftTypeSchedule.init(
         model: "shift_types",
         key: "shift_type_id",
       },
+      onDelete: "CASCADE",
     },
     template_version_id: {
       type: DataTypes.UUID,
@@ -64,6 +65,7 @@ ShiftTypeSchedule.init(
         model: "shift_template_versions",
         key: "template_version_id",
       },
+      onDelete: "CASCADE",
     },
     start_time: {
       type: DataTypes.TIME,

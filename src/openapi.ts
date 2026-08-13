@@ -5,6 +5,7 @@ import group_openapi from "./openapi/groupOpenApi.json";
 import device_openapi from "./openapi/deviceOpenApi.json";
 import apple_auth_openapi from "./openapi/appleAuthOpenApi.json";
 import google_auth_openapi from "./openapi/googleAuthOpenApi.json";
+import account_deletion_openapi from "./openapi/accountDeletionOpenApi.json";
 
 const openapi = {
   ...group_openapi,
@@ -16,12 +17,14 @@ const openapi = {
     ...group_openapi.tags,
     ...apple_auth_openapi.tags,
     ...google_auth_openapi.tags,
+    ...account_deletion_openapi.tags,
   ],
   paths: {
     ...group_openapi.paths,
     ...device_openapi.paths,
     ...apple_auth_openapi.paths,
     ...google_auth_openapi.paths,
+    ...account_deletion_openapi.paths,
   },
   components: {
     ...group_openapi.components,
@@ -30,11 +33,13 @@ const openapi = {
       ...device_openapi.components.schemas,
       ...apple_auth_openapi.components.schemas,
       ...google_auth_openapi.components.schemas,
+      ...account_deletion_openapi.components.schemas,
     },
     responses: {
       ...group_openapi.components.responses,
       ...apple_auth_openapi.components.responses,
       ...google_auth_openapi.components.responses,
+      ...account_deletion_openapi.components.responses,
     },
   },
 };

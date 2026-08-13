@@ -46,6 +46,7 @@ FriendLevelSetting.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     friend_user_id: {
       type: DataTypes.UUID,
@@ -55,6 +56,7 @@ FriendLevelSetting.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     can_view: {
       type: DataTypes.BOOLEAN,
@@ -118,4 +120,3 @@ FriendLevelSetting.belongsTo(User, {
 });
 
 export default FriendLevelSetting;
-

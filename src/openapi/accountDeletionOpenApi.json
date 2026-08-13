@@ -1,0 +1,133 @@
+{
+  "tags": [
+    {
+      "name": "Account Deletion",
+      "description": "최근 재인증 후 접수되는 비동기 전체 계정 삭제"
+    }
+  ],
+  "paths": {
+    "/auth/account": {
+      "delete": {
+        "tags": ["Account Deletion"],
+        "summary": "회원 탈퇴 요청",
+        "description": "접수 즉시 계정을 사용 불가 상태로 전환하고 provider revoke, DB·Redis purge를 worker가 처리합니다.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AccountDeletionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "회원 탈퇴 접수 성공",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountDeletionReceiptResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/AccountDeletionBadRequest" },
+          "401": { "$ref": "#/components/responses/AccountDeletionUnauthorized" },
+          "403": { "$ref": "#/components/responses/AccountDeletionReauthenticationRequired" },
+          "409": { "$ref": "#/components/responses/AccountDeletionInProgress" },
+          "503": { "$ref": "#/components/responses/AccountDeletionUnavailable" }
+        }
+      }
+    },
+    "/auth/account-deletion": {
+      "get": {
+        "tags": ["Account Deletion"],
+        "summary": "진행 중인 회원 탈퇴 상태 조회",
+        "responses": {
+          "200": {
+            "description": "진행 상태",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountDeletionReceiptResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/AccountDeletionUnauthorized" },
+          "404": { "$ref": "#/components/responses/AccountDeletionNotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountDeletionRequest": {
+        "type": "object",
+        "required": ["confirmation"],
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": { "type": "boolean", "enum": [true] }
+        }
+      },
+      "AccountDeletionReceipt": {
+        "type": "object",
+        "required": ["deletion_request_id", "status", "requested_at"],
+        "properties": {
+          "deletion_request_id": { "type": "string", "format": "uuid" },
+          "status": {
+            "type": "string",
+            "enum": ["PENDING", "PROCESSING", "RETRY", "CACHE_PURGE_PENDING", "FAILED", "COMPLETED"]
+          },
+          "requested_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AccountDeletionReceiptResponse": {
+        "type": "object",
+        "required": ["success", "data", "request_id"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "data": { "$ref": "#/components/schemas/AccountDeletionReceipt" },
+          "request_id": { "type": "string" }
+        }
+      },
+      "AccountDeletionErrorResponse": {
+        "type": "object",
+        "required": ["success", "error"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [false] },
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          },
+          "request_id": { "type": "string" }
+        }
+      }
+    },
+    "responses": {
+      "AccountDeletionBadRequest": {
+        "description": "명시적 확인 누락",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionErrorResponse" } } }
+      },
+      "AccountDeletionUnauthorized": {
+        "description": "인증 실패",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionErrorResponse" } } }
+      },
+      "AccountDeletionReauthenticationRequired": {
+        "description": "최근 10분 이내 전체 로그인이 필요함",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionErrorResponse" } } }
+      },
+      "AccountDeletionInProgress": {
+        "description": "이미 탈퇴 처리 중",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionErrorResponse" } } }
+      },
+      "AccountDeletionNotFound": {
+        "description": "진행 중인 탈퇴 요청 없음",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionErrorResponse" } } }
+      },
+      "AccountDeletionUnavailable": {
+        "description": "기능 비활성",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionErrorResponse" } } }
+      }
+    }
+  }
+}

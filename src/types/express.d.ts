@@ -5,6 +5,10 @@ declare global {
     interface Request {
       user?: User;
       request_id?: string;
+      auth_context?: {
+        auth_time: number | null;
+        issued_at: number | null;
+      };
     }
   }
 }

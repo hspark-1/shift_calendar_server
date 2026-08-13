@@ -77,6 +77,7 @@ PushDelivery.init(
       type: DataTypes.UUID,
       allowNull: false,
       references: { model: "user_devices", key: "device_id" },
+      onDelete: "CASCADE",
     },
     status: {
       type: DataTypes.TEXT,

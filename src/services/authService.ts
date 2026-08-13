@@ -13,6 +13,7 @@ interface TokenPayload {
   user_id: string; // UUID
   email: string;
   jti?: string;
+  auth_time?: number;
 }
 
 interface AuthTokens {
@@ -24,6 +25,7 @@ interface AuthTokens {
 interface GenerateTokensOptions {
   device_info?: string;
   transaction?: Transaction;
+  auth_time?: number;
 }
 
 // 토큰을 SHA-256으로 해싱
@@ -36,6 +38,9 @@ export async function generateTokens(
   user: User,
   options?: GenerateTokensOptions
 ): Promise<AuthTokens> {
+  if (user.account_status !== "ACTIVE") {
+    throw new Error("ACCOUNT_DELETION_IN_PROGRESS");
+  }
   const jwt_secret = getRequiredEnvironmentVariable("JWT_SECRET");
   const jwt_refresh_secret =
     getRequiredEnvironmentVariable("JWT_REFRESH_SECRET");
@@ -43,6 +48,7 @@ export async function generateTokens(
   const base_payload = {
     user_id: user.user_id,
     email: user.email,
+    auth_time: options?.auth_time ?? Math.floor(Date.now() / 1000),
   };
   const access_payload: TokenPayload = {
     ...base_payload,
@@ -162,6 +168,7 @@ export async function rotateRefreshToken(
     const tokens = await generateTokens(user, {
       device_info,
       transaction,
+      auth_time: payload.auth_time ?? 0,
     });
 
     return { tokens, user };

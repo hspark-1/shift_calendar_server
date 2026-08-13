@@ -26,6 +26,15 @@ export {
   OAuthProvider,
 } from "./OAuthLoginChallenge";
 export { default as OAuthAuthorization } from "./OAuthAuthorization";
+export {
+  default as AccountDeletionRequest,
+  AccountDeletionStatus,
+} from "./AccountDeletionRequest";
+export {
+  default as AccountDeletionProviderTask,
+  AccountDeletionProvider,
+  AccountDeletionProviderTaskStatus,
+} from "./AccountDeletionProviderTask";
 
 // 친구 관련
 export { default as FriendRequest, FriendRequestStatus } from "./FriendRequest";

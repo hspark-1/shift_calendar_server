@@ -67,6 +67,7 @@ WorkShiftCacheOutbox.init(
       type: DataTypes.UUID,
       allowNull: false,
       references: { model: "users", key: "user_id" },
+      onDelete: "CASCADE",
     },
     year_month: {
       type: DataTypes.DATEONLY,

@@ -6,6 +6,8 @@ import { getRequiredEnvironmentVariable } from "../config/environment";
 interface JwtPayload {
   user_id: string; // UUID
   email: string;
+  auth_time?: number;
+  iat?: number;
 }
 
 // Express Request에 user 속성 추가 타입
@@ -49,13 +51,62 @@ export async function authMiddleware(
       return;
     }
 
+    if (user.account_status !== "ACTIVE") {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: "ACCOUNT_DELETION_IN_PROGRESS",
+          message: "회원 탈퇴가 처리 중입니다.",
+        },
+        request_id: req.request_id,
+      });
+      return;
+    }
+
     (req as AuthenticatedRequest).user = user;
+    req.auth_context = {
+      auth_time:
+        typeof decoded.auth_time === "number" ? decoded.auth_time : null,
+      issued_at: typeof decoded.iat === "number" ? decoded.iat : null,
+    };
     next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       sendUnauthorizedResponse(res);
       return;
     }
+    sendUnauthorizedResponse(res);
+  }
+}
+
+export async function accountDeletionStatusAuthMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const auth_header = req.headers.authorization;
+    if (!auth_header || !auth_header.startsWith("Bearer ")) {
+      sendUnauthorizedResponse(res);
+      return;
+    }
+    const decoded = jwt.verify(
+      auth_header.split(" ")[1],
+      getRequiredEnvironmentVariable("JWT_SECRET"),
+    ) as JwtPayload;
+    const user = await User.findByPk(decoded.user_id);
+    if (!user || user.account_status !== "DELETION_PENDING") {
+      sendUnauthorizedResponse(res);
+      return;
+    }
+    req.user = user;
+    req.auth_context = {
+      auth_time:
+        typeof decoded.auth_time === "number" ? decoded.auth_time : null,
+      issued_at: typeof decoded.iat === "number" ? decoded.iat : null,
+    };
+    next();
+  } catch {
     sendUnauthorizedResponse(res);
   }
 }

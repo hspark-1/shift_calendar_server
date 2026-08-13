@@ -1,9 +1,9 @@
-<mxfile host="app.diagrams.net" modified="2026-08-11T00:00:00.000Z" agent="Codex" version="24.7.17">
+<mxfile host="app.diagrams.net" modified="2026-08-14T00:00:00.000Z" agent="Codex" version="24.7.17">
   <diagram id="schema" name="Current Schema">
     <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1500" math="0" shadow="0">
       <root>
         <mxCell id="0"/><mxCell id="1" parent="0"/>
-        <mxCell id="users" value="users&#10;PK user_id (uuid)&#10;email / kakao_id / apple_id / google_id / naver_id&#10;phone / timezone" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="370" height="150" as="geometry"/></mxCell>
+        <mxCell id="users" value="users&#10;PK user_id (uuid)&#10;email / kakao_id / apple_id / google_id / naver_id&#10;phone / timezone&#10;account_status / deletion_requested_at" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="370" height="170" as="geometry"/></mxCell>
         <mxCell id="friend_requests" value="friend_requests&#10;PK request_id&#10;requester_user_id → users&#10;addressee_user_id → users&#10;status" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="40" y="230" width="300" height="150" as="geometry"/></mxCell>
         <mxCell id="friendships" value="friendships&#10;PK (user_id_a, user_id_b)&#10;both → users&#10;user_id_a &lt; user_id_b" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="390" y="230" width="300" height="140" as="geometry"/></mxCell>
         <mxCell id="friend_settings" value="friend_level_settings&#10;PK (owner_user_id, friend_user_id)&#10;both → users&#10;can_view / friend_level" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="740" y="230" width="340" height="150" as="geometry"/></mxCell>
@@ -25,7 +25,9 @@
         <mxCell id="user_devices" value="user_devices&#10;PK device_id&#10;user_id → users (nullable on logout)&#10;environment + installation UNIQUE&#10;platform / permission / active / FCM target&#10;last_seen_at / target_updated_at" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="60" y="1170" width="360" height="190" as="geometry"/></mxCell>
         <mxCell id="push_jobs" value="push_jobs&#10;PK push_job_id&#10;notification_id → notifications UNIQUE&#10;receiver_user_id → users&#10;LATEST_ACTIVE / snapshot / TTL&#10;status / attempts / lease / cancel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="490" y="1170" width="380" height="190" as="geometry"/></mxCell>
         <mxCell id="push_deliveries" value="push_deliveries&#10;PK delivery_id&#10;push_job_id → push_jobs UNIQUE&#10;device_id → user_devices&#10;status / attempts / message ID&#10;target hash / error / sent_at" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="940" y="1170" width="380" height="190" as="geometry"/></mxCell>
-        <mxCell id="note" value="사용자 1명 = 캘린더 1개&#10;groups는 캘린더를 소유하지 않음&#10;그룹 공개도 friend_level_settings에서 관리&#10;OAuth challenge에는 원문 credential을 저장하지 않음&#10;Redis는 캐시이며 PostgreSQL 스키마에 포함하지 않음" style="shape=note;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="1610" y="710" width="390" height="190" as="geometry"/></mxCell>
+        <mxCell id="account_deletion_requests" value="account_deletion_requests&#10;PK deletion_request_id&#10;user_id (logical reference, nullable)&#10;status / lease / retry&#10;DB + Redis purge checkpoints" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1380" y="1170" width="360" height="190" as="geometry"/></mxCell>
+        <mxCell id="account_deletion_provider_tasks" value="account_deletion_provider_tasks&#10;PK provider_task_id&#10;deletion_request_id → requests CASCADE&#10;APPLE / KAKAO&#10;status / attempts / retry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1790" y="1170" width="360" height="190" as="geometry"/></mxCell>
+        <mxCell id="note" value="사용자 1명 = 캘린더 1개&#10;groups는 캘린더를 소유하지 않음&#10;그룹 공개도 friend_level_settings에서 관리&#10;OAuth challenge에는 원문 credential을 저장하지 않음&#10;탈퇴 request는 사용자 purge 후 user_id를 null로 익명화&#10;Redis는 캐시이며 PostgreSQL 스키마에 포함하지 않음" style="shape=note;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="1610" y="710" width="390" height="220" as="geometry"/></mxCell>
 
         <mxCell id="e1" edge="1" parent="1" source="templates" target="users" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="e2" edge="1" parent="1" source="versions" target="templates" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
@@ -51,6 +53,7 @@
         <mxCell id="e22" edge="1" parent="1" source="push_deliveries" target="push_jobs" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="e23" edge="1" parent="1" source="push_deliveries" target="user_devices" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="e24" edge="1" parent="1" source="oauth_authorizations" target="users" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e25" edge="1" parent="1" source="account_deletion_provider_tasks" target="account_deletion_requests" style="endArrow=block;html=1;"><mxGeometry relative="1" as="geometry"/></mxCell>
       </root>
     </mxGraphModel>
   </diagram>

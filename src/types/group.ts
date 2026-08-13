@@ -31,7 +31,7 @@ export interface GroupDetail {
   my_role: GroupRole;
   member_count: number;
   members: GroupMemberSummary[];
-  created_by_user_id: string;
+  created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
 }

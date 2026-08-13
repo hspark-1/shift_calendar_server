@@ -56,6 +56,7 @@ FriendRequest.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     addressee_user_id: {
       type: DataTypes.UUID,
@@ -64,6 +65,7 @@ FriendRequest.init(
         model: "users",
         key: "user_id",
       },
+      onDelete: "CASCADE",
     },
     status: {
       type: DataTypes.TEXT,
@@ -130,4 +132,3 @@ FriendRequest.belongsTo(User, {
 });
 
 export default FriendRequest;
-

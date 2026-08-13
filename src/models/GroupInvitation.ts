@@ -59,11 +59,13 @@ GroupInvitation.init(
       type: DataTypes.UUID,
       allowNull: false,
       references: { model: "users", key: "user_id" },
+      onDelete: "CASCADE",
     },
     invitee_user_id: {
       type: DataTypes.UUID,
       allowNull: false,
       references: { model: "users", key: "user_id" },
+      onDelete: "CASCADE",
     },
     status: {
       type: DataTypes.TEXT,

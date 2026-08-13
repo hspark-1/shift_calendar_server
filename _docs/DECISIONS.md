@@ -1221,3 +1221,70 @@ Flutter가 전달하는 Google ID Token의 진위를 서버가 확인하고 기�
 
 - 명시적 재인증 기반 계정 연결 기능 설계
 - 실제 모바일 client와 end-to-end 검증
+
+---
+
+## ADR-0025: 비동기 회원 탈퇴 worker와 사용자 데이터 물리 삭제
+
+### 배경(문제)
+
+현재 `users`를 참조하는 대부분의 FK는 cascade가 아니고, 그룹 감사 컬럼과 다른 사용자의 알림 JSON snapshot도 탈퇴자를 참조합니다. 또한 Apple revoke와 Kakao unlink는 외부 HTTP라 DB transaction에 포함할 수 없고 Redis 근무표 cache도 PostgreSQL 삭제로 자동 제거되지 않습니다. 단순 사용자 row 삭제나 장시간 동기 HTTP 요청으로는 완전성·재시도·다중 인스턴스 멱등성을 동시에 보장할 수 없습니다.
+
+### 선택지(대안)
+
+1. 사용자 row만 soft delete하고 관련 데이터는 유지
+2. HTTP 요청 하나에서 외부 revoke, 모든 DB 삭제와 Redis purge를 동기 처리
+3. PostgreSQL 삭제 요청/공급자 task와 lease worker를 사용해 외부 revoke → DB 물리 삭제 → Redis purge를 단계 처리
+4. 외부 revoke 성공 여부와 관계없이 즉시 모든 내부 row를 삭제
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다. 계정을 즉시 사용 불가 상태로 전환한 뒤 전용 worker가 외부 공급자 처리, DB 물리 삭제, Redis purge를 멱등 수행합니다.**
+
+- 접수는 `202 Accepted`, 동일 사용자 active request는 1건만 허용
+- Access/Refresh JWT의 최초 `auth_time`을 사용해 10분 이내 최근 재인증 요구
+- 접수 transaction에서 `DELETION_PENDING`, Refresh Token revoke와 기기 비활성 처리
+- Apple은 저장된 encrypted refresh token으로 `/auth/revoke`, Kakao는 Admin Key와 `kakao_id`로 unlink
+- Google/Naver는 현재 서버가 revoke token을 보유하지 않으므로 클라이언트 disconnect와 내부 삭제를 분리
+- 사용자 소유 row는 물리 삭제하고 감사자 FK는 nullable `ON DELETE SET NULL`
+- 그룹 OWNER는 ADMIN 우선, 그다음 가입이 가장 빠른 MEMBER에게 자동 승계하고 1인 그룹은 삭제
+- 알림/push JSON snapshot과 Redis 사용자 월 cache까지 제거한 뒤 완료
+- 완료된 작업은 `user_id`를 제거한 최소 운영 상태만 30일 보관
+
+### 근거(왜)
+
+- PostgreSQL 원본에 작업 상태를 남겨 API 응답 유실과 worker 재시작에도 재개 가능
+- 외부 네트워크 호출로 업무 transaction과 row lock을 오래 점유하지 않음
+- 기존 cache/push worker와 같은 lease·재시도 운영 패턴을 재사용 가능
+- Apple이 허용하는 비동기 삭제 안내와 token revoke 요구를 함께 충족
+- 그룹 소유권 때문에 사용자의 전체 계정 삭제 권리가 막히지 않음
+- 단순 anonymization이 아니라 사용자 생성 콘텐츠를 포함한 실제 물리 삭제를 명시
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 공급자·Redis 일시 장애에도 요청을 잃지 않고 재시도
+- 일반 API는 접수 직후 차단되어 7일 Access Token 잔존 문제 해소
+- FK, JSON snapshot, cache까지 삭제 범위를 정적·통합 테스트로 고정
+- 동일 요청과 외부 revoke를 멱등 처리
+
+**트레이드오프**:
+
+- 신규 DB 테이블·상태 컬럼·전용 worker와 운영 지표가 필요
+- 그룹 감사 FK nullable 변경으로 일부 API DTO가 `string | null` behavior change를 가짐
+- Google/Naver의 중앙 revoke는 현재 token 저장 구조로 지원할 수 없어 클라이언트 협력이 필요
+- 완료된 물리 삭제는 애플리케이션 rollback으로 복구할 수 없음
+
+### 구현 위치
+
+- 설계 정본: `_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`
+- DB: `migrations/{account_deletion_preflight,add_account_deletion_support,account_deletion_postflight,rollback_account_deletion_support}.sql`, `migrations/final_schema.sql`
+- 코드: `src/services/accountDeletion*.ts`, `src/workers/accountDeletionWorker.ts`, 인증 route/controller/model/OpenAPI
+- 연계 코드: `src/services/appleService.ts`, `src/services/authService.ts`, `src/middlewares/auth.ts`, `src/services/workShiftMonthCacheService.ts`
+
+### 추후 과제(언제 다시 평가)
+
+- Production 활성 전 개인정보 보존 의무와 완료 SLA를 제품·법무에서 확정
+- Google/Naver도 서버 중앙 revoke가 필요해지면 provider token 암호화 저장과 기존 사용자 재동의를 별도 ADR로 설계
+- Stage Apple/Kakao 실제 계정, Redis 장애와 worker crash E2E를 통과한 뒤에만 환경별 endpoint와 Apple 로그인 gate 활성화

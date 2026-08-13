@@ -64,6 +64,12 @@ migrations/*
 !migrations/add_google_auth_support.sql
 !migrations/google_auth_postflight.sql
 !migrations/rollback_google_auth_support.sql
+!migrations/stage_google_auth_apply_pgadmin.sql
+!migrations/center_google_auth_apply_pgadmin.sql
+!migrations/account_deletion_preflight.sql
+!migrations/add_account_deletion_support.sql
+!migrations/account_deletion_postflight.sql
+!migrations/rollback_account_deletion_support.sql
 .cursor/
 AGENTS.md
 schema.drawio

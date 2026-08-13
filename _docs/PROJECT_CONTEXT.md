@@ -75,6 +75,60 @@ HTTP Request
 - API 서버는 FCM을 직접 호출하지 않으며, 기능 활성화 이후 같은 transaction에서 생성된 job만 worker가 처리합니다.
 - 상세 계약과 운영 절차는 `_docs/PUSH_NOTIFICATION_GUIDE.md`를 따릅니다.
 
+### Apple 로그인 구조
+
+```text
+Challenge 발급(state/nonce 원문은 앱, SHA-256 hash는 DB)
+  → iOS native 또는 Android Web 인증
+  → Android callback은 state 확인 후 고정 intent로만 303 전달
+  → 로그인 완료 요청에서 challenge를 UPDATE ... RETURNING으로 1회 소비
+  → Apple token endpoint code 교환(5초 timeout, 자동 재시도 없음)
+  → JWKS RS256 + iss/aud/exp/iat/sub/nonce/email_verified 검증
+  → User + 기본 템플릿 + OAuth authorization + ShiftMate JWT transaction
+```
+
+- 검증된 Apple subject가 사용자 식별 정본이고, 같은 이메일의 기존 계정은 자동 연결하지 않습니다.
+- Apple refresh token은 계정 삭제 revoke를 위해 AES-256-GCM 암호화해 `oauth_authorizations`에 저장하며 앱 JWT `refresh_tokens`와 분리합니다.
+- `APPLE_AUTH_ENABLED=false`가 기본값입니다. 앱 내 계정 삭제와 Apple revoke 2단계 완료 전 Flutter Production 버튼과 서버 flag를 활성화하지 않습니다.
+- 상세 HTTP/DB/배포 계약은 `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`를 따릅니다.
+
+### Google 로그인 구조
+
+```text
+Flutter google_sign_in
+  → Google ID Token
+  → POST /api/v1/auth/google/token
+  → auth rate limit + express-validator
+  → google-auth-library verifyIdToken(Web client audience 고정)
+  → google_id 또는 lower(email) 정책
+  → 신규 User + 기본 템플릿 + ShiftMate refresh token 단일 transaction
+```
+
+- 검증된 Google `sub`가 사용자 식별 정본이며, 요청 본문의 email/name/id는 받거나 신뢰하지 않습니다.
+- `email_verified=true`인 유효 이메일만 허용하고, 같은 이메일의 기존 계정은 자동 연결하지 않습니다.
+- 기존 Google 사용자의 저장 프로필은 claim 변경으로 자동 갱신하지 않습니다.
+- `GOOGLE_AUTH_ENABLED=false`가 기본값이며 DB migration과 Stage 실기기 검증 후 환경별로 활성화합니다.
+- API key·Web client secret·Google access token은 필요하지 않습니다. 상세 설정과 rollout은 `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`를 따릅니다.
+
+### 회원 탈퇴 구조
+
+```text
+인증 + 최근 재인증 + 명시적 확인
+  → users=DELETION_PENDING + 내부 session 차단 + 삭제 요청 기록
+  → 전용 worker가 Apple revoke / Kakao unlink를 멱등 처리
+  → 그룹 OWNER 자동 승계 또는 1인 그룹 삭제
+  → 사용자·콘텐츠·관계·알림/push snapshot 물리 삭제
+  → Redis tombstone + 사용자 월 cache 제거
+  → 최소 운영 기록만 남기고 사용자 식별자 제거
+```
+
+- 회원 탈퇴는 일반 콘텐츠 soft delete의 예외이며 전체 계정과 사용자 생성 콘텐츠를 물리 삭제합니다.
+- 외부 HTTP와 Redis 작업을 DB transaction 안에서 실행하지 않고 PostgreSQL lease worker로 재시도합니다.
+- Google/Naver는 현재 서버가 revoke 가능한 OAuth token을 보관하지 않으므로 클라이언트 연동 해제와 내부 데이터 삭제를 분리합니다.
+- `DELETE /api/v1/auth/account`는 `confirmation=true`와 JWT `auth_time` 10분 조건을 확인한 뒤 `202`로 접수합니다. 접수 즉시 사용자를 `DELETION_PENDING`으로 바꾸고 Refresh Token·푸시 기기를 무효화합니다.
+- `src/workers/accountDeletionWorker.ts`는 provider 해제 → DB purge → Redis tombstone/purge 순서를 lease·backoff로 재시도합니다. API와 worker 플래그의 기본값은 모두 `false`입니다.
+- 구현·운영 정본은 `_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`이며, Stage 실제 Apple/Kakao·Redis 장애 E2E 전에는 Production에서 활성화하지 않습니다.
+
 #### 캐시 적용 요청과 key 공유 계약
 
 - `GET /work-shifts`, `GET /calendar/range`, `GET /calendar/day`의 근무표는 로그인 사용자의 월 snapshot을 사용합니다.
@@ -769,7 +823,7 @@ catch (error) {
 | `GROUP_MEMBER_LIMIT`                  | 그룹 최대 활성 멤버                   | `20`               |
 | `GROUP_INVITATION_TTL_DAYS`           | 그룹 초대 만료 일수                   | `7`                |
 | `GROUP_CALENDAR_MAX_RANGE_DAYS`       | 그룹 캘린더 양 끝 포함 최대 일수      | `100`              |
-| `API_DOCS_ENABLED`                    | `/api-docs`와 원본 OpenAPI 노출        | `false`            |
+| `API_DOCS_ENABLED`                    | `/api-docs`와 원본 OpenAPI 노출       | `false`            |
 
 #### 환경별 차이
 
@@ -853,6 +907,20 @@ AUTH_RATE_LIMIT_MAX=10
 - `phone`: nullable unique, `000-000-0000` 또는 `000-0000-0000` 형식만 저장
 - `kakao_id`, `apple_id`, `naver_id` (OAuth)
 - `timezone`
+- `account_status`: `ACTIVE | DELETION_PENDING`
+- `deletion_requested_at`: 탈퇴 접수 시각. `ACTIVE`인 동안 `null`
+
+#### OAuthLoginChallenge / OAuthAuthorization
+
+- `oauth_login_challenges`: Apple `state`/`nonce` SHA-256 hash, 플랫폼별 client/redirect, 5분 만료와 원자적 소비 시각. raw credential은 저장하지 않습니다.
+- `oauth_authorizations`: `user_id` FK, Apple provider subject/client unique, AES-256-GCM refresh token 암호문/IV/auth tag, revoke 상태를 저장합니다.
+- Apple authorization은 앱 JWT `refresh_tokens`와 수명·용도가 다르며 서로 대체하지 않습니다.
+
+#### AccountDeletionRequest / AccountDeletionProviderTask
+
+- `account_deletion_requests`: 사용자 탈퇴 접수, worker lease, DB/Redis purge 진행 상태를 보관하고 완료 시 `user_id`를 제거합니다.
+- `account_deletion_provider_tasks`: Apple revoke와 Kakao unlink의 공급자별 멱등 상태·재시도를 보관하며 token·이메일·provider subject는 저장하지 않습니다.
+- 상세 컬럼, FK 변경, 삭제 순서와 rollout은 `_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`가 정본입니다.
 
 #### WorkShift (근무표)
 
@@ -1363,6 +1431,14 @@ P0/P1 그룹 요청
   - 의존성: build된 `dist`, 통합 테스트는 격리 PostgreSQL
   - 사용 예: `npm test`, `npm run test:apple-integration`, `npm run test:google-integration`
 - 실제 client ID, private key, 암호화 키와 환경별 인프라 식별값은 저장소에 기록하지 않고 `.env.example`에는 빈 값 또는 명시적 placeholder만 둡니다.
+
+### 13. 회원 탈퇴 서버 설계
+
+- **`_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`**
+  - 역할: 비동기 탈퇴 API, 최근 재인증, provider revoke/unlink, 그룹 OWNER 승계, FK 삭제 정책, PostgreSQL·Redis purge와 배포/테스트 계약의 정본
+  - 의존성: 현재 인증 서비스, Apple OAuth authorization, 친구/그룹/알림/push/근무표 schema, Redis 월 cache
+  - 사용 예: 별도 구현 작업에서 migration → model/service/worker → OpenAPI → 통합 테스트 순서의 승인 기준으로 사용
+- 현재는 설계만 완료됐으며 `DELETE /api/v1/auth/account`, 삭제 worker와 DB 객체는 아직 존재하지 않습니다.
 
 ---
 

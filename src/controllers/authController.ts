@@ -25,6 +25,11 @@ import {
   GoogleAuthError,
   googleService,
 } from "../services/googleService";
+import {
+  AccountDeletionError,
+  getAccountDeletionStatus,
+  requestAccountDeletion,
+} from "../services/accountDeletionService";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -541,6 +546,82 @@ export async function updateProfile(
     res
       .status(500)
       .json({ success: false, message: "서버 오류가 발생했습니다." });
+  }
+}
+
+function sendAccountDeletionError(
+  req: Request,
+  res: Response,
+  error: unknown,
+): void {
+  if (error instanceof AccountDeletionError) {
+    res.status(error.status_code).json({
+      success: false,
+      error: {
+        code: error.code,
+        message:
+          error.code === "REAUTHENTICATION_REQUIRED"
+            ? "회원 탈퇴를 위해 다시 로그인해주세요."
+            : error.code === "ACCOUNT_DELETION_IN_PROGRESS"
+              ? "회원 탈퇴가 이미 처리 중입니다."
+              : error.code === "ACCOUNT_DELETION_DISABLED"
+                ? "회원 탈퇴 기능이 현재 비활성화되어 있습니다."
+                : "회원 탈퇴 요청을 찾을 수 없습니다.",
+      },
+      ...(error.deletion_request_id && {
+        data: { deletion_request_id: error.deletion_request_id },
+      }),
+      request_id: req.request_id,
+    });
+    return;
+  }
+  logError("account_deletion_request_failed", error, req.request_id);
+  res.status(500).json({
+    success: false,
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "서버 오류가 발생했습니다.",
+    },
+    request_id: req.request_id,
+  });
+}
+
+export async function deleteAccount(
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: "인증이 필요합니다." });
+      return;
+    }
+    const receipt = await requestAccountDeletion(
+      req.user.user_id,
+      req.auth_context?.auth_time ?? null,
+    );
+    res.status(202).json({
+      success: true,
+      data: receipt,
+      request_id: req.request_id,
+    });
+  } catch (error) {
+    sendAccountDeletionError(req, res, error);
+  }
+}
+
+export async function accountDeletionStatus(
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: "인증이 필요합니다." });
+      return;
+    }
+    const status = await getAccountDeletionStatus(req.user.user_id);
+    res.json({ success: true, data: status, request_id: req.request_id });
+  } catch (error) {
+    sendAccountDeletionError(req, res, error);
   }
 }
 
