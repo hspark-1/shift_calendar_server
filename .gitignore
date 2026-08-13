@@ -54,10 +54,27 @@ coverage/
 .yarn/build-state.yml
 .yarn/install-state.gz
 
-migrations/
+migrations/*
+!migrations/final_schema.sql
+!migrations/apple_auth_preflight.sql
+!migrations/add_apple_auth_support.sql
+!migrations/apple_auth_postflight.sql
+!migrations/rollback_apple_auth_support.sql
+!migrations/google_auth_preflight.sql
+!migrations/add_google_auth_support.sql
+!migrations/google_auth_postflight.sql
+!migrations/rollback_google_auth_support.sql
 .cursor/
 AGENTS.md
 schema.drawio
 visibility_flow.drawio
+
+# Local credentials and signing keys
+*.p8
+*.p12
+*.pem
+*.key
+service-account*.json
+firebase-admin*.json
 
 shiftmate-api-*.tar.gz

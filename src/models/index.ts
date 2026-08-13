@@ -20,6 +20,12 @@ export { default as WorkShiftCacheOutbox } from "./WorkShiftCacheOutbox";
 
 // 인증 관련
 export { default as RefreshToken } from "./RefreshToken";
+export {
+  default as OAuthLoginChallenge,
+  OAuthLoginPlatform,
+  OAuthProvider,
+} from "./OAuthLoginChallenge";
+export { default as OAuthAuthorization } from "./OAuthAuthorization";
 
 // 친구 관련
 export { default as FriendRequest, FriendRequestStatus } from "./FriendRequest";

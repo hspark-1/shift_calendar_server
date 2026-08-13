@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { NextFunction, Request, Response, Router } from "express";
 import { body } from "express-validator";
 import {
   register,
@@ -12,6 +12,10 @@ import {
   kakaoLoginWithToken,
   naverLogin,
   naverLoginWithToken,
+  createAppleChallenge,
+  appleCallback,
+  appleLogin,
+  googleLoginWithToken,
 } from "../controllers/authController";
 import { authMiddleware } from "../middlewares/auth";
 import { authRateLimitMiddleware } from "../middlewares/rateLimit";
@@ -20,7 +24,152 @@ import { normalizePhoneNumber } from "../utils/phone";
 
 const router = Router();
 
+function validateApplePlatform(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (req.body.platform === "ios" || req.body.platform === "android") {
+    next();
+    return;
+  }
+
+  res.status(400).json({
+    success: false,
+    error: {
+      code: "APPLE_INVALID_PLATFORM",
+      message: "platform은 ios 또는 android여야 합니다.",
+    },
+    request_id: req.request_id,
+  });
+}
+
+function validateAppleCallbackState(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (
+    typeof req.body.state === "string" &&
+    /^[A-Za-z0-9_-]{43,128}$/.test(req.body.state)
+  ) {
+    next();
+    return;
+  }
+
+  res.status(400).json({
+    success: false,
+    error: {
+      code: "APPLE_INVALID_CHALLENGE",
+      message: "Apple 로그인 요청이 만료되었습니다. 다시 시도해주세요.",
+    },
+    request_id: req.request_id,
+  });
+}
+
+function validateAppleLoginChallengeFields(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const credential_pattern = /^[A-Za-z0-9_-]{43,128}$/;
+  if (
+    typeof req.body.state === "string" &&
+    credential_pattern.test(req.body.state) &&
+    typeof req.body.nonce === "string" &&
+    credential_pattern.test(req.body.nonce)
+  ) {
+    next();
+    return;
+  }
+
+  res.status(400).json({
+    success: false,
+    error: {
+      code: "APPLE_INVALID_CHALLENGE",
+      message: "Apple 로그인 요청이 만료되었습니다. 다시 시도해주세요.",
+    },
+    request_id: req.request_id,
+  });
+}
+
 // ===== OAuth 로그인 =====
+
+// Google SDK ID Token 서버 검증 로그인
+router.post(
+  "/google/token",
+  authRateLimitMiddleware,
+  [
+    body("id_token")
+      .isString()
+      .withMessage("id_token은 문자열이어야 합니다.")
+      .bail()
+      .customSanitizer((value: string) => value.trim())
+      .isLength({ min: 1, max: 16384 })
+      .withMessage("id_token은 trim 후 1~16384자여야 합니다."),
+  ],
+  validateRequestMiddleware,
+  googleLoginWithToken,
+);
+
+// Apple OAuth 로그인 challenge 발급
+router.post(
+  "/apple/challenge",
+  authRateLimitMiddleware,
+  validateApplePlatform,
+  createAppleChallenge,
+);
+
+// Apple Android/Web form_post callback (고정 intent로만 전달)
+router.post(
+  "/apple/callback",
+  authRateLimitMiddleware,
+  validateAppleCallbackState,
+  [
+    body("code").optional().isString().isLength({ min: 1, max: 4096 }),
+    body("id_token")
+      .optional()
+      .isString()
+      .isLength({ min: 1, max: 16384 }),
+    body("user").optional().isString().isLength({ min: 1, max: 8192 }),
+    body("error").optional().isString().isLength({ min: 1, max: 128 }),
+  ],
+  validateRequestMiddleware,
+  appleCallback,
+);
+
+// Apple OAuth 로그인 완료
+router.post(
+  "/apple",
+  authRateLimitMiddleware,
+  validateApplePlatform,
+  validateAppleLoginChallengeFields,
+  [
+    body("authorization_code")
+      .isString()
+      .isLength({ min: 1, max: 4096 })
+      .withMessage("유효한 authorization_code가 필요합니다."),
+    body("identity_token")
+      .optional()
+      .isString()
+      .isLength({ min: 1, max: 16384 })
+      .withMessage("identity_token 형식이 올바르지 않습니다."),
+    body("given_name")
+      .optional()
+      .isString()
+      .customSanitizer((value: string) => value.trim())
+      .isLength({ min: 1, max: 100 })
+      .withMessage("given_name은 trim 후 1~100자여야 합니다."),
+    body("family_name")
+      .optional()
+      .isString()
+      .customSanitizer((value: string) => value.trim())
+      .isLength({ min: 1, max: 100 })
+      .withMessage("family_name은 trim 후 1~100자여야 합니다."),
+  ],
+  validateRequestMiddleware,
+  appleLogin,
+);
 
 // 카카오 OAuth 로그인 (WebView 방식 - authorization code)
 router.post(

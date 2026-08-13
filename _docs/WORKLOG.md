@@ -1,5 +1,27 @@
 # 작업 일지
 
+## 2026-08-13
+
+### [DONE] 공개 develop 브랜치용 인증 기능 복구
+
+- **목적**: 별도 비공개 브랜치에서 구현된 Apple·Google 인증 기능 중 애플리케이션 코드와 공개 가능한 기술 문서만 공개 `develop` 기준으로 재구성
+- **변경**:
+  - `origin/develop`에서 별도 복구 브랜치를 만들고 혼합 커밋을 cherry-pick하지 않은 채 Apple·Google 인증 코드, 범용 migration, OpenAPI와 테스트만 선별 이식
+  - 배포 자동화, 환경별 실행 SQL, 실제 인프라 식별값, 운영 실행 기록과 배포 정적 테스트는 신규 이력에서 제외
+  - `.env.example`의 DB·Redis·Firebase·OAuth 값을 로컬 placeholder 또는 빈 값으로 교체하고 signing key·service account ignore 규칙 추가
+  - Apple·Google 공개 기술 가이드, PROJECT_CONTEXT 파일 역할, ADR-0023/0024를 현재 코드 기준으로 작성
+  - Apple·Google 단위 테스트에서 별도 배포 저장소 파일에 대한 의존성을 제거
+- **영향범위**: 인증 API, 사용자/OAuth DB 스키마, 환경변수 검증, OpenAPI, 테스트와 공개 개발 문서
+- **파일**: `src/services/{appleService,googleService}.ts`, 인증 controller/routes/config/models/OpenAPI, `migrations/*apple_auth*`, `migrations/*google_auth*`, `test/appleAuth*.test.cjs`, `test/googleAuth*.test.cjs`, `.env.example`, `.gitignore`, `_docs/{APPLE_SIGN_IN_SERVER_GUIDE,GOOGLE_SIGN_IN_SERVER_GUIDE,OAUTH_API_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`
+- **테스트**:
+  - `npm test`: 36 pass, 6개의 명시적 integration skip, 0 fail
+  - `npm run build`, `git diff --check`, OpenAPI JSON parse, `xmllint --noout schema.drawio` 통과
+  - 신규·변경 파일의 private key/token 형식과 환경별 배포 식별자 패턴 검사 결과 신규 노출 없음
+  - `npm audit --audit-level=high`: high/critical 0, 기존 Firebase Admin 간접 의존성 moderate 8
+  - Apple·Google PostgreSQL 통합 테스트는 로컬 Docker daemon이 실행 중이지 않아 fixture 기동 전에 중단되었으며 DB 변경은 발생하지 않음
+- **롤백**: 공개 반영 전에는 복구 브랜치를 폐기하고 `origin/develop`으로 복귀. 반영 후에는 본 커밋을 revert하고 add-only DB 컬럼·테이블은 보존
+- **다음**: Docker 사용 가능한 격리 환경에서 Apple·Google PostgreSQL 통합 테스트를 실행한 뒤 공개 원격의 복구 브랜치로 push하고 PR에서 최종 파일 목록을 검토
+
 ## 2026-08-03
 
 ### [DONE] Push Worker 기반 푸시 알림 구현

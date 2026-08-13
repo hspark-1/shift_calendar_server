@@ -11,6 +11,7 @@ interface UserAttributes {
   timezone?: string | null;
   kakao_id?: string | null;
   apple_id?: string | null;
+  google_id?: string | null;
   naver_id?: string | null;
   password?: string | null;
   phone?: string | null; // 전화번호: 000-000-0000 또는 000-0000-0000
@@ -25,6 +26,7 @@ interface UserCreationAttributes
     | "timezone"
     | "kakao_id"
     | "apple_id"
+    | "google_id"
     | "naver_id"
     | "password"
     | "phone"
@@ -42,6 +44,7 @@ class User
   declare timezone: string | null | undefined;
   declare kakao_id: string | null | undefined;
   declare apple_id: string | null | undefined;
+  declare google_id: string | null | undefined;
   declare naver_id: string | null | undefined;
   declare password: string | null | undefined;
   declare phone: string | null | undefined;
@@ -94,6 +97,11 @@ User.init(
       unique: true,
     },
     apple_id: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      unique: true,
+    },
+    google_id: {
       type: DataTypes.TEXT,
       allowNull: true,
       unique: true,

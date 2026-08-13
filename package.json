@@ -12,6 +12,8 @@
     "debug:group-db:down": "docker compose -f test/fixtures/groupDebug.compose.yml down --volumes --remove-orphans",
     "test:group-integration": "npm run build && RUN_GROUP_INTEGRATION=true GROUP_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/groupIntegration.test.cjs",
     "test:push-integration": "npm run build && RUN_PUSH_INTEGRATION=true PUSH_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/pushIntegration.test.cjs",
+    "test:apple-integration": "npm run build && RUN_APPLE_AUTH_INTEGRATION=true APPLE_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/appleAuthIntegration.test.cjs",
+    "test:google-integration": "npm run build && RUN_GOOGLE_AUTH_INTEGRATION=true GOOGLE_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/googleAuthIntegration.test.cjs",
     "start": "node dist/index.js",
     "start:cache-worker": "node dist/workers/workShiftCacheWorker.js",
     "start:push-worker": "node dist/workers/pushWorker.js"
@@ -32,6 +34,7 @@
     "express": "^4.22.2",
     "express-validator": "^7.2.1",
     "firebase-admin": "13.10.0",
+    "google-auth-library": "^11.0.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.11.0",
@@ -56,6 +59,7 @@
     "typescript": "^5.7.2"
   },
   "overrides": {
+    "brace-expansion": "5.0.9",
     "sequelize": {
       "uuid": "11.1.1"
     }

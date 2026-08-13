@@ -8,6 +8,7 @@ import type { Server } from "http";
 import { connectDatabase, disconnectDatabase } from "./config/database";
 import {
   getPositiveIntegerEnvironmentVariable,
+  validateAppleAuthEnvironment,
   validateEnvironment,
 } from "./config/environment";
 import { requestContextMiddleware } from "./middlewares/requestContext";
@@ -16,6 +17,8 @@ import { errorHandler } from "./middlewares/errorHandler";
 import { logError } from "./utils/logger";
 import { disconnectRedis } from "./config/redis";
 import { registerApiDocs } from "./openapi";
+import { appleService } from "./services/appleService";
+import { googleService } from "./services/googleService";
 
 const app = express();
 const port = getPositiveIntegerEnvironmentVariable("PORT", 3000);
@@ -149,6 +152,11 @@ app.use(errorHandler);
 async function startServer(): Promise<void> {
   try {
     validateEnvironment();
+    // Apple private key는 API 프로세스에만 mount합니다. 공용 환경변수를 읽는
+    // cache/push worker가 API 전용 secret을 요구하지 않도록 여기서 분리 검증합니다.
+    validateAppleAuthEnvironment();
+    appleService.initialize();
+    googleService.initialize();
     await connectDatabase();
 
     http_server = app.listen(port, "0.0.0.0", () => {

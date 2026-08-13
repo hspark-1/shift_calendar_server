@@ -2,7 +2,7 @@
 
 ## 개요
 
-이 문서는 카카오 및 네이버 OAuth 2.0 소셜 로그인 기능의 백엔드 API 사용 가이드입니다.
+이 문서는 카카오, 네이버, Apple 및 Google 소셜 로그인 기능의 백엔드 API 사용 가이드입니다. Apple·Google 서버 검증 계약은 각각 `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`, `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`를 따릅니다.
 
 ### 기본 정보
 
@@ -24,13 +24,16 @@
       "name": "사용자 이름",
       "profile_image_url": "https://...",
       "kakao_id": "카카오 ID (카카오 로그인 시)",
+      "apple_id": "Apple 검증 subject (Apple 로그인 시)",
+      "google_id": "Google 검증 subject (Google 로그인 시)",
       "naver_id": "네이버 ID (네이버 로그인 시)",
       "timezone": "Asia/Seoul",
       "created_at": "2026-01-11T12:00:00.000Z"
     },
     "access_token": "JWT access token",
     "refresh_token": "JWT refresh token",
-    "expires_at": 1234567890000
+    "expires_at": 1234567890000,
+    "is_new_user": "Apple·Google 응답에서는 항상 boolean"
   }
 }
 
@@ -40,6 +43,23 @@
   "message": "에러 메시지"
 }
 ```
+
+---
+
+## Apple 로그인
+
+- `POST /api/v1/auth/apple/challenge`: 플랫폼별 일회성 state/nonce 발급
+- `POST /api/v1/auth/apple/callback`: form post 응답 검증 및 앱 callback 전달
+- `POST /api/v1/auth/apple`: authorization code와 identity token을 서버에서 검증하고 ShiftMate JWT 발급
+- 검증 이메일이 기존 계정과 같아도 자동 연결하지 않고 `409 ACCOUNT_LINK_REQUIRED`를 반환합니다.
+- 기본값은 `APPLE_AUTH_ENABLED=false`입니다.
+
+## Google 로그인
+
+- `POST /api/v1/auth/google/token`: Flutter가 전달한 Google ID Token을 서버에서 검증하고 ShiftMate JWT 발급
+- 서버는 서명, issuer, audience, 만료 및 verified email을 검증하고 `sub`를 사용자 식별자로 저장합니다.
+- 검증 이메일이 기존 계정과 같아도 자동 연결하지 않고 `409 ACCOUNT_LINK_REQUIRED`를 반환합니다.
+- 기본값은 `GOOGLE_AUTH_ENABLED=false`입니다.
 
 ---
 

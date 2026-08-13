@@ -46,6 +46,67 @@ export function logError(
   );
 }
 
+export interface AppleAuthLogEvent {
+  request_id?: string;
+  platform?: "ios" | "android";
+  user_id?: string;
+  action: "challenge" | "callback" | "login";
+  result: "success" | "denied" | "error";
+  error_code?: string;
+  duration_ms: number;
+}
+
+export function logAppleAuthEvent(event: AppleAuthLogEvent): void {
+  const output = {
+    level: event.result === "error" ? "error" : "info",
+    context: "apple_auth",
+    request_id: event.request_id ?? null,
+    provider: "APPLE",
+    platform: event.platform ?? null,
+    user_id: event.user_id ?? null,
+    action: event.action,
+    result: event.result,
+    error_code: event.error_code ?? null,
+    duration_ms: event.duration_ms,
+  };
+
+  if (event.result === "error") {
+    console.error(JSON.stringify(output));
+    return;
+  }
+  console.log(JSON.stringify(output));
+}
+
+export interface GoogleAuthLogEvent {
+  request_id?: string;
+  user_id?: string;
+  result: "success" | "denied" | "error";
+  error_code?: string;
+  duration_ms: number;
+  is_new_user?: boolean;
+}
+
+export function logGoogleAuthEvent(event: GoogleAuthLogEvent): void {
+  const output = {
+    level: event.result === "error" ? "error" : "info",
+    context: "google_auth",
+    request_id: event.request_id ?? null,
+    provider: "GOOGLE",
+    user_id: event.user_id ?? null,
+    action: "google_login",
+    result: event.result,
+    error_code: event.error_code ?? null,
+    duration_ms: event.duration_ms,
+    is_new_user: event.is_new_user ?? null,
+  };
+
+  if (event.result === "error") {
+    console.error(JSON.stringify(output));
+    return;
+  }
+  console.log(JSON.stringify(output));
+}
+
 export interface GroupLogEvent {
   request_id?: string;
   actor_user_id: string;

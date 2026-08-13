@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import fs from "fs";
 
 dotenv.config();
 
@@ -53,6 +54,91 @@ export function getBooleanEnvironmentVariable(
   if (raw_value === "true") return true;
   if (raw_value === "false") return false;
   throw new Error(`${name}은(는) true 또는 false여야 합니다.`);
+}
+
+export function getAppleTokenEncryptionKey(): Buffer {
+  const encoded_key = getRequiredEnvironmentVariable(
+    "APPLE_TOKEN_ENCRYPTION_KEY",
+  );
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded_key)) {
+    throw new Error("APPLE_TOKEN_ENCRYPTION_KEY는 유효한 base64여야 합니다.");
+  }
+
+  const decoded_key = Buffer.from(encoded_key, "base64");
+  const normalized_input = encoded_key.replace(/=+$/, "");
+  const normalized_output = decoded_key.toString("base64").replace(/=+$/, "");
+  if (decoded_key.length !== 32 || normalized_input !== normalized_output) {
+    throw new Error(
+      "APPLE_TOKEN_ENCRYPTION_KEY는 base64 decode 결과가 정확히 32바이트여야 합니다.",
+    );
+  }
+  return decoded_key;
+}
+
+export function validateAppleAuthEnvironment(): void {
+  if (!getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false)) return;
+
+  const team_id = getRequiredEnvironmentVariable("APPLE_TEAM_ID");
+  const key_id = getRequiredEnvironmentVariable("APPLE_KEY_ID");
+  const ios_client_id = getRequiredEnvironmentVariable("APPLE_IOS_CLIENT_ID");
+  getRequiredEnvironmentVariable("APPLE_SERVICE_ID");
+  const redirect_uri = getRequiredEnvironmentVariable("APPLE_REDIRECT_URI");
+  const private_key_path = getRequiredEnvironmentVariable(
+    "APPLE_PRIVATE_KEY_PATH",
+  );
+
+  if (!/^[A-Z0-9]{10}$/.test(team_id)) {
+    throw new Error("APPLE_TEAM_ID는 10자의 영문 대문자/숫자여야 합니다.");
+  }
+  if (!/^[A-Z0-9]{10}$/.test(key_id)) {
+    throw new Error("APPLE_KEY_ID는 10자의 영문 대문자/숫자여야 합니다.");
+  }
+  if (ios_client_id !== "com.hspark.shiftmate") {
+    throw new Error(
+      "APPLE_IOS_CLIENT_ID는 com.hspark.shiftmate여야 합니다.",
+    );
+  }
+
+  let parsed_redirect_uri: URL;
+  try {
+    parsed_redirect_uri = new URL(redirect_uri);
+  } catch {
+    throw new Error("APPLE_REDIRECT_URI는 유효한 HTTPS URL이어야 합니다.");
+  }
+  if (
+    parsed_redirect_uri.protocol !== "https:" ||
+    parsed_redirect_uri.pathname !== "/api/v1/auth/apple/callback" ||
+    parsed_redirect_uri.search !== "" ||
+    parsed_redirect_uri.hash !== "" ||
+    parsed_redirect_uri.hostname === "localhost" ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsed_redirect_uri.hostname)
+  ) {
+    throw new Error(
+      "APPLE_REDIRECT_URI는 도메인 기반 HTTPS /api/v1/auth/apple/callback URL이어야 합니다.",
+    );
+  }
+
+  try {
+    fs.accessSync(private_key_path, fs.constants.R_OK);
+  } catch {
+    throw new Error("APPLE_PRIVATE_KEY_PATH 파일을 읽을 수 없습니다.");
+  }
+  getAppleTokenEncryptionKey();
+}
+
+export function validateGoogleAuthEnvironment(): void {
+  if (!getBooleanEnvironmentVariable("GOOGLE_AUTH_ENABLED", false)) return;
+
+  const server_client_id = getRequiredEnvironmentVariable(
+    "GOOGLE_SERVER_CLIENT_ID",
+  );
+  if (
+    !/^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(server_client_id)
+  ) {
+    throw new Error(
+      "GOOGLE_SERVER_CLIENT_ID는 Web application OAuth client ID 형식이어야 합니다.",
+    );
+  }
 }
 
 export function validateEnvironment(): void {
@@ -114,10 +200,30 @@ export function validateEnvironment(): void {
   getPositiveIntegerEnvironmentVariable("PUSH_MAX_ATTEMPTS", 6);
   getPositiveIntegerEnvironmentVariable("PUSH_JOB_TTL_SECONDS", 3600);
   getPositiveIntegerEnvironmentVariable("PUSH_TERMINAL_RETENTION_DAYS", 30);
+  const apple_challenge_ttl_seconds = getPositiveIntegerEnvironmentVariable(
+    "APPLE_CHALLENGE_TTL_SECONDS",
+    300,
+  );
+  if (
+    apple_challenge_ttl_seconds < 60 ||
+    apple_challenge_ttl_seconds > 600
+  ) {
+    throw new Error("APPLE_CHALLENGE_TTL_SECONDS는 60~600초여야 합니다.");
+  }
+  const apple_jwks_cache_seconds = getPositiveIntegerEnvironmentVariable(
+    "APPLE_JWKS_CACHE_SECONDS",
+    21600,
+  );
+  if (apple_jwks_cache_seconds < 60 || apple_jwks_cache_seconds > 86400) {
+    throw new Error("APPLE_JWKS_CACHE_SECONDS는 60~86400초여야 합니다.");
+  }
   getBooleanEnvironmentVariable("WORK_SHIFT_CACHE_ENABLED", false);
   getBooleanEnvironmentVariable("PUSH_JOB_ENQUEUE_ENABLED", false);
   getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false);
   getBooleanEnvironmentVariable("API_DOCS_ENABLED", false);
+  getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false);
+  getBooleanEnvironmentVariable("GOOGLE_AUTH_ENABLED", false);
+  validateGoogleAuthEnvironment();
 
   const push_app_environment = process.env.PUSH_APP_ENVIRONMENT?.trim();
   if (

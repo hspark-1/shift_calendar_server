@@ -464,6 +464,15 @@ export async function handler(req: AuthenticatedRequest, res: Response) {
 - **네이버 OAuth**: `src/services/naverService.ts`
   - WebView 방식: `POST /api/v1/auth/naver` (authorization code)
   - SDK 방식: `POST /api/v1/auth/naver/token` (access_token 직접 전송)
+- **Apple 로그인**: `src/services/appleService.ts`
+  - `POST /api/v1/auth/apple/challenge`에서 일회성 state/nonce를 발급
+  - `POST /api/v1/auth/apple`에서 code 교환과 JWKS/claim 검증 후 ShiftMate JWT 발급
+  - state/nonce는 hash만 저장하고 외부 refresh token은 AES-256-GCM 암호문으로 분리 저장
+  - 기본 `APPLE_AUTH_ENABLED=false`, 동일 이메일 기존 계정은 자동 연결하지 않음
+- **Google 로그인**: `src/services/googleService.ts`
+  - `POST /api/v1/auth/google/token`에서 공식 라이브러리로 ID Token의 서명·issuer·audience·만료·verified email 검증
+  - 검증된 `sub`를 `users.google_id`로 저장하고 신규 가입 전체를 transaction으로 처리
+  - 기본 `GOOGLE_AUTH_ENABLED=false`, 동일 이메일 기존 계정은 자동 연결하지 않음
 
 ### 3.5 DB 접근 규칙
 
@@ -1345,6 +1354,34 @@ P0/P1 그룹 요청
   - 의존성: Stage 그룹 migration/API 배포, 기존 JWT refresh·공통 AppError·Dio 계층
   - 사용 예: 그룹 화면의 더미 datasource를 실제 API로 교체하고 DTO/domain state/widget 테스트를 작성할 때 기준 문서로 사용
 - 서버 상세 endpoint·migration·역할은 `_docs/GROUP_API_GUIDE.md`, Flutter 연동은 `_docs/GROUP_FRONTEND_API_GUIDE.md`, 실제 동작 판정은 `_docs/GROUP_RUNTIME_VERIFICATION_CHECKLIST.md`, 설계 근거는 ADR-0021을 정본으로 사용합니다.
+
+### 12. Apple·Google 인증 모듈
+
+- **`src/services/appleService.ts`**
+  - 역할: Apple challenge, code 교환, JWKS/claim 검증, 외부 refresh token 암복호화
+  - 의존성: PostgreSQL OAuth 보조 테이블, Node.js crypto, Apple 공개 endpoint
+  - 사용 예: `authController`가 검증된 플랫폼과 credential을 전달
+- **`src/services/googleService.ts`**
+  - 역할: Google ID Token 검증과 공개 claim 정규화
+  - 의존성: `google-auth-library`, 고정 server audience
+  - 사용 예: `POST /api/v1/auth/google/token` 처리
+- **`src/models/OAuthLoginChallenge.ts`, `src/models/OAuthAuthorization.ts`**
+  - 역할: Apple 일회성 challenge hash와 암호화된 외부 authorization 저장
+  - 의존성: `users`, Apple add-only migration
+  - 사용 예: 로그인 transaction과 challenge atomic consume
+- **`migrations/*apple_auth*`, `migrations/*google_auth*`**
+  - 역할: 공개 가능한 범용 preflight/apply/postflight/제한적 rollback SQL
+  - 의존성: PostgreSQL 16과 기존 `users`
+  - 사용 예: 백업과 대상 확인 후 개발자가 수동 실행
+- **`src/openapi/appleAuthOpenApi.json`, `src/openapi/googleAuthOpenApi.json`**
+  - 역할: 인증 endpoint와 공통 오류 응답 계약
+  - 의존성: `src/openapi.ts`
+  - 사용 예: `API_DOCS_ENABLED=true`인 개발 환경에서 확인
+- **`test/appleAuth*.test.cjs`, `test/googleAuth*.test.cjs`**
+  - 역할: crypto/claim/HTTP/transaction/migration 회귀 검증
+  - 의존성: build된 `dist`, 통합 테스트는 격리 PostgreSQL
+  - 사용 예: `npm test`, `npm run test:apple-integration`, `npm run test:google-integration`
+- 실제 client ID, private key, 암호화 키와 환경별 인프라 식별값은 저장소에 기록하지 않고 `.env.example`에는 빈 값 또는 명시적 placeholder만 둡니다.
 
 ---
 

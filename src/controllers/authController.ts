@@ -11,7 +11,20 @@ import { processKakaoLogin, getKakaoUserInfo } from "../services/kakaoService";
 import { processNaverLogin, getNaverUserInfo } from "../services/naverService";
 import { ensureDefaultTemplate } from "../services/shiftTemplateService";
 import { normalizePhoneNumber } from "../utils/phone";
-import { logError } from "../utils/logger";
+import {
+  logAppleAuthEvent,
+  logError,
+  logGoogleAuthEvent,
+} from "../utils/logger";
+import {
+  AppleAuthError,
+  appleService,
+} from "../services/appleService";
+import { OAuthLoginPlatform } from "../models/OAuthLoginChallenge";
+import {
+  GoogleAuthError,
+  googleService,
+} from "../services/googleService";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -23,6 +36,212 @@ function getDeviceInfo(req: Request): string {
   const user_agent = req.headers["user-agent"] || "unknown";
   const ip = req.ip || req.socket.remoteAddress || "unknown";
   return `${user_agent} | ${ip}`;
+}
+
+function sendAppleAuthError(
+  req: Request,
+  res: Response,
+  error: unknown,
+  context: string,
+): void {
+  if (error instanceof AppleAuthError) {
+    res.status(error.status_code).json({
+      success: false,
+      error: { code: error.code, message: error.message },
+      request_id: req.request_id,
+    });
+    return;
+  }
+
+  logError(context, error, req.request_id);
+  res.status(500).json({
+    success: false,
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "서버 오류가 발생했습니다.",
+    },
+    request_id: req.request_id,
+  });
+}
+
+function sendGoogleAuthError(
+  req: Request,
+  res: Response,
+  error: unknown,
+): void {
+  if (error instanceof GoogleAuthError) {
+    res.status(error.status_code).json({
+      success: false,
+      error: { code: error.code, message: error.message },
+      request_id: req.request_id,
+    });
+    return;
+  }
+
+  logError("auth_google_login_failed", error, req.request_id);
+  res.status(500).json({
+    success: false,
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "서버 오류가 발생했습니다.",
+    },
+    request_id: req.request_id,
+  });
+}
+
+export async function googleLoginWithToken(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const started_at = Date.now();
+  try {
+    const result = await googleService.completeLogin({
+      id_token: req.body.id_token,
+      device_info: getDeviceInfo(req),
+    });
+    logGoogleAuthEvent({
+      request_id: req.request_id,
+      user_id: result.user.user_id,
+      result: "success",
+      duration_ms: Date.now() - started_at,
+      is_new_user: result.is_new_user,
+    });
+    res.status(result.is_new_user ? 201 : 200).json({
+      success: true,
+      message: result.is_new_user
+        ? "회원가입이 완료되었습니다."
+        : "Google 로그인 성공",
+      data: {
+        user: result.user.toJSON(),
+        ...result.tokens,
+        is_new_user: result.is_new_user,
+      },
+    });
+  } catch (error) {
+    const error_code =
+      error instanceof GoogleAuthError
+        ? error.code
+        : "INTERNAL_SERVER_ERROR";
+    logGoogleAuthEvent({
+      request_id: req.request_id,
+      result:
+        error_code === "GOOGLE_UPSTREAM_UNAVAILABLE" ||
+        error_code === "INTERNAL_SERVER_ERROR"
+          ? "error"
+          : "denied",
+      error_code,
+      duration_ms: Date.now() - started_at,
+    });
+    sendGoogleAuthError(req, res, error);
+  }
+}
+
+export async function createAppleChallenge(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const started_at = Date.now();
+  const platform = req.body.platform as OAuthLoginPlatform;
+  try {
+    const challenge = await appleService.createChallenge(platform);
+    logAppleAuthEvent({
+      request_id: req.request_id,
+      platform,
+      action: "challenge",
+      result: "success",
+      duration_ms: Date.now() - started_at,
+    });
+    res.json({ success: true, data: challenge });
+  } catch (error) {
+    logAppleAuthEvent({
+      request_id: req.request_id,
+      platform,
+      action: "challenge",
+      result: error instanceof AppleAuthError ? "denied" : "error",
+      error_code:
+        error instanceof AppleAuthError ? error.code : "INTERNAL_SERVER_ERROR",
+      duration_ms: Date.now() - started_at,
+    });
+    sendAppleAuthError(req, res, error, "auth_apple_challenge_failed");
+  }
+}
+
+export async function appleCallback(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const started_at = Date.now();
+  try {
+    const redirect_url = await appleService.buildAndroidCallbackRedirect(
+      req.body as Record<string, unknown>,
+    );
+    logAppleAuthEvent({
+      request_id: req.request_id,
+      platform: "android",
+      action: "callback",
+      result: "success",
+      duration_ms: Date.now() - started_at,
+    });
+    res.redirect(303, redirect_url);
+  } catch (error) {
+    logAppleAuthEvent({
+      request_id: req.request_id,
+      platform: "android",
+      action: "callback",
+      result: error instanceof AppleAuthError ? "denied" : "error",
+      error_code:
+        error instanceof AppleAuthError ? error.code : "INTERNAL_SERVER_ERROR",
+      duration_ms: Date.now() - started_at,
+    });
+    sendAppleAuthError(req, res, error, "auth_apple_callback_failed");
+  }
+}
+
+export async function appleLogin(req: Request, res: Response): Promise<void> {
+  const started_at = Date.now();
+  const platform = req.body.platform as OAuthLoginPlatform;
+  try {
+    const result = await appleService.completeLogin({
+      platform,
+      authorization_code: req.body.authorization_code,
+      identity_token: req.body.identity_token,
+      state: req.body.state,
+      nonce: req.body.nonce,
+      given_name: req.body.given_name,
+      family_name: req.body.family_name,
+      device_info: getDeviceInfo(req),
+    });
+    logAppleAuthEvent({
+      request_id: req.request_id,
+      platform,
+      user_id: result.user.user_id,
+      action: "login",
+      result: "success",
+      duration_ms: Date.now() - started_at,
+    });
+    res.json({
+      success: true,
+      message: result.is_new_user
+        ? "회원가입이 완료되었습니다."
+        : "로그인 성공",
+      data: {
+        user: result.user.toJSON(),
+        ...result.tokens,
+        is_new_user: result.is_new_user,
+      },
+    });
+  } catch (error) {
+    logAppleAuthEvent({
+      request_id: req.request_id,
+      platform,
+      action: "login",
+      result: error instanceof AppleAuthError ? "denied" : "error",
+      error_code:
+        error instanceof AppleAuthError ? error.code : "INTERNAL_SERVER_ERROR",
+      duration_ms: Date.now() - started_at,
+    });
+    sendAppleAuthError(req, res, error, "auth_apple_login_failed");
+  }
 }
 
 // 회원가입 (패스워드 인증 - 추후 활성화)

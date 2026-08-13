@@ -1200,3 +1200,101 @@ Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 �
 - 실제 운영 중 한 기기 정책으로 중요 알림 유실이 허용되지 않으면 알림별 fan-out 정책을 별도 ADR로 검토
 - Firebase Admin 14.x와 Node 호환성 검증 후 audit advisory 해소를 위해 pinned 버전 변경 검토
 - FID 기반 전송이 안정화되면 provider adapter와 `target_type`을 확장
+
+---
+
+## ADR-0023: 서버 검증형 Apple 로그인과 기본 비활성화
+
+### 배경(문제)
+
+클라이언트가 전달한 Apple credential을 신뢰하지 않고 서버가 code와 identity token을 검증해야 하며, replay 방지와 외부 refresh token 보호가 필요합니다.
+
+### 선택지(대안)
+
+1. 서버가 challenge, code 교환, JWKS/claim 검증과 외부 refresh token 암호화를 담당
+2. 클라이언트가 검증한 사용자 정보만 서버에 전달
+3. 외부 인증 완료 상태를 서버 session에 저장
+
+### 결정(무엇을 선택)
+
+**서버 검증형 Apple 로그인을 구현하고 `APPLE_AUTH_ENABLED=false`를 기본값으로 유지**합니다.
+
+- state/nonce 원문은 저장하지 않고 SHA-256 hash만 저장
+- challenge는 만료 시간과 atomic consume으로 재사용 차단
+- identity token의 서명, issuer, audience, nonce와 verified email 검증
+- 외부 refresh token은 AES-256-GCM 암호문으로 앱 JWT refresh token과 분리
+- 동일 이메일 기존 계정은 자동 연결하지 않고 `ACCOUNT_LINK_REQUIRED` 반환
+- 신규 사용자와 관련 레코드는 하나의 transaction으로 생성
+
+### 근거(왜)
+
+- 클라이언트 입력 위조와 credential replay를 서버 경계에서 차단
+- 외부 refresh token 평문 저장 방지
+- 암묵적 이메일 계정 연결로 인한 계정 탈취 위험 제거
+- DB 선적용과 애플리케이션 롤백이 가능한 add-only schema 유지
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- Apple 공개키 조회와 외부 token endpoint 장애 처리가 추가됨
+- 암호화 키와 private key는 저장소 밖에서 관리해야 함
+- 기능 활성화 전 환경변수와 migration 검증이 필요함
+
+### 구현 위치
+
+- `src/services/appleService.ts`
+- `src/models/OAuthLoginChallenge.ts`, `src/models/OAuthAuthorization.ts`
+- `migrations/add_apple_auth_support.sql`
+- `src/openapi/appleAuthOpenApi.json`
+
+### 추후 과제(언제 다시 평가)
+
+- 계정 삭제와 Apple revoke 계약 완료 시 활성화 정책 재검토
+- 실제 iOS/Android credential로 end-to-end 검증
+
+---
+
+## ADR-0024: Google ID Token 서버 검증과 이메일 자동 연결 금지
+
+### 배경(문제)
+
+Flutter가 전달하는 Google ID Token의 진위를 서버가 확인하고 기존 ShiftMate JWT로 교환해야 하며, 같은 이메일의 기존 계정을 자동 연결할지 결정해야 합니다.
+
+### 선택지(대안)
+
+1. 공식 라이브러리로 ID Token을 검증하고 Google `sub`를 식별자로 저장
+2. 클라이언트가 전달한 이메일과 프로필을 신뢰
+3. 이메일이 같으면 기존 계정에 자동 연결
+
+### 결정(무엇을 선택)
+
+**`google-auth-library`로 ID Token을 검증하고 검증된 `sub`를 `users.google_id`에 저장하며 이메일 자동 연결은 금지**합니다.
+
+- 서명, issuer, 고정 Web client audience, 만료, verified email 검증
+- subject 기준 advisory transaction lock으로 동시 신규 가입 직렬화
+- 신규 사용자, 기본 템플릿과 refresh token을 한 transaction으로 생성
+- 동일 이메일 기존 계정은 `ACCOUNT_LINK_REQUIRED` 반환
+- `GOOGLE_AUTH_ENABLED=false`를 기본값으로 유지
+
+### 근거(왜)
+
+- 사용자 식별을 변경 가능한 이메일이 아니라 공급자 subject에 고정
+- 공식 검증 라이브러리로 공개키와 claim 검증 오류를 일관되게 처리
+- 명시적 계정 연결 절차 없이 기존 계정에 접근하는 위험 방지
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- 사용자는 동일 이메일 계정 충돌 시 별도 연결 절차가 필요함
+- 서버 시작 시 활성화된 환경의 Web client ID 형식을 검증함
+- nullable 컬럼과 partial unique index가 추가됨
+
+### 구현 위치
+
+- `src/services/googleService.ts`
+- `src/models/User.ts`
+- `migrations/add_google_auth_support.sql`
+- `src/openapi/googleAuthOpenApi.json`
+
+### 추후 과제(언제 다시 평가)
+
+- 명시적 재인증 기반 계정 연결 기능 설계
+- 실제 모바일 client와 end-to-end 검증

@@ -1,0 +1,243 @@
+{
+  "tags": [
+    {
+      "name": "Apple Auth",
+      "description": "서버 검증형 Apple 로그인. APPLE_AUTH_ENABLED=false이면 503을 반환합니다."
+    }
+  ],
+  "paths": {
+    "/auth/apple/challenge": {
+      "post": {
+        "tags": ["Apple Auth"],
+        "summary": "Apple 로그인 일회성 challenge 발급",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ApplePlatformRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "발급 성공. iOS redirect_uri는 null, Android는 서버의 고정 callback URL입니다.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AppleChallengeResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/AppleBadRequest" },
+          "429": { "$ref": "#/components/responses/AppleRateLimited" },
+          "503": { "$ref": "#/components/responses/AppleDisabled" }
+        }
+      }
+    },
+    "/auth/apple": {
+      "post": {
+        "tags": ["Apple Auth"],
+        "summary": "Apple authorization code 검증 및 ShiftMate 로그인",
+        "description": "challenge는 요청 시작 시 원자적으로 1회 소비됩니다. Apple token endpoint 결과의 검증된 id_token을 사용자 식별 정본으로 사용합니다.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AppleLoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "로그인 또는 회원가입 성공",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AppleLoginResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/AppleBadRequest" },
+          "409": {
+            "description": "검증된 이메일과 기존 계정 충돌. 자동 연결하지 않습니다.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/AppleRateLimited" },
+          "502": {
+            "description": "Apple token/JWKS 일시 장애",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
+              }
+            }
+          },
+          "503": { "$ref": "#/components/responses/AppleDisabled" }
+        }
+      }
+    },
+    "/auth/apple/callback": {
+      "post": {
+        "tags": ["Apple Auth"],
+        "summary": "Apple Android/Web form_post callback",
+        "description": "유효한 미소비 Android state만 확인하고 allowlist 필드만 고정 앱 intent로 303 전달합니다. 세션 생성과 challenge 소비는 하지 않습니다.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AppleCallbackRequest" }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "intent://callback 고정 대상 redirect",
+            "headers": {
+              "Location": {
+                "schema": { "type": "string" },
+                "description": "package=com.hspark.shiftmate, scheme=signinwithapple 고정"
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/AppleBadRequest" },
+          "429": { "$ref": "#/components/responses/AppleRateLimited" },
+          "503": { "$ref": "#/components/responses/AppleDisabled" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApplePlatformRequest": {
+        "type": "object",
+        "required": ["platform"],
+        "additionalProperties": false,
+        "properties": {
+          "platform": { "type": "string", "enum": ["ios", "android"] }
+        }
+      },
+      "AppleChallengeResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "data": {
+            "type": "object",
+            "required": ["nonce", "state", "client_id", "redirect_uri", "expires_at"],
+            "properties": {
+              "nonce": { "type": "string", "minLength": 43, "maxLength": 128 },
+              "state": { "type": "string", "minLength": 43, "maxLength": 128 },
+              "client_id": { "type": "string" },
+              "redirect_uri": { "type": "string", "format": "uri", "nullable": true },
+              "expires_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      },
+      "AppleLoginRequest": {
+        "type": "object",
+        "required": ["platform", "authorization_code", "state", "nonce"],
+        "additionalProperties": false,
+        "properties": {
+          "platform": { "type": "string", "enum": ["ios", "android"] },
+          "authorization_code": { "type": "string", "minLength": 1, "maxLength": 4096, "writeOnly": true },
+          "identity_token": { "type": "string", "minLength": 1, "maxLength": 16384, "writeOnly": true },
+          "state": { "type": "string", "minLength": 43, "maxLength": 128, "writeOnly": true },
+          "nonce": { "type": "string", "minLength": 43, "maxLength": 128, "writeOnly": true },
+          "given_name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "family_name": { "type": "string", "minLength": 1, "maxLength": 100 }
+        }
+      },
+      "AppleCallbackRequest": {
+        "type": "object",
+        "required": ["state"],
+        "properties": {
+          "code": { "type": "string", "maxLength": 4096, "writeOnly": true },
+          "id_token": { "type": "string", "maxLength": 16384, "writeOnly": true },
+          "state": { "type": "string", "minLength": 43, "maxLength": 128, "writeOnly": true },
+          "user": { "type": "string", "maxLength": 8192, "writeOnly": true },
+          "error": { "type": "string", "maxLength": 128 }
+        }
+      },
+      "AppleLoginResponse": {
+        "type": "object",
+        "required": ["success", "message", "data"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "message": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["user", "access_token", "refresh_token", "expires_at", "is_new_user"],
+            "properties": {
+              "user": { "type": "object", "additionalProperties": true },
+              "access_token": { "type": "string", "writeOnly": true },
+              "refresh_token": { "type": "string", "writeOnly": true },
+              "expires_at": { "type": "integer", "format": "int64", "description": "Unix epoch milliseconds" },
+              "is_new_user": { "type": "boolean" }
+            }
+          }
+        }
+      },
+      "AppleErrorResponse": {
+        "type": "object",
+        "required": ["success", "error"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [false] },
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "APPLE_INVALID_PLATFORM",
+                  "APPLE_INVALID_CHALLENGE",
+                  "APPLE_INVALID_TOKEN",
+                  "APPLE_CODE_INVALID",
+                  "APPLE_EMAIL_UNAVAILABLE",
+                  "APPLE_REFRESH_TOKEN_UNAVAILABLE",
+                  "ACCOUNT_LINK_REQUIRED",
+                  "AUTH_RATE_LIMIT_EXCEEDED",
+                  "APPLE_UPSTREAM_UNAVAILABLE",
+                  "APPLE_AUTH_DISABLED"
+                ]
+              },
+              "message": { "type": "string" }
+            }
+          },
+          "request_id": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "responses": {
+      "AppleBadRequest": {
+        "description": "Apple 요청 또는 인증 정보 검증 실패",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
+          }
+        }
+      },
+      "AppleRateLimited": {
+        "description": "인증 rate limit 초과",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
+          }
+        }
+      },
+      "AppleDisabled": {
+        "description": "APPLE_AUTH_ENABLED=false",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
+          }
+        }
+      }
+    }
+  }
+}

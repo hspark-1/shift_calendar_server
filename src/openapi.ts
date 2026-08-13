@@ -3,6 +3,8 @@ import swaggerUi from "swagger-ui-express";
 import { getBooleanEnvironmentVariable } from "./config/environment";
 import group_openapi from "./openapi/groupOpenApi.json";
 import device_openapi from "./openapi/deviceOpenApi.json";
+import apple_auth_openapi from "./openapi/appleAuthOpenApi.json";
+import google_auth_openapi from "./openapi/googleAuthOpenApi.json";
 
 const openapi = {
   ...group_openapi,
@@ -10,15 +12,29 @@ const openapi = {
     ...group_openapi.info,
     title: "ShiftMate API",
   },
+  tags: [
+    ...group_openapi.tags,
+    ...apple_auth_openapi.tags,
+    ...google_auth_openapi.tags,
+  ],
   paths: {
     ...group_openapi.paths,
     ...device_openapi.paths,
+    ...apple_auth_openapi.paths,
+    ...google_auth_openapi.paths,
   },
   components: {
     ...group_openapi.components,
     schemas: {
       ...group_openapi.components.schemas,
       ...device_openapi.components.schemas,
+      ...apple_auth_openapi.components.schemas,
+      ...google_auth_openapi.components.schemas,
+    },
+    responses: {
+      ...group_openapi.components.responses,
+      ...apple_auth_openapi.components.responses,
+      ...google_auth_openapi.components.responses,
     },
   },
 };
