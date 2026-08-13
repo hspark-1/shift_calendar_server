@@ -5,7 +5,6 @@ const test = require("node:test");
 
 const repository_root = path.resolve(__dirname, "..");
 
-process.env.GOOGLE_AUTH_ENABLED = "true";
 process.env.GOOGLE_SERVER_CLIENT_ID =
   "123456789-test.apps.googleusercontent.com";
 process.env.JWT_SECRET = "google-test-access-secret";
@@ -33,7 +32,7 @@ function createVerifier(payload, capture) {
   };
 }
 
-test("Google 환경 검증은 활성 시 Web application OAuth client ID를 강제한다", () => {
+test("Google 환경 검증은 항상 Web application OAuth client ID를 강제한다", () => {
   assert.doesNotThrow(() => validateGoogleAuthEnvironment());
 
   const original_client_id = process.env.GOOGLE_SERVER_CLIENT_ID;
@@ -44,11 +43,12 @@ test("Google 환경 검증은 활성 시 Web application OAuth client ID를 강�
   );
   process.env.GOOGLE_SERVER_CLIENT_ID = original_client_id;
 
-  process.env.GOOGLE_AUTH_ENABLED = "false";
   delete process.env.GOOGLE_SERVER_CLIENT_ID;
-  assert.doesNotThrow(() => validateGoogleAuthEnvironment());
+  assert.throws(
+    () => validateGoogleAuthEnvironment(),
+    /필수 환경변수 GOOGLE_SERVER_CLIENT_ID/,
+  );
   process.env.GOOGLE_SERVER_CLIENT_ID = original_client_id;
-  process.env.GOOGLE_AUTH_ENABLED = "true";
 });
 
 test("verifyIdToken은 원문 ID Token과 고정 server audience를 전달하고 claim을 정규화한다", async () => {
@@ -149,40 +149,18 @@ test("미확인·누락·형식 오류 이메일은 GOOGLE_EMAIL_UNAVAILABLE로 
   }
 });
 
-test("기능 플래그가 false이면 Google controller는 request_id가 있는 503을 반환한다", async () => {
-  process.env.GOOGLE_AUTH_ENABLED = "false";
-  const {
-    googleLoginWithToken,
-  } = require("../dist/controllers/authController.js");
-  let response_status = 200;
-  let response_body;
-  const response = {
-    status(status_code) {
-      response_status = status_code;
-      return this;
-    },
-    json(body) {
-      response_body = body;
-      return this;
-    },
-  };
-  try {
-    await googleLoginWithToken(
-      {
-        body: { id_token: "disabled-token" },
-        headers: {},
-        ip: "127.0.0.1",
-        socket: {},
-        request_id: "google-disabled-request-id",
-      },
-      response,
-    );
-    assert.equal(response_status, 503);
-    assert.equal(response_body.error.code, "GOOGLE_AUTH_DISABLED");
-    assert.equal(response_body.request_id, "google-disabled-request-id");
-  } finally {
-    process.env.GOOGLE_AUTH_ENABLED = "true";
-  }
+test("Google 로그인은 feature flag 환경변수 없이 초기화된다", () => {
+  delete process.env.GOOGLE_AUTH_ENABLED;
+  const service = new GoogleService();
+  assert.doesNotThrow(() => service.initialize());
+  assert.doesNotMatch(
+    readRepositoryFile(".env.example"),
+    /^GOOGLE_AUTH_ENABLED=/m,
+  );
+  assert.doesNotMatch(
+    readRepositoryFile("src/services/googleService.ts"),
+    /GOOGLE_AUTH_ENABLED/,
+  );
 });
 
 test("Google 구조화 로그는 token, email, subject claim을 받을 필드가 없다", () => {

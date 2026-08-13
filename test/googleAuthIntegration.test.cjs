@@ -28,7 +28,6 @@ if (process.env.RUN_GOOGLE_AUTH_INTEGRATION !== "true") {
   });
 } else {
   process.env.NODE_ENV = "test";
-  process.env.GOOGLE_AUTH_ENABLED = "true";
   process.env.GOOGLE_SERVER_CLIENT_ID =
     "123456789-integration.apps.googleusercontent.com";
   process.env.JWT_SECRET = "google-integration-access-secret";

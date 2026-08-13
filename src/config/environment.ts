@@ -76,13 +76,6 @@ export function getAppleTokenEncryptionKey(): Buffer {
 }
 
 export function validateAppleAuthEnvironment(): void {
-  if (
-    !getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false) &&
-    !getBooleanEnvironmentVariable("ACCOUNT_DELETION_WORKER_ENABLED", false)
-  ) {
-    return;
-  }
-
   const team_id = getRequiredEnvironmentVariable("APPLE_TEAM_ID");
   const key_id = getRequiredEnvironmentVariable("APPLE_KEY_ID");
   const ios_client_id = getRequiredEnvironmentVariable("APPLE_IOS_CLIENT_ID");
@@ -132,8 +125,6 @@ export function validateAppleAuthEnvironment(): void {
 }
 
 export function validateGoogleAuthEnvironment(): void {
-  if (!getBooleanEnvironmentVariable("GOOGLE_AUTH_ENABLED", false)) return;
-
   const server_client_id = getRequiredEnvironmentVariable(
     "GOOGLE_SERVER_CLIENT_ID",
   );
@@ -232,8 +223,6 @@ export function validateEnvironment(): void {
   getBooleanEnvironmentVariable("PUSH_JOB_ENQUEUE_ENABLED", false);
   getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false);
   getBooleanEnvironmentVariable("API_DOCS_ENABLED", false);
-  getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false);
-  getBooleanEnvironmentVariable("GOOGLE_AUTH_ENABLED", false);
   getBooleanEnvironmentVariable("ACCOUNT_DELETION_ENABLED", false);
   getBooleanEnvironmentVariable("ACCOUNT_DELETION_WORKER_ENABLED", false);
   validateGoogleAuthEnvironment();

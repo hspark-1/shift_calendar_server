@@ -13,10 +13,7 @@ import {
   where,
 } from "sequelize";
 import { sequelize } from "../config/database";
-import {
-  getBooleanEnvironmentVariable,
-  getRequiredEnvironmentVariable,
-} from "../config/environment";
+import { getRequiredEnvironmentVariable } from "../config/environment";
 import { User } from "../models";
 import { generateTokens } from "./authService";
 import { ensureDefaultTemplate } from "./shiftTemplateService";
@@ -25,8 +22,7 @@ export type GoogleAuthErrorCode =
   | "GOOGLE_INVALID_TOKEN"
   | "GOOGLE_EMAIL_UNAVAILABLE"
   | "ACCOUNT_LINK_REQUIRED"
-  | "GOOGLE_UPSTREAM_UNAVAILABLE"
-  | "GOOGLE_AUTH_DISABLED";
+  | "GOOGLE_UPSTREAM_UNAVAILABLE";
 
 export class GoogleAuthError extends Error {
   constructor(
@@ -137,23 +133,11 @@ export class GoogleService {
   }
 
   initialize(): void {
-    if (!getBooleanEnvironmentVariable("GOOGLE_AUTH_ENABLED", false)) return;
     getRequiredEnvironmentVariable("GOOGLE_SERVER_CLIENT_ID");
     if (!this.oauth_client) this.oauth_client = new OAuth2Client();
   }
 
-  private assertEnabled(): void {
-    if (!getBooleanEnvironmentVariable("GOOGLE_AUTH_ENABLED", false)) {
-      throw new GoogleAuthError(
-        "GOOGLE_AUTH_DISABLED",
-        503,
-        "Google 로그인이 현재 비활성화되어 있습니다.",
-      );
-    }
-  }
-
   async verifyIdentityToken(id_token: string): Promise<VerifiedGoogleIdentity> {
-    this.assertEnabled();
     if (!this.oauth_client) this.oauth_client = new OAuth2Client();
 
     let payload: TokenPayload | undefined;

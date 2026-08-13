@@ -2,7 +2,7 @@
   "tags": [
     {
       "name": "Apple Auth",
-      "description": "서버 검증형 Apple 로그인. APPLE_AUTH_ENABLED=false이면 503을 반환합니다."
+      "description": "항상 활성화되는 서버 검증형 Apple 로그인입니다."
     }
   ],
   "paths": {
@@ -29,8 +29,7 @@
             }
           },
           "400": { "$ref": "#/components/responses/AppleBadRequest" },
-          "429": { "$ref": "#/components/responses/AppleRateLimited" },
-          "503": { "$ref": "#/components/responses/AppleDisabled" }
+          "429": { "$ref": "#/components/responses/AppleRateLimited" }
         }
       }
     },
@@ -74,8 +73,7 @@
                 "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
               }
             }
-          },
-          "503": { "$ref": "#/components/responses/AppleDisabled" }
+          }
         }
       }
     },
@@ -104,8 +102,7 @@
             }
           },
           "400": { "$ref": "#/components/responses/AppleBadRequest" },
-          "429": { "$ref": "#/components/responses/AppleRateLimited" },
-          "503": { "$ref": "#/components/responses/AppleDisabled" }
+          "429": { "$ref": "#/components/responses/AppleRateLimited" }
         }
       }
     }
@@ -202,8 +199,7 @@
                   "APPLE_REFRESH_TOKEN_UNAVAILABLE",
                   "ACCOUNT_LINK_REQUIRED",
                   "AUTH_RATE_LIMIT_EXCEEDED",
-                  "APPLE_UPSTREAM_UNAVAILABLE",
-                  "APPLE_AUTH_DISABLED"
+                  "APPLE_UPSTREAM_UNAVAILABLE"
                 ]
               },
               "message": { "type": "string" }
@@ -224,14 +220,6 @@
       },
       "AppleRateLimited": {
         "description": "인증 rate limit 초과",
-        "content": {
-          "application/json": {
-            "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
-          }
-        }
-      },
-      "AppleDisabled": {
-        "description": "APPLE_AUTH_ENABLED=false",
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }

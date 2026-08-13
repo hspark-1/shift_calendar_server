@@ -18,7 +18,6 @@ fs.writeFileSync(
   { mode: 0o600 },
 );
 
-process.env.APPLE_AUTH_ENABLED = "true";
 process.env.APPLE_TEAM_ID = "TEAMID1234";
 process.env.APPLE_KEY_ID = "KEYID12345";
 process.env.APPLE_IOS_CLIENT_ID = "com.hspark.shiftmate";
@@ -292,46 +291,17 @@ test("OpenAPI와 migration은 Apple 공개 계약, hash 제약, 안전 rollback�
   assert.match(rollback, /두 테이블이 모두 0건이어야 합니다/);
 });
 
-test("Apple 환경변수 예시는 기능 플래그 false와 비밀키 파일 경로만 제공한다", () => {
+test("Apple 환경변수 예시는 feature flag 없이 비밀키 파일 경로만 제공한다", () => {
   const environment_example = readRepositoryFile(".env.example");
-  assert.match(environment_example, /^APPLE_AUTH_ENABLED=false$/m);
+  const apple_service = readRepositoryFile("src/services/appleService.ts");
+  assert.doesNotMatch(environment_example, /^APPLE_AUTH_ENABLED=/m);
+  assert.doesNotMatch(apple_service, /APPLE_AUTH_ENABLED/);
   assert.match(environment_example, /^APPLE_PRIVATE_KEY_PATH=$/m);
   assert.doesNotMatch(environment_example, /BEGIN PRIVATE KEY/);
 });
 
-test("기능 플래그가 false이면 공개 challenge endpoint는 503 공통 오류를 반환한다", async () => {
-  process.env.APPLE_AUTH_ENABLED = "false";
-  const {
-    createAppleChallenge,
-  } = require("../dist/controllers/authController.js");
-  let response_status = 200;
-  let response_body;
-  const response = {
-    status(status_code) {
-      response_status = status_code;
-      return this;
-    },
-    json(body) {
-      response_body = body;
-      return this;
-    },
-  };
-  try {
-    await createAppleChallenge(
-      {
-        body: { platform: "ios" },
-        request_id: "00000000-0000-4000-8000-000000000001",
-      },
-      response,
-    );
-    assert.equal(response_status, 503);
-    assert.equal(response_body.success, false);
-    assert.equal(response_body.error.code, "APPLE_AUTH_DISABLED");
-    assert.equal(
-      response_body.request_id,
-      "00000000-0000-4000-8000-000000000001",
-    );
-  } finally {
-    process.env.APPLE_AUTH_ENABLED = "true";
-  }
+test("Apple 로그인은 feature flag 환경변수 없이 초기화된다", () => {
+  delete process.env.APPLE_AUTH_ENABLED;
+  const service = new AppleService();
+  assert.doesNotThrow(() => service.initialize());
 });

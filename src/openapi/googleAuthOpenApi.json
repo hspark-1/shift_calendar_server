@@ -2,7 +2,7 @@
   "tags": [
     {
       "name": "Google Auth",
-      "description": "Google ID Token 서버 검증 로그인. GOOGLE_AUTH_ENABLED=false이면 503을 반환합니다."
+      "description": "항상 활성화되는 Google ID Token 서버 검증 로그인입니다."
     }
   ],
   "paths": {
@@ -117,7 +117,6 @@
                   "ACCOUNT_LINK_REQUIRED",
                   "AUTH_RATE_LIMIT_EXCEEDED",
                   "GOOGLE_UPSTREAM_UNAVAILABLE",
-                  "GOOGLE_AUTH_DISABLED",
                   "INTERNAL_SERVER_ERROR"
                 ]
               },
@@ -170,7 +169,7 @@
         }
       },
       "GoogleUnavailable": {
-        "description": "Google 공개키/검증 upstream 장애 또는 기능 비활성",
+        "description": "Google 공개키/검증 upstream 장애",
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/GoogleErrorResponse" }

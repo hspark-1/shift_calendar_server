@@ -10,6 +10,8 @@
 
 - 카카오 OAuth 로그인
 - 네이버 OAuth 로그인
+- Apple 서버 검증형 로그인
+- Google ID Token 서버 검증 로그인
 - 근무 템플릿 관리 (3교대 등)
 - 근무표 생성/수정/삭제
 - 개인 일정(Event) 관리
@@ -89,7 +91,7 @@ Challenge 발급(state/nonce 원문은 앱, SHA-256 hash는 DB)
 
 - 검증된 Apple subject가 사용자 식별 정본이고, 같은 이메일의 기존 계정은 자동 연결하지 않습니다.
 - Apple refresh token은 계정 삭제 revoke를 위해 AES-256-GCM 암호화해 `oauth_authorizations`에 저장하며 앱 JWT `refresh_tokens`와 분리합니다.
-- `APPLE_AUTH_ENABLED=false`가 기본값입니다. 앱 내 계정 삭제와 Apple revoke 2단계 완료 전 Flutter Production 버튼과 서버 flag를 활성화하지 않습니다.
+- Apple 로그인은 feature flag 없이 항상 활성화되며 API 시작 전에 client/redirect, `.p8`, 암호화 키를 검증합니다.
 - 상세 HTTP/DB/배포 계약은 `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`를 따릅니다.
 
 ### Google 로그인 구조
@@ -107,7 +109,7 @@ Flutter google_sign_in
 - 검증된 Google `sub`가 사용자 식별 정본이며, 요청 본문의 email/name/id는 받거나 신뢰하지 않습니다.
 - `email_verified=true`인 유효 이메일만 허용하고, 같은 이메일의 기존 계정은 자동 연결하지 않습니다.
 - 기존 Google 사용자의 저장 프로필은 claim 변경으로 자동 갱신하지 않습니다.
-- `GOOGLE_AUTH_ENABLED=false`가 기본값이며 DB migration과 Stage 실기기 검증 후 환경별로 활성화합니다.
+- Google 로그인은 feature flag 없이 항상 활성화되며 서버 시작 전에 Web OAuth Client ID를 검증합니다.
 - API key·Web client secret·Google access token은 필요하지 않습니다. 상세 설정과 rollout은 `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`를 따릅니다.
 
 ### 회원 탈퇴 구조
@@ -522,11 +524,11 @@ export async function handler(req: AuthenticatedRequest, res: Response) {
   - `POST /api/v1/auth/apple/challenge`에서 일회성 state/nonce를 발급
   - `POST /api/v1/auth/apple`에서 code 교환과 JWKS/claim 검증 후 ShiftMate JWT 발급
   - state/nonce는 hash만 저장하고 외부 refresh token은 AES-256-GCM 암호문으로 분리 저장
-  - 기본 `APPLE_AUTH_ENABLED=false`, 동일 이메일 기존 계정은 자동 연결하지 않음
+  - 항상 활성, 동일 이메일 기존 계정은 자동 연결하지 않음
 - **Google 로그인**: `src/services/googleService.ts`
   - `POST /api/v1/auth/google/token`에서 공식 라이브러리로 ID Token의 서명·issuer·audience·만료·verified email 검증
   - 검증된 `sub`를 `users.google_id`로 저장하고 신규 가입 전체를 transaction으로 처리
-  - 기본 `GOOGLE_AUTH_ENABLED=false`, 동일 이메일 기존 계정은 자동 연결하지 않음
+  - 항상 활성, 동일 이메일 기존 계정은 자동 연결하지 않음
 
 ### 3.5 DB 접근 규칙
 

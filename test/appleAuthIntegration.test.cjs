@@ -46,7 +46,6 @@ if (process.env.RUN_APPLE_AUTH_INTEGRATION !== "true") {
   );
 
   process.env.NODE_ENV = "test";
-  process.env.APPLE_AUTH_ENABLED = "true";
   process.env.APPLE_TEAM_ID = "TEAMID1234";
   process.env.APPLE_KEY_ID = "KEYID12345";
   process.env.APPLE_IOS_CLIENT_ID = "com.hspark.shiftmate";

@@ -2,6 +2,20 @@
 
 ## 2026-08-14
 
+### [DONE] develop 브랜치 Apple·Google 로그인 상시 활성화 적용
+
+- **목적**: 배포 `main` 전용 파일을 제외하고 Apple·Google 로그인 상시 활성화 개발 변경을 공개 `develop` 브랜치에 반영한다.
+- **변경**:
+  - Apple·Google 서비스의 boolean gate와 `*_AUTH_DISABLED` 오류를 제거하고 항상 활성화
+  - `.env.example`에서 두 flag를 제거하고 필수 OAuth 설정을 시작 전에 항상 검증
+  - OpenAPI, 범용 Google rollback 안내, 단위·통합 테스트와 공개 Apple/Google/OAuth 문서를 상시 활성 계약으로 동기화
+  - ADR-0026으로 feature flag 제거와 운영 계층 긴급 차단 정책을 기록
+- **영향범위**: 공개 애플리케이션 코드와 문서. 비공개 `deploy/`, 환경별 pgAdmin 파일, CI/CD 운영 정보는 제외한다.
+- **파일**: `.env.example`, `src/{config/environment.ts,services/appleService.ts,services/googleService.ts,openapi/appleAuthOpenApi.json,openapi/googleAuthOpenApi.json}`, `migrations/rollback_google_auth_support.sql`, `test/{appleAuth,appleAuthIntegration,googleAuth,googleAuthIntegration}.test.cjs`, `_docs/{PROJECT_CONTEXT,DECISIONS,APPLE_SIGN_IN_SERVER_GUIDE,GOOGLE_SIGN_IN_SERVER_GUIDE,OAUTH_API_GUIDE,WORKLOG}.md`
+- **테스트**: `npm test` 41 pass, 명시적 integration 6 skip, 0 fail. TypeScript build와 공개 인증 계약 테스트 통과.
+- **롤백**: develop 전용 커밋을 revert한다.
+- **다음**: develop 전용 diff에 `deploy/`, 환경별 pgAdmin/CI/CD 파일이 없음을 재확인하고 `origin/develop`에 커밋·푸시한다.
+
 ### [DONE] 회원 탈퇴 서버 기능 구현
 
 - **목적**: 승인된 회원 탈퇴 설계를 실제 migration, API, worker, provider 연동, Redis purge와 회귀 테스트로 구현한다.

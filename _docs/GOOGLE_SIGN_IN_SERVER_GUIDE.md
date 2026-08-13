@@ -2,7 +2,7 @@
 
 ## 범위
 
-Flutter가 전달한 Google ID Token을 서버가 공식 `google-auth-library`로 검증한 뒤 기존 ShiftMate Access/Refresh Token을 발급합니다. 기능은 기본적으로 비활성화합니다.
+Flutter가 전달한 Google ID Token을 서버가 공식 `google-auth-library`로 검증한 뒤 기존 ShiftMate Access/Refresh Token을 발급합니다. 로그인 endpoint는 feature flag 없이 항상 활성화됩니다.
 
 ## 인증 흐름
 
@@ -40,4 +40,4 @@ npm run test:google-integration
 
 ## 롤백
 
-먼저 `GOOGLE_AUTH_ENABLED=false`로 신규 요청을 차단합니다. nullable `google_id` 컬럼과 partial unique index는 애플리케이션 롤백 동안 유지합니다. 연결 데이터가 없고 별도 승인을 받은 경우에만 제공된 rollback SQL을 사용합니다.
+프록시/WAF 또는 이전 이미지로 신규 요청을 차단합니다. nullable `google_id` 컬럼과 partial unique index는 애플리케이션 롤백 동안 유지합니다. 연결 데이터가 없고 별도 승인을 받은 경우에만 제공된 rollback SQL을 사용합니다.

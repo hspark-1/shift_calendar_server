@@ -21,7 +21,7 @@ SELECT current_database() = :'expected_database' AS database_matches
 
 \if :confirm_google_auth_disabled
 \else
-  DO $guard$ BEGIN RAISE EXCEPTION 'GOOGLE_AUTH_ENABLED=false 확인이 필요합니다.'; END $guard$;
+  DO $guard$ BEGIN RAISE EXCEPTION 'Google 로그인 요청 차단과 이전 이미지 배포 확인이 필요합니다.'; END $guard$;
 \endif
 
 \if :{?confirm_google_auth_support_drop}
@@ -38,7 +38,7 @@ DO $zero_row_guard$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.users WHERE google_id IS NOT NULL) THEN
     RAISE EXCEPTION
-      'Google auth rollback 중단: google_id 데이터가 존재합니다. 기능 플래그 비활성과 이전 서버 이미지만 사용하세요.';
+      'Google auth rollback 중단: google_id 데이터가 존재합니다. 요청 차단과 이전 서버 이미지만 사용하세요.';
   END IF;
 END;
 $zero_row_guard$;

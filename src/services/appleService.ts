@@ -14,7 +14,6 @@ import {
 import { sequelize } from "../config/database";
 import {
   getAppleTokenEncryptionKey,
-  getBooleanEnvironmentVariable,
   getPositiveIntegerEnvironmentVariable,
   getRequiredEnvironmentVariable,
 } from "../config/environment";
@@ -43,8 +42,7 @@ export type AppleAuthErrorCode =
   | "APPLE_EMAIL_UNAVAILABLE"
   | "APPLE_REFRESH_TOKEN_UNAVAILABLE"
   | "ACCOUNT_LINK_REQUIRED"
-  | "APPLE_UPSTREAM_UNAVAILABLE"
-  | "APPLE_AUTH_DISABLED";
+  | "APPLE_UPSTREAM_UNAVAILABLE";
 
 export class AppleAuthError extends Error {
   constructor(
@@ -182,19 +180,8 @@ export class AppleService {
   }
 
   initialize(): void {
-    if (!getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false)) return;
     this.getPrivateKey();
     getAppleTokenEncryptionKey();
-  }
-
-  private assertEnabled(): void {
-    if (!getBooleanEnvironmentVariable("APPLE_AUTH_ENABLED", false)) {
-      throw new AppleAuthError(
-        "APPLE_AUTH_DISABLED",
-        503,
-        "Apple 로그인이 현재 비활성화되어 있습니다.",
-      );
-    }
   }
 
   resolveAppleClient(platform: OAuthLoginPlatform): AppleClientConfiguration {
@@ -220,7 +207,6 @@ export class AppleService {
   async createChallenge(
     platform: OAuthLoginPlatform,
   ): Promise<AppleChallengeResponse> {
-    this.assertEnabled();
     const client = this.resolveAppleClient(platform);
     const nonce = this.random_bytes(32).toString("base64url");
     const state = this.random_bytes(32).toString("base64url");
@@ -257,7 +243,6 @@ export class AppleService {
   async buildAndroidCallbackRedirect(
     callback: Record<string, unknown>,
   ): Promise<string> {
-    this.assertEnabled();
     const state = typeof callback.state === "string" ? callback.state : "";
     const challenge = await OAuthLoginChallenge.findOne({
       where: {
@@ -291,7 +276,6 @@ export class AppleService {
   async completeLogin(
     input: CompleteAppleLoginInput,
   ): Promise<CompleteAppleLoginResult> {
-    this.assertEnabled();
     const challenge = await this.consumeChallenge(
       input.platform,
       input.state,

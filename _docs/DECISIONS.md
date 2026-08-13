@@ -1288,3 +1288,47 @@ Flutter가 전달하는 Google ID Token의 진위를 서버가 확인하고 기�
 - Production 활성 전 개인정보 보존 의무와 완료 SLA를 제품·법무에서 확정
 - Google/Naver도 서버 중앙 revoke가 필요해지면 provider token 암호화 저장과 기존 사용자 재동의를 별도 ADR로 설계
 - Stage Apple/Kakao 실제 계정, Redis 장애와 worker crash E2E를 통과한 뒤에만 환경별 endpoint와 Apple 로그인 gate 활성화
+
+---
+
+## ADR-0026: Apple·Google 로그인 서버 feature flag 제거
+
+### 배경(문제)
+
+Apple 계정 삭제/revoke와 Google 서버 검증 구현이 완료된 뒤에도 `APPLE_AUTH_ENABLED`, `GOOGLE_AUTH_ENABLED`가 남아 있어 환경별 boolean 값과 런타임 활성 상태가 어긋날 수 있었습니다.
+
+### 선택지(대안)
+
+1. 두 boolean feature flag 유지
+2. 기본값만 `true`로 변경
+3. 두 flag를 제거하고 필수 OAuth 설정을 서버 시작 전에 항상 검증
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다. Apple·Google 로그인 endpoint는 항상 활성화하고 `.env` boolean 토글을 사용하지 않습니다.**
+
+- Google은 `GOOGLE_SERVER_CLIENT_ID`를 항상 필수 검증
+- Apple API는 Team/Key/Client/redirect, `.p8`, 32바이트 encryption key를 항상 필수 검증
+- 긴급 차단은 feature flag가 아니라 프록시/WAF 또는 이전 이미지 rollback으로 수행
+
+### 근거(왜)
+
+- 배포 설정과 런타임 활성 상태를 하나로 고정해 boolean 값 파싱 실패를 제거
+- 잘못 구성된 OAuth를 요청 시점까지 숨기지 않고 시작 전에 명확히 실패
+- 인증 API 계약에서 도달 불가능한 `*_AUTH_DISABLED` 응답 제거
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- `.env`에 `APPLE_AUTH_ENABLED`, `GOOGLE_AUTH_ENABLED`가 필요하지 않음
+- 모든 API 실행 환경에 Apple secret과 Google client ID가 준비되어야 함
+- OAuth만 즉시 끄는 애플리케이션 토글은 사라지므로 긴급 차단 절차를 운영 계층에서 수행해야 함
+
+### 구현 위치
+
+- `src/config/environment.ts`
+- `src/services/{appleService,googleService}.ts`
+- `src/openapi/{appleAuthOpenApi,googleAuthOpenApi}.json`
+
+### 추후 과제(언제 다시 평가)
+
+- 공급자 장기 장애로 운영 계층 차단이 반복되면 별도 circuit breaker 정책을 검토

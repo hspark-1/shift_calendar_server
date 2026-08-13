@@ -2,7 +2,7 @@
 
 ## 범위
 
-서버가 Apple authorization code와 identity token을 검증한 뒤 기존 ShiftMate Access/Refresh Token을 발급합니다. 기능은 기본적으로 비활성화되어 있으며 필요한 DB 스키마와 환경변수가 준비된 환경에서만 활성화합니다.
+서버가 Apple authorization code와 identity token을 검증한 뒤 기존 ShiftMate Access/Refresh Token을 발급합니다. 로그인 endpoint는 feature flag 없이 항상 활성화되며 필요한 DB 스키마와 환경변수를 시작 전에 검증합니다.
 
 ## 인증 흐름
 
@@ -52,11 +52,11 @@ psql "$DATABASE_URL" -X \
 - 기존 `refresh_tokens`: ShiftMate JWT refresh token SHA-256 hash
 - migration은 add-only이며 API 시작 시 자동 실행하지 않습니다.
 
-rollback은 두 신규 테이블이 모두 0건이고 별도 승인을 받은 경우에만 허용합니다. 로그인 데이터가 생긴 뒤에는 테이블을 삭제하지 말고 feature flag와 이전 이미지로 복구합니다.
+rollback은 두 신규 테이블이 모두 0건이고 별도 승인을 받은 경우에만 허용합니다. 로그인 데이터가 생긴 뒤에는 테이블을 삭제하지 말고 요청 차단과 이전 이미지로 복구합니다.
 
 ## Apple Developer Portal 설정
 
-`APPLE_AUTH_ENABLED=true` 전환 전에 다음을 확인합니다.
+서버 배포 전에 다음을 확인합니다.
 
 1. 앱의 Primary App ID에서 Sign in with Apple을 활성화합니다.
 2. 환경별 Services ID와 HTTPS Return URL을 각각 등록합니다.
@@ -74,7 +74,6 @@ rollback은 두 신규 테이블이 모두 0건이고 별도 승인을 받은 �
 필요한 변수 이름과 placeholder는 `.env.example`을 따릅니다.
 
 ```env
-APPLE_AUTH_ENABLED=false
 APPLE_TEAM_ID=<APPLE_TEAM_ID>
 APPLE_KEY_ID=<APPLE_KEY_ID>
 APPLE_IOS_CLIENT_ID=<IOS_BUNDLE_ID>
@@ -89,15 +88,14 @@ APPLE_JWKS_CACHE_SECONDS=21600
 - 실제 Team ID, Key ID, client ID, 도메인, 암호화 키와 private key는 저장소에 기록하지 않습니다.
 - 환경별 Services ID, redirect URI와 encryption key를 분리합니다.
 - encryption key는 기존 Apple refresh token 복호화에 필요한 영속 키이므로 백업·복구 절차 없이 교체하지 않습니다.
-- `APPLE_AUTH_ENABLED=false`일 때는 Apple 전용 비밀값 없이 기존 서버가 기동할 수 있어야 합니다.
-- 활성 환경의 API 컨테이너에만 `.p8`을 read-only mount하고 worker에는 전달하지 않습니다.
+- API 컨테이너에만 `.p8`을 read-only mount하고 cache/push worker에는 전달하지 않습니다.
 
 ## 단계별 배포
 
 1. Portal의 App ID, 환경별 Services ID/Return URL과 private key를 준비합니다.
 2. 환경별 DB 백업 후 preflight → migration → postflight를 실행하고 결과를 비공개 운영 기록에 남깁니다.
-3. Apple secret 없이 `APPLE_AUTH_ENABLED=false` 이미지부터 배포하고 기존 인증 및 `503 APPLE_AUTH_DISABLED`를 검증합니다.
-4. 검증 환경에만 secret과 Apple 환경변수를 주입하고 flag를 활성화합니다.
+3. 검증 환경에 Apple secret과 필수 환경변수를 주입한 뒤 이미지를 배포하고 기존 인증과 Apple endpoint를 검증합니다.
+4. 검증 완료 후 운영 환경에도 동일한 필수 구성을 준비해 배포합니다.
 5. iOS/Android 실기기에서 신규/기존/취소/만료/replay/relay email/callback을 검증합니다.
 6. 계정 삭제와 Apple token revoke를 별도 구현·검증한 뒤 운영 활성화를 승인합니다.
 
@@ -112,7 +110,7 @@ npm run test:apple-integration
 
 ## 롤백
 
-먼저 `APPLE_AUTH_ENABLED=false`로 신규 요청을 차단하고 이전 애플리케이션 이미지를 복구합니다. 스키마는 add-only이므로 애플리케이션 롤백 동안 유지합니다. OAuth 데이터가 없고 별도 승인을 받은 경우에만 제공된 rollback SQL을 사용합니다.
+프록시/WAF 또는 이전 이미지로 신규 요청을 차단하고 이전 애플리케이션 이미지를 복구합니다. 스키마는 add-only이므로 애플리케이션 롤백 동안 유지합니다. OAuth 데이터가 없고 별도 승인을 받은 경우에만 제공된 rollback SQL을 사용합니다.
 
 ## 파일 역할
 
