@@ -109,7 +109,7 @@ migrations/pgadmin_stage_add_group_feature.sql
 파일 상단 `INSERT INTO stage_group_migration_context`의 다음 세 값만 변경하고, 부분 선택하지 않은 상태에서 전체 파일을 Execute(F5)합니다.
 
 - `REPLACE_WITH_ACTUAL_STAGE_DB_NAME` → pgAdmin에서 선택한 실제 Stage DB 이름
-- `REPLACE_WITH_RESTORABLE_BACKUP_ID` → 홈서버 Docker PostgreSQL에서 실제 생성하고 복원 확인한 `pg_dump` 백업 파일명. 예: `pg_dump:shiftmate_stage_before_group_20260801.backup` (랜덤값 금지)
+- `REPLACE_WITH_RESTORABLE_BACKUP_ID` → 비공개 실행 환경 Docker PostgreSQL에서 실제 생성하고 복원 확인한 `pg_dump` 백업 파일명. 예: `pg_dump:[private database].backup` (랜덤값 금지)
 - `REPLACE_WITH_APPLY_GROUP_FEATURE_TO_STAGE` → `APPLY_GROUP_FEATURE_TO_STAGE`
 
 이 SQL은 psql meta-command 없이 하나의 transaction에서 preflight → public schema DDL → strict postflight를 수행합니다. 중간 검증이 실패하면 마지막 `COMMIT`은 적용되지 않고 전체 DDL이 rollback됩니다. Data Output의 대상 DB, DB 사용자, PostgreSQL 버전, 백업 식별자, 데이터 건수와 제약/index 결과를 저장합니다.
@@ -126,7 +126,7 @@ psql "$STAGE_DATABASE_URL" \
   -f migrations/stage_group_feature_preflight.sql
 ```
 
-DB 백업과 복원 가능 여부를 확인하고 정본 DDL checksum을 대조합니다. 현재 운영 환경은 AWS RDS가 아니라 홈서버 Docker `postgres:16`이므로 `backup_reference`에는 RDS snapshot ID가 아닌 실제 `pg_dump`/pgAdmin Custom 백업 파일명을 기록합니다.
+DB 백업과 복원 가능 여부를 확인하고 정본 DDL checksum을 대조합니다. 현재 운영 환경은 AWS RDS가 아니라 비공개 실행 환경 Docker `postgres:16`이므로 `backup_reference`에는 RDS snapshot ID가 아닌 실제 `pg_dump`/pgAdmin Custom 백업 파일명을 기록합니다.
 
 ```bash
 shasum -a 256 migrations/add_group_feature.sql

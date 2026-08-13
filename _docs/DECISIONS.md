@@ -807,7 +807,7 @@ Nginx 뒤의 Express 인스턴스 3개를 운영하려면 컨테이너 식별, �
 ### 추후 과제(언제 다시 평가)
 
 - Nginx 설정 단계에서 전체 인스턴스 공통 `limit_req` 추가
-- 다중 홈서버로 확장하거나 프록시를 우회하는 내부 클라이언트가 생기면 Redis/PostgreSQL 기반 전역 rate limit 재평가
+- 다중 비공개 실행 환경로 확장하거나 프록시를 우회하는 내부 클라이언트가 생기면 Redis/PostgreSQL 기반 전역 rate limit 재평가
 
 ---
 
@@ -815,7 +815,7 @@ Nginx 뒤의 Express 인스턴스 3개를 운영하려면 컨테이너 식별, �
 
 ### 배경(문제)
 
-Intel N100 홈서버에서 동일 Express 인스턴스를 3개 실행하려면 재현 가능한 `linux/amd64` 이미지, TypeScript 빌드 단계와 런타임 단계의 분리, 비밀값 제외, 비루트 실행, Docker health check와 SIGTERM 종료 계약이 필요합니다. 최초 이미지 빌드에서는 운영 의존성 취약점도 확인되었습니다.
+self-hosted x86_64 환경에서 동일 Express 인스턴스를 3개 실행하려면 재현 가능한 `linux/amd64` 이미지, TypeScript 빌드 단계와 런타임 단계의 분리, 비밀값 제외, 비루트 실행, Docker health check와 SIGTERM 종료 계약이 필요합니다. 최초 이미지 빌드에서는 운영 의존성 취약점도 확인되었습니다.
 
 ### 선택지(대안)
 
@@ -870,7 +870,7 @@ Intel N100 홈서버에서 동일 Express 인스턴스를 3개 실행하려면 �
 
 - Sequelize 7 전환 또는 Sequelize 6의 uuid 의존성 상향 시 override 제거 검토
 - 이미지 전송 전 digest와 파일 크기 기록
-- 홈서버에서 amd64 네이티브 실행, DB 연결, 메모리 사용량 재검증
+- 비공개 실행 환경에서 amd64 네이티브 실행, DB 연결, 메모리 사용량 재검증
 
 ---
 
@@ -935,83 +935,6 @@ Flutter 색상 선택기는 기준 색상을 흰색과 혼합해 농도가 적�
 
 ---
 
-## ADR-0019: 별도 배포 저장소와 GHCR 기반 Blue/Green 운영 배포
-
-### 배경(문제)
-
-홈서버의 Center Express 인스턴스 3개와 Stage 인스턴스 1개를 같은 이미지로 교체해야 하며, 빌드 실패나 health 실패가 기존 운영 상태를 남기지 않아야 합니다. Self-hosted runner에는 Docker와 Nginx를 변경할 권한이 필요하지만 저장소 워크플로가 임의 root 명령을 실행할 수 있게 해서는 안 됩니다. 또한 애플리케이션 개발 원격과 운영 배포 자동화의 변경 경계를 분리해야 합니다.
-
-### 선택지(대안)
-
-1. 별도 배포 저장소에서 애플리케이션 소스와 고정 배포 자동화를 함께 관리하고 GHCR·Blue/Green 전환 사용
-2. 애플리케이션 저장소의 push마다 홈서버에서 직접 pull·build·restart
-3. 홈서버에서 SSH 기반 수동 배포
-4. Kubernetes 또는 외부 관리형 배포 서비스 도입
-
-### 결정(무엇을 선택)
-
-**`hspark-1/shift_calendar_server-deploy`의 `main`을 운영 배포 기준으로 사용하고, commit SHA 이미지와 홈서버 Blue/Green 전환을 적용**합니다.
-
-- GitHub Actions는 수동 `workflow_dispatch`, `main`, 확인 체크를 검증
-- GitHub-hosted runner에서 Node 22 빌드 후 `linux/amd64` 이미지를 `sha-<commit>`으로 GHCR에 push
-- 홈서버 self-hosted runner의 sudoers는 root 소유 `/usr/local/sbin/shiftmate-deploy` 경로만 허용하고, 이미지·actor 인자는 스크립트가 엄격히 검증
-- pull한 하나의 불변 image digest를 기존 Stage Compose의 image override에 먼저 적용하고 3201 내부 `/health`를 확인
-- 현재 활성 색상의 반대편 Center API 인스턴스 3개에 같은 digest를 적용하고 내부 `/health`를 모두 확인
-- Nginx upstream reload 후 Center와 Stage 외부 `/api/v1/health`가 모두 성공해야 배포 상태를 확정
-- Center Blue/Green upstream 이름은 `shiftmate_center_api_cluster`, Stage 3201 고정 upstream 이름은 `shiftmate_stage_api_cluster`로 분리
-- Center 동적 upstream 교체는 Stage 고정 upstream snippet을 변경하지 않음
-- 실패 시 Stage image override와 컨테이너, Center upstream·상태 파일·신규 컨테이너를 이전 상태로 복원
-- 롤백도 과거 commit SHA를 대상으로 같은 배포 경로를 재사용
-- DB migration은 이미지 배포와 분리하여 개발자가 수동 실행
-
-### 근거(왜)
-
-- 빌드 실패는 홈서버 상태를 변경하지 않음
-- 신규 인스턴스가 준비된 후에만 트래픽을 전환하므로 중단 시간을 최소화
-- commit 태그를 pull한 뒤 digest로 고정해 실제 실행 이미지를 불변으로 유지
-- 한 번 빌드한 동일 digest를 Stage와 Center에 적용해 환경별 이미지 차이를 방지
-- self-hosted runner를 Docker 그룹에 넣지 않고 검증된 root 스크립트 하나만 허용
-- sudoers command argument wildcard·정규식 지원 여부에 의존하지 않고, 수정 불가능한 root 스크립트의 인자 개수·이미지 형식·actor 검증으로 권한 범위를 제한
-- 별도 배포 원격으로 운영 자동화 변경과 일반 개발 배포 권한을 구분
-
-### 결과/영향(좋은 점/트레이드오프)
-
-**좋은 점**:
-
-- Stage 1개와 Center 3개의 내부 health 및 양쪽 외부 health를 모두 검증
-- 정상 상태의 Stage 1개와 Center 3개가 같은 image digest를 사용
-- 배포와 롤백의 절차 및 실패 복구 경로 통일
-- 운영 `.env`, DB 암호, JWT secret을 GitHub에 전달하지 않음
-- Blue/Green 상태와 이미지 digest를 `/opt/shiftmate/.deploy.env`에서 명시적으로 추적
-
-**트레이드오프**:
-
-- 배포 저장소의 애플리케이션 소스를 운영 배포 대상 commit과 동기화해야 함
-- 한 번에 두 색상의 컨테이너가 기동되는 동안 추가 CPU·메모리 필요
-- Stage는 단일 컨테이너 재생성이므로 배포 중 짧은 중단이 발생할 수 있음
-- 이미지 롤백은 DB schema를 되돌리지 못하므로 migration은 하위 호환 순서를 지켜야 함
-- 홈서버 runner, Nginx include, sudoers를 최초 1회 수동 구성해야 함
-- root 소유 배포 스크립트의 인자 검증이 sudo 권한 안전성의 일부이므로 스크립트 권한과 검증 로직을 함께 유지해야 함
-
-### 구현 위치
-
-- **배포 워크플로**: `.github/workflows/deploy-production.yml`
-- **롤백 워크플로**: `.github/workflows/rollback-production.yml`
-- **운영 Compose**: `deploy/compose.production.yaml`
-- **Stage 배포 설정 예시**: `deploy/stage.deploy.env.example`
-- **배포 엔진**: `deploy/shiftmate-deploy`
-- **최초 전환**: `deploy/shiftmate-bootstrap`
-- **Center Nginx upstream**: `deploy/nginx/shiftmate-upstream-blue.conf`, `deploy/nginx/shiftmate-upstream-green.conf`
-- **Stage Nginx upstream**: `deploy/nginx/shiftmate-stage-upstream.conf`
-- **Runner sudoers**: `deploy/sudoers/github-runner-shiftmate`
-- **운영 절차**: `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
-
-### 추후 과제(언제 다시 평가)
-
-- 자동 테스트가 추가되면 이미지 push 전 CI 단계에 포함
-- 운영 migration 자동화가 필요해지면 expand/contract 호환성과 별도 승인 단계를 먼저 설계
-- 다중 홈서버 또는 지역 이중화가 필요해지면 현재 단일 호스트 Blue/Green 구조 재평가
-
 ---
 
 ## ADR-0020: 공유 Redis 월별 근무표 캐시와 PostgreSQL Outbox
@@ -1065,12 +988,12 @@ Flutter 색상 선택기는 기준 색상을 흰색과 혼합해 농도가 적�
 - **캐시/Redis**: `src/config/redis.ts`, `src/services/workShiftMonthCacheService.ts`
 - **정합성/worker**: `src/services/workShiftCacheInvalidationService.ts`, `src/workers/workShiftCacheWorker.ts`
 - **DB**: `migrations/add_work_shift_month_cache_support.sql`
-- **배포**: `deploy/compose.production.yaml`, `deploy/shiftmate-deploy`
+- **배포**: `[private deployment file]`, `[private deployment file]`
 
 ### 추후 과제(언제 다시 평가)
 
 - events 조회가 실제 DB 병목으로 확인되면 기간 겹침과 visibility를 별도 설계한 뒤 캐시 범위 확대
-- 다중 홈서버/Redis HA가 필요해지면 managed Redis 또는 Sentinel/Cluster 전환 검토
+- 다중 비공개 실행 환경/Redis HA가 필요해지면 managed Redis 또는 Sentinel/Cluster 전환 검토
 - Outbox 지연과 hit ratio를 장기 수집할 관측 시스템 도입
 
 ---
@@ -1133,7 +1056,7 @@ Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 �
 
 ### 추후 과제(언제 다시 평가)
 
-- Stage 측정에서 그룹 aggregate DB query time이 병목일 때만 set-based multi-owner cache 설계
+- 격리 환경 측정에서 그룹 aggregate DB query time이 병목일 때만 set-based multi-owner cache 설계
 - 외부 push 인프라가 도입되면 `invitation_id` idempotency key 기반 비동기 발송 추가
 - 20명·100일 한도나 그룹별 공개 정책 요구가 변경될 때 스키마와 개인정보 노출 위험 재평가
 
@@ -1161,7 +1084,7 @@ Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 �
 - 재시도는 같은 device에 고정하고 전송 직전 최신 target 재조회
 - 같은 job의 차순위 기기 fallback 없음
 - 10초 지수 backoff+jitter, 15분 상한, 6회/1시간 TTL
-- Stage/Production DB·Firebase project·credential·기기 데이터를 분리
+- 환경별 DB·Firebase project·credential·기기 데이터를 분리
 - exactly-once가 아닌 at-least-once를 명시하고 collapse ID+클라이언트 중복 제거 사용
 
 ### 근거(왜)

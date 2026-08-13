@@ -2,6 +2,23 @@
 
 ## 2026-08-13
 
+### [DONE] 공개 저장소 운영 식별자 정리
+
+- **목적**: 기존 공개 `develop` 문서와 테스트에 남아 있는 비공개 배포 저장소·호스트 경로·환경별 식별자를 현재 branch tip에서 제거
+- **변경**:
+  - 운영 전용 배포 가이드를 공개/비공개 경계, 범용 검증·DB 변경·롤백 원칙만 담은 문서로 교체
+  - 비공개 배포 저장소 구조를 기록한 ADR-0019와 별도 저장소 파일을 전제로 한 배포 정적 테스트 제거
+  - PROJECT_CONTEXT의 환경별 CI/CD 상세를 공개 저장소 배포 경계로 교체
+  - 기존 WORKLOG·그룹 문서·ADR의 저장소명, 호스트 경로, DB/upstream/runner 식별자와 환경별 파일명을 일반화
+- **영향범위**: 공개 문서와 배포 정적 테스트만 변경하며 런타임 코드에는 영향 없음
+- **파일**: `_docs/{DEPLOYMENT_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG,GROUP_API_GUIDE,GROUP_RUNTIME_VERIFICATION_CHECKLIST}.md`, `test/deploymentCacheRollout.test.cjs`
+- **테스트**:
+  - `npm test`: 36 pass, 5개의 명시적 integration skip, 0 fail
+  - 금지한 저장소명·호스트 경로·DB/upstream/runner 식별자와 private key/token 패턴 미검출
+  - `git diff --check` 통과
+- **롤백**: 본 문서 정리 커밋을 revert
+- **다음**: 과거 Git commit에 남은 값이 실제 credential인지 확인하고, 실제 값이면 먼저 회전한 뒤 별도 승인된 history rewrite 수행
+
 ### [DONE] 공개 develop 브랜치용 인증 기능 복구
 
 - **목적**: 별도 비공개 브랜치에서 구현된 Apple·Google 인증 기능 중 애플리케이션 코드와 공개 가능한 기술 문서만 공개 `develop` 기준으로 재구성
@@ -51,7 +68,7 @@
 - **목적**: 그룹 P0/P1 서버 구현, PostgreSQL 16 검증 환경, OpenAPI와 프론트 연동 문서를 하나의 재현 가능한 커밋으로 정리해 `origin/develop` 반영을 준비
 - **변경**:
   - staged/unstaged/untracked 변경 범위와 비밀값·로컬 산출물 포함 여부 감사
-  - 홈서버 Docker PostgreSQL 16 환경에 맞게 공유 환경변수 예시를 `DB_SSL=false`로 교정하고 백업 식별자는 실제 `pg_dump`/pgAdmin 백업 파일명을 사용하도록 명시
+  - 비공개 실행 환경 Docker PostgreSQL 16 환경에 맞게 공유 환경변수 예시를 `DB_SSL=false`로 교정하고 백업 식별자는 실제 `pg_dump`/pgAdmin 백업 파일명을 사용하도록 명시
   - gitignore 대상인 migration 파일이 원격 체크아웃에 전부 없으면 정적 테스트를 명시적으로 skip하고 일부만 있으면 실패하도록 기준선 보정
   - 격리된 PostgreSQL 16·Redis 컨테이너에서 그룹 및 기존 캐시 통합 테스트를 실행하고 종료 후 검증 컨테이너 제거
 - **영향범위**: 그룹 기능 전체 변경의 Git 이력과 커밋 전 검증. 실제 Stage/Center DB migration 또는 API 배포는 수행하지 않음
@@ -256,7 +273,7 @@
   - 배포 순서·통합 rollback 정적 테스트를 추가하고 API 전환 판단을 PostgreSQL readiness로 변경
   - 1회 bootstrap은 기존 이미지에 없는 worker를 시작하지 않고, 첫 캐시 코드 자동 배포부터 API와 같은 digest의 worker를 시작하도록 스크립트·가이드 정합성 교정
 - **영향범위**: 월별 근무표 캐시와 Outbox worker의 경계 조건, API readiness 기반 배포 판단, CI 회귀 테스트와 운영 문서
-- **파일**: `src/services/workShiftMonthCacheService.ts`, `test/cacheIntegration.test.cjs`, `test/deploymentCacheRollout.test.cjs`, `deploy/shiftmate-deploy`, `deploy/shiftmate-bootstrap`, `_docs/PROJECT_CONTEXT.md`, 루트/정본 배포 가이드
+- **파일**: `src/services/workShiftMonthCacheService.ts`, `test/cacheIntegration.test.cjs`, `test/deploymentCacheRollout.test.cjs`, `[private deployment file]`, `[private deployment file]`, `_docs/PROJECT_CONTEXT.md`, 루트/정본 배포 가이드
 - **테스트**:
   - `npm test`: TypeScript build, 단위·배포 정적 테스트 9건 성공(통합 테스트 진입점 1건은 의도대로 skip)
   - 격리 PostgreSQL 16/Redis 7.4 `npm run test:integration`: 23건 전부 성공
@@ -283,7 +300,7 @@
   - `src/config/redis.ts`, `src/services/workShiftMonthCacheService.ts`, `src/services/workShiftCacheInvalidationService.ts`
   - `src/workers/workShiftCacheWorker.ts`, `src/models/WorkShiftMonthState.ts`, `src/models/WorkShiftCacheOutbox.ts`
   - `migrations/add_work_shift_month_cache_support.sql`, `migrations/final_schema.sql`, `AGENTS.md`, `schema.drawio`, `visibility_flow.drawio`
-  - `deploy/compose.production.yaml`, `deploy/shiftmate-deploy`, `deploy/shiftmate-bootstrap`, `.github/workflows/deploy-production.yml`
+  - `[private deployment file]`, `[private deployment file]`, `[private deployment file]`, `[private workflow]`
   - `test/workShiftMonthCacheService.test.cjs`, `test/cacheIntegration.test.cjs`, `test/deploymentCacheRollout.test.cjs`, `test/fixtures/cacheIntegrationSchema.sql`
 - **테스트**:
   - `npm test`: TypeScript build와 단위·배포 정적 테스트 9건 성공
@@ -297,22 +314,22 @@
 
 ### [DONE] Runner sudoers·Compose profile 검증 교정
 
-- **목적**: 홈서버 sudo가 인자 wildcard/정규식을 지원하지 않는 환경에서도 Runner가 검증된 배포 스크립트만 호출하게 하고, profile 기반 Center 서비스 6개를 문서 명령으로 정확히 검증
+- **목적**: 비공개 실행 환경 sudo가 인자 wildcard/정규식을 지원하지 않는 환경에서도 Runner가 검증된 배포 스크립트만 호출하게 하고, profile 기반 Center 서비스 6개를 문서 명령으로 정확히 검증
 - **변경**:
   - sudoers 원본에서 지원되지 않는 인자 wildcard를 제거하고 root 소유 배포 스크립트의 엄격한 인자 검증을 보안 경계로 명시
   - Center Compose 검증·장애 로그 명령에 `blue`, `green` profile 추가
   - 루트/정본 가이드, 프로젝트 컨텍스트, ADR-0019 동기화
-- **영향범위**: Self-hosted Runner sudo 권한 설치 및 Center Compose 운영 검증
+- **영향범위**: 비공개 runner sudo 권한 설치 및 Center Compose 운영 검증
 - **테스트**:
-  - 로컬 `visudo -cf deploy/sudoers/github-runner-shiftmate` 파싱 성공
+  - 로컬 `visudo -cf [private deployment file]` 파싱 성공
   - `--profile blue --profile green config --services`에서 Center 서비스 6개 모두 확인
   - 배포·bootstrap Bash 문법 및 workflow·Compose YAML 파싱 성공
   - `DEPLOY_README.md`와 정본 가이드 내용 일치, Markdown code fence 80개 균형 확인
   - wildcard 레거시 규칙 제거와 대상 파일 `git diff --check` 통과
 - **파일**:
-  - `deploy/sudoers/github-runner-shiftmate`
+  - `[private deployment file]`
   - `DEPLOY_README.md`
-  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `[private deployment guide]`
   - `_docs/PROJECT_CONTEXT.md`
   - `_docs/DECISIONS.md`
   - `_docs/WORKLOG.md`
@@ -322,9 +339,9 @@
 
 - **목적**: 오래된 `DEPLOY_README.md`를 현재 Stage 1개·Center 3개 동일 이미지 자동 배포 흐름과 배포 전용 저장소 기준으로 교정
 - **변경**:
-  - 배포 저장소, 홈서버 파일 설치, Stage 설정, Center·Stage Nginx upstream, 첫 배포·롤백·장애 대응 절차를 정본 가이드와 동기화
+  - 배포 저장소, 비공개 실행 환경 파일 설치, Stage 설정, Center·Stage Nginx upstream, 첫 배포·롤백·장애 대응 절차를 정본 가이드와 동기화
   - `PROJECT_CONTEXT.md`에 루트 배포 가이드의 역할·의존성·사용 예 기록
-- **영향범위**: 홈서버 CI/CD 작업자가 실행하는 배포 준비 및 검증 명령
+- **영향범위**: 비공개 실행 환경 CI/CD 작업자가 실행하는 배포 준비 및 검증 명령
 - **테스트**:
   - `cmp DEPLOY_README.md _docs/CI_CD_DEPLOYMENT_GUIDE.md` 내용 일치 확인
   - 잘못된 `git push origin main`과 애플리케이션 저장소 Runner URL 제거 확인
@@ -332,7 +349,7 @@
   - Markdown 코드 fence 78개가 짝수로 닫히고 대상 파일 `git diff --check` 통과
 - **파일**:
   - `DEPLOY_README.md`
-  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `[private deployment guide]`
   - `_docs/PROJECT_CONTEXT.md`
   - `_docs/WORKLOG.md`
 - **롤백**: `DEPLOY_README.md`와 관련 문서 변경을 이전 내용으로 복원
@@ -344,107 +361,107 @@
 - **목적**: GitHub Actions가 한 번 빌드한 불변 GHCR digest를 Stage 1개와 Center 3개에 순차 적용하고 실패 시 두 환경을 이전 상태로 함께 복원
 - **변경**:
   - 기존 Stage Compose와 애플리케이션 `.env`를 보존하면서 지정 서비스의 image만 덮어쓰는 root 관리 `compose.deploy.yaml` 생성 기능 추가
-  - 실제 Stage Compose 서비스명과 외부 health URL을 홈서버에서 확정하도록 `stage.deploy.env.example` 추가 및 `root:root 600` 검증 적용
+  - 실제 Stage Compose 서비스명과 외부 health URL을 비공개 실행 환경에서 확정하도록 `[private deployment config]` 추가 및 `root:root 600` 검증 적용
   - 배포 스크립트에 Stage 선배포, 3201 내부 health, Center Blue/Green 연속 배포, 양쪽 외부 health, 통합 rollback 추가
   - 부분적인 `docker compose up` 실패도 복구하도록 Stage·Center 변경 플래그를 실행 전에 설정
-  - 배포·롤백 workflow timeout과 표시 문구, 홈서버 설치·검증·복구 가이드, 프로젝트 컨텍스트와 ADR-0019 갱신
+  - 배포·롤백 workflow timeout과 표시 문구, 비공개 실행 환경 설치·검증·복구 가이드, 프로젝트 컨텍스트와 ADR-0019 갱신
 - **영향범위**:
   - Stage 3201 컨테이너 재생성
   - Center Blue/Green 3개 전환
   - 운영 및 Stage rollback
 - **테스트**:
-  - `bash -n deploy/shiftmate-deploy`, `bash -n deploy/shiftmate-bootstrap` 성공
+  - `bash -n [private deployment file]`, `bash -n [private deployment file]` 성공
   - Ruby YAML parser로 배포·롤백 workflow와 운영 Compose 파싱 성공
   - `npm run build` TypeScript 컴파일 성공
   - `--profile blue --profile green`을 명시한 `docker compose config --quiet`, `config --services`로 Center 6개 서비스 구성 검증 성공
   - 임시 Stage Compose와 생성형 override 병합 후 최종 image가 지정 GHCR digest인지 확인
   - Stage/Center 부분 기동, Nginx 전환, 외부 health 실패별 복원 플래그와 실행 순서 정적 검증
 - **파일**:
-  - `.github/workflows/deploy-production.yml`
-  - `.github/workflows/rollback-production.yml`
-  - `deploy/shiftmate-deploy`
-  - `deploy/stage.deploy.env.example`
-  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `[private workflow]`
+  - `[private workflow]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment guide]`
   - `_docs/PROJECT_CONTEXT.md`
   - `_docs/DECISIONS.md`
   - `_docs/WORKLOG.md`
 - **롤백**:
   - 통합 배포 스크립트와 Stage 설정을 이전 커밋으로 복원하고 생성된 Stage override 제거 후 기존 Compose 이미지로 재생성
 - **다음**:
-  - 홈서버에서 Stage 실제 Compose 서비스명과 HTTPS health URL을 확인해 `/opt/shiftmate-stage/.deploy.env`를 설정한 뒤 첫 workflow를 수동 실행
+  - 비공개 실행 환경에서 Stage 실제 Compose 서비스명과 HTTPS health URL을 확인해 `[private deployment path]`를 설정한 뒤 첫 workflow를 수동 실행
 
 ### [DONE] Center·Stage Nginx upstream 이름 분리
 
-- **목적**: 운영 Center Blue/Green과 고정 Stage 프록시가 각각 `shiftmate_center_api_cluster`, `shiftmate_stage_api_cluster`를 사용하도록 Nginx upstream 이름을 명시적으로 분리
+- **목적**: 운영 Center Blue/Green과 고정 Stage 프록시가 각각 `[private upstream]`, `[private upstream]`를 사용하도록 Nginx upstream 이름을 명시적으로 분리
 - **변경**:
-  - Center Blue/Green 정적 snippet과 bootstrap/deploy 동적 렌더링을 `shiftmate_center_api_cluster`로 통일
-  - 기존 Stage 3201을 `shiftmate_stage_api_cluster`로 제공하는 고정 `shiftmate-stage-upstream.conf` 추가
-  - 홈서버에서 Center active snippet과 Stage fixed snippet을 각각 설치·include하고 용도별 `proxy_pass`를 사용하는 절차 추가
+  - Center Blue/Green 정적 snippet과 bootstrap/deploy 동적 렌더링을 `[private upstream]`로 통일
+  - 기존 Stage 3201을 `[private upstream]`로 제공하는 고정 `shiftmate-stage-upstream.conf` 추가
+  - 비공개 실행 환경에서 Center active snippet과 Stage fixed snippet을 각각 설치·include하고 용도별 `proxy_pass`를 사용하는 절차 추가
   - PROJECT_CONTEXT의 파일 역할·의존성과 ADR-0019의 Nginx 라우팅 계약 갱신
 - **영향범위**:
   - Nginx Center/Stage upstream 정의
   - 최초 bootstrap 및 이후 Blue/Green 배포·롤백
 - **테스트**:
-  - `bash -n deploy/shiftmate-bootstrap`, `bash -n deploy/shiftmate-deploy` 성공
+  - `bash -n [private deployment file]`, `bash -n [private deployment file]` 성공
   - 배포 파일에서 레거시 `shiftmate_api_cluster`가 제거되고 Center/Stage 이름만 생성되는 것을 검색으로 확인
   - `nginx:latest`에서 Blue+Stage, Green+Stage snippet 조합 각각 `nginx -t` 성공
 - **파일**:
-  - `deploy/shiftmate-bootstrap`
-  - `deploy/shiftmate-deploy`
-  - `deploy/nginx/shiftmate-upstream-blue.conf`
-  - `deploy/nginx/shiftmate-upstream-green.conf`
-  - `deploy/nginx/shiftmate-stage-upstream.conf`
-  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment guide]`
   - `_docs/PROJECT_CONTEXT.md`
   - `_docs/DECISIONS.md`
   - `_docs/WORKLOG.md`
 - **롤백**:
   - Stage snippet/include를 제거하고 Center upstream 이름과 proxy_pass를 변경 전 이름으로 복원
 - **다음**:
-  - 홈서버 실제 Nginx 설정에서 Center/Stage server block의 `proxy_pass`를 확인한 뒤 가이드 순서로 두 snippet 설치 및 `nginx -t` 수행
+  - 비공개 실행 환경 실제 Nginx 설정에서 Center/Stage server block의 `proxy_pass`를 확인한 뒤 가이드 순서로 두 snippet 설치 및 `nginx -t` 수행
 
 ### [DONE] 배포 자동화 전용 저장소 분리
 
-- **목적**: GitHub Actions 및 홈서버 Blue/Green 배포 파일을 애플리케이션 저장소와 분리하여 `hspark-1/shift_calendar_server-deploy`의 `main` 브랜치에서 관리
+- **목적**: GitHub Actions 및 비공개 실행 환경 Blue/Green 배포 파일을 애플리케이션 저장소와 분리하여 `[private deployment repository]`의 `main` 브랜치에서 관리
 - **변경**:
-  - `shiftmate-cicd-bundle/repository/`의 GitHub Actions, Compose, Nginx, 서버 스크립트를 저장소 루트 `.github/workflows/`, `deploy/`로 이전
-  - 번들 README를 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`로 이전하고 배포 전용 저장소·원격 기준으로 수정
+  - 비공개 배포 번들의 workflow, Compose, proxy, 서버 스크립트를 별도 비공개 저장소 구조로 이전
+  - 번들 README를 `[private deployment guide]`로 이전하고 배포 전용 저장소·원격 기준으로 수정
   - `.dockerignore`에 `.github`, `deploy`를 추가해 운영 이미지 빌드 컨텍스트에서 자동화 파일 제외
   - 존재하지 않는 `actions/checkout@v7`, `actions/setup-node@v7`을 공식 현재 major인 `@v6`으로 수정
   - `PROJECT_CONTEXT.md`에 운영 CI/CD 파일 역할·의존성·사용 예를 추가하고 ADR-0019에 별도 배포 저장소와 Blue/Green 정책 기록
   - 이전 완료 후 `shiftmate-cicd-bundle/` 디렉터리 제거
 - **영향범위**:
   - GitHub Actions 배포·롤백
-  - GHCR 이미지 빌드 및 홈서버 Blue/Green 배포
+  - GHCR 이미지 빌드 및 비공개 실행 환경 Blue/Green 배포
   - 배포 자동화 문서
 - **파일**:
   - `.dockerignore`
-  - `.github/workflows/deploy-production.yml`
-  - `.github/workflows/rollback-production.yml`
-  - `deploy/compose.production.yaml`
-  - `deploy/deploy.env.example`
-  - `deploy/shiftmate-bootstrap`
-  - `deploy/shiftmate-deploy`
-  - `deploy/nginx/shiftmate-upstream-blue.conf`
-  - `deploy/nginx/shiftmate-upstream-green.conf`
-  - `deploy/sudoers/github-runner-shiftmate`
-  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+  - `[private workflow]`
+  - `[private workflow]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment file]`
+  - `[private deployment guide]`
   - `_docs/PROJECT_CONTEXT.md`
   - `_docs/DECISIONS.md`
   - `_docs/WORKLOG.md`
 - **테스트**:
-  - 원격 `deploy/main`이 작업 전 `791498a7af689a6275846b0f1e5fd5ad9ce4320d`임을 확인
+  - 원격 `[private deployment branch]`이 작업 전 `791498a7af689a6275846b0f1e5fd5ad9ce4320d`임을 확인
   - 공개 GitHub API가 배포 저장소에 404를 반환하고 인증된 `git ls-remote`는 성공하여 Private 원격 접근 상태 확인
   - GitHub 공식 Action 저장소 기준 `actions/checkout@v6`, `actions/setup-node@v6`, `docker/login-action@v4`, `docker/setup-buildx-action@v4`, `docker/build-push-action@v7` 유효성 확인
   - `npm run build` 성공
   - GitHub Actions 2개와 Compose YAML 파싱 성공
-  - `bash -n deploy/shiftmate-bootstrap`, `bash -n deploy/shiftmate-deploy` 성공
+  - `bash -n [private deployment file]`, `bash -n [private deployment file]` 성공
   - `docker compose ... config --quiet` 성공
   - 배포 스크립트 실행 권한과 `shiftmate-cicd-bundle/` 제거 확인
 - **롤백**:
-  - `deploy/main`을 이번 배포 자동화 커밋의 부모로 되돌리고 필요 시 제거한 번들 구조로 파일 복원
+  - `[private deployment branch]`을 이번 배포 자동화 커밋의 부모로 되돌리고 필요 시 제거한 번들 구조로 파일 복원
 - **다음**:
-  - GitHub 저장소에서 Private 여부, GHCR Actions access, self-hosted runner label을 확인하고 가이드에 따라 최초 bootstrap 수행
+  - GitHub 저장소에서 Private 여부, GHCR Actions access, private runner label을 확인하고 가이드에 따라 최초 bootstrap 수행
 
 ## 2026-07-20
 
@@ -615,7 +632,7 @@
   - `package.json`, `package-lock.json`의 이번 의존성 패치와 uuid override를 이전 버전으로 복원
   - 이번 작업의 PROJECT_CONTEXT/DEPLOYMENT_GUIDE/DECISIONS/WORKLOG 변경 제거
 - **다음**:
-  - 홈서버에서 `linux/amd64` 이미지를 로드하고 DB 주소/메모리 사용량 확인
+  - 비공개 실행 환경에서 `linux/amd64` 이미지를 로드하고 DB 주소/메모리 사용량 확인
   - 검증된 동일 이미지로 Express 컨테이너 3개 실행
 
 ### [DONE] Express 운영 보안·관측 기능 추가
@@ -753,7 +770,7 @@
   - 운영 롤백 시 신규 선택 환경변수는 제거 가능하지만 기존 필수 DB/JWT 환경변수는 유지
 - **다음**:
   - Dockerfile/.dockerignore 및 컨테이너 healthcheck 추가
-  - 홈서버 PostgreSQL `max_connections` 확인 후 `3 × DB_POOL_MAX` 예산 확정
+  - 비공개 실행 환경 PostgreSQL `max_connections` 확인 후 `3 × DB_POOL_MAX` 예산 확정
   - Nginx upstream과 3개 컨테이너 구성
 
 ## 2026-07-09

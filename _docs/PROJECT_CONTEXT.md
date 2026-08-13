@@ -781,7 +781,7 @@ DB_SSL=false
 TRUST_PROXY_HOPS=0
 ```
 
-**스테이징/프로덕션(현재 홈서버 내부 Docker PostgreSQL 16)**:
+**스테이징/프로덕션(현재 비공개 실행 환경 내부 Docker PostgreSQL 16)**:
 
 ```env
 NODE_ENV=production
@@ -794,7 +794,7 @@ AUTH_RATE_LIMIT_WINDOW_MS=60000
 AUTH_RATE_LIMIT_MAX=10
 ```
 
-`DB_SSL=true`는 PostgreSQL 접속 경로에 TLS가 실제로 구성된 경우에만 사용합니다. 현재 홈서버 내부 Docker 네트워크의 PostgreSQL 16 연결은 `DB_SSL=false`가 기준입니다.
+`DB_SSL=true`는 PostgreSQL 접속 경로에 TLS가 실제로 구성된 경우에만 사용합니다. 현재 비공개 실행 환경 내부 Docker 네트워크의 PostgreSQL 16 연결은 `DB_SSL=false`가 기준입니다.
 
 `JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다.
 
@@ -1128,36 +1128,17 @@ curl --fail http://127.0.0.1:3000/health
 
 - `.env`의 `DB_HOST=localhost` 또는 `127.0.0.1`은 컨테이너 자신을 가리킵니다.
 - Docker Desktop에서 호스트 PostgreSQL을 사용할 때는 `-e DB_HOST=host.docker.internal`을 추가합니다.
-- 홈서버에서는 PostgreSQL 컨테이너 서비스명 또는 실제 DB 주소를 사용합니다.
+- 비공개 실행 환경에서는 PostgreSQL 컨테이너 서비스명 또는 실제 DB 주소를 사용합니다.
 - 운영 실행에서는 `.env`의 `NODE_ENV=production`을 확인합니다. `--env-file` 값은 이미지의 기본 `NODE_ENV=production`보다 우선합니다.
 - 최종 컨테이너는 `node` 사용자(UID/GID 1000), `node dist/index.js`, `STOPSIGNAL SIGTERM`으로 실행됩니다.
 - Docker 내장 health check는 `PORT`의 루트 `/health`를 호출합니다.
 - migration은 이미지에 포함하거나 컨테이너 시작 시 실행하지 않습니다.
 
-### 운영 CI/CD
+### 공개 저장소 배포 경계
 
-- **배포 저장소**: `hspark-1/shift_calendar_server-deploy`의 `main`
-- **파일 역할**:
-  - `.github/workflows/deploy-production.yml`: 수동 승인, TypeScript 검증, `linux/amd64` 이미지 빌드·GHCR push, 홈서버 배포 호출
-  - `.github/workflows/rollback-production.yml`: 기존 commit SHA 이미지를 Stage와 Center에 함께 재배포
-  - `deploy/compose.production.yaml`: Blue/Green API 인스턴스 6개 정의와 기존 `shiftmate_center_internal` 연결
-  - `deploy/stage.deploy.env.example`: 홈서버 Stage Compose 서비스명과 외부 health URL의 root 전용 설정 예시
-  - `deploy/shiftmate-deploy`: 하나의 이미지 digest를 Stage에 먼저 적용한 뒤 Center 비활성 색상에 배포하고, 양쪽 health 검사·Nginx 전환·통합 실패 복원 수행
-  - `deploy/shiftmate-bootstrap`: 기존 운영 구성을 Blue/Green으로 전환하는 최초 1회용 스크립트
-  - `deploy/nginx/shiftmate-upstream-{blue,green}.conf`: Center Blue/Green 포트를 `shiftmate_center_api_cluster`로 정의
-  - `deploy/nginx/shiftmate-stage-upstream.conf`: 기존 Stage 3201을 `shiftmate_stage_api_cluster`로 정의하는 고정 snippet
-  - `deploy/sudoers/github-runner-shiftmate`: `github-runner`가 root 소유 배포 스크립트 경로만 비밀번호 없이 호출하도록 허용하며, 이미지·actor 인자는 스크립트가 검증
-  - `DEPLOY_README.md`: 저장소 루트에서 바로 확인하는 홈서버 CI/CD 실행 가이드로, 정본 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`와 동일한 절차 유지
-  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`: 홈서버 사전 구성, runner 설치, 최초 배포, 롤백 및 장애 대응 절차
-- **의존성**: Private GitHub 저장소, GHCR, `shiftmate-production` label의 전용 self-hosted runner, Docker Compose, Nginx, 기존 운영 `.env`와 외부 Docker 네트워크, `/opt/shiftmate-stage/compose.yaml`, Stage 3201 서비스 및 실제 HTTPS health URL
-- **캐시 배포 의존성**: Center/Stage 별도 Redis, Stage API/worker/Redis 서비스명, 환경별 `REDIS_URL`/`CACHE_KEY_PREFIX`, 사전 expand migration
-- **사용 예**: GitHub Actions에서 `Deploy production`을 `main`과 확인 체크로 실행하며, 배포 자동화 변경은 `git push deploy main`으로 전용 저장소에 반영
-- **문서 동기화 규칙**: 배포 절차 변경 시 `DEPLOY_README.md`와 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`를 함께 갱신하고 내용 일치를 검사
-- **원칙**: 배포·롤백은 동일한 `shiftmate-deploy` 경로를 사용하고 Stage 1개와 Center 3개는 같은 불변 GHCR digest를 실행하며 DB migration은 자동 실행하지 않음
-- **Compose profile 검증**: Center 6개 서비스는 모두 `blue` 또는 `green` profile에 속하므로 전체 구성 검사에는 두 profile을 명시
-- **Runner 권한 계약**: sudoers는 `/usr/local/sbin/shiftmate-deploy` 경로만 허용하고, root가 소유한 스크립트가 인자 개수·불변 GHCR commit 이미지·actor를 거부 우선 방식으로 검증
-- **Stage 적용 계약**: 기존 `/opt/shiftmate-stage/compose.yaml`과 애플리케이션 `.env`는 보존하고 root 관리 `compose.deploy.yaml`에서 지정 서비스의 image만 덮어씀
-- **Nginx 라우팅 계약**: 운영 proxy는 `shiftmate_center_api_cluster`, Stage proxy는 `shiftmate_stage_api_cluster`만 참조하며 배포 스크립트는 Center active upstream만 교체하고 Stage 고정 upstream은 변경하지 않음
+- 공개 저장소는 애플리케이션 코드, 범용 migration, 테스트와 API 계약만 관리합니다.
+- 환경별 Compose, workflow, 호스트 경로, runner, upstream, secret 위치와 실제 인프라 식별자는 별도 비공개 구성에서 관리합니다.
+- DB migration은 자동 실행하지 않고 백업과 대상 확인 후 개발자가 수동 실행합니다.
 
 ### DB 변경
 
