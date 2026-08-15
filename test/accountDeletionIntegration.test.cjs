@@ -55,7 +55,14 @@ if (process.env.RUN_ACCOUNT_DELETION_INTEGRATION !== "true") {
   test.before(async () => {
     await connectDatabase();
     const schema = readSqlForDatabaseDriver("migrations/final_schema.sql");
-    await sequelize.query(schema);
+    try {
+      await sequelize.query(schema);
+    } catch (error) {
+      const database_message = error?.parent?.message ?? error?.message;
+      throw new Error(`final_schema.sql 실행 실패: ${database_message}`, {
+        cause: error,
+      });
+    }
   });
 
   test.after(async () => {

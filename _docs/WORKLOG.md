@@ -4,6 +4,16 @@
 
 ## 2026-08-16
 
+### [DONE] 전체 schema의 초기화 역할 이식성 수정
+
+- **목적**: `POSTGRES_USER=group_debug` 격리 DB에 존재하지 않는 `postgres` 역할로 GRANT해 회원 탈퇴 통합 테스트가 실패하는 문제를 해결한다.
+- **변경**: 전체 초기화 DDL의 schema 권한 대상을 고정 역할 대신 `CURRENT_USER`로 변경하고, 통합 hook 오류에 PostgreSQL 원문 메시지를 보존한다.
+- **영향범위**: 파괴적 로컬/CI 전체 schema 초기화와 회원 탈퇴 통합 테스트 진단. 증분 운영 migration은 변경하지 않는다.
+- **파일**: `migrations/final_schema.sql`, `test/{accountDeletion,accountDeletionIntegration}.test.cjs`, `_docs/WORKLOG.md`.
+- **테스트**: TypeScript build, 회원 탈퇴 단위·정적 테스트 6건, `final_schema.sql`의 고정 DB 역할 잔존 검사, `git diff --check` 성공. 실제 PostgreSQL 통합 시나리오는 main CI에서 재확인한다.
+- **롤백**: 변경을 revert하되 실행 DB에 `postgres` 역할이 존재해야 한다.
+- **다음**: develop 병합 후 main CI에서 전체 schema 초기화와 삭제 시나리오를 다시 실행한다.
+
 ### [DONE] 회원 탈퇴 통합 테스트의 psql 메타 명령 분리
 
 - **목적**: Sequelize가 `final_schema.sql`의 psql 전용 `\set`을 SQL로 실행해 CI가 실패하는 문제를 해결한다.

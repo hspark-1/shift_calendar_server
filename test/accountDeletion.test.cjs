@@ -61,6 +61,8 @@ test("migration은 유저 상태, 멱등 작업, cascade/set null, 안전 rollba
   assert.match(rollback, /EXISTS \(SELECT 1 FROM public\.account_deletion_requests\)/);
   assert.match(final_schema, /account_status text NOT NULL DEFAULT 'ACTIVE'/);
   assert.match(final_schema, /CREATE TABLE account_deletion_requests/);
+  assert.match(final_schema, /GRANT ALL ON SCHEMA public TO CURRENT_USER/);
+  assert.doesNotMatch(final_schema, /GRANT ALL ON SCHEMA public TO postgres/);
 });
 
 test("워커는 provider 선행, DB purge, Redis tombstone 후에만 완료한다", () => {
