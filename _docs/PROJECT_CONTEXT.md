@@ -951,7 +951,7 @@ AUTH_RATE_LIMIT_MAX=10
 
 `DB_SSL=true`는 PostgreSQL 접속 경로에 TLS가 실제로 구성된 경우에만 사용합니다. 현재 비공개 실행 환경 내부 Docker 네트워크의 PostgreSQL 16 연결은 `DB_SSL=false`가 기준입니다.
 
-`JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다. API는 Apple Team/Key/Client/redirect, `.p8` 읽기, 32바이트 encryption key와 Google `GOOGLE_SERVER_CLIENT_ID` 형식을 DB 연결 전에 항상 검증합니다. cache/push worker는 API 전용 `.p8`을 요구하지 않습니다.
+`JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다. API는 Apple Team/Key/Client/redirect, `.p8` 읽기, 32바이트 encryption key와 Google `GOOGLE_SERVER_CLIENT_ID` 형식을 DB 연결 전에 항상 검증합니다. 공통 `validateEnvironment()`는 worker 전용 secret을 요구하지 않으며, push worker만 Firebase project/credential을, 회원 탈퇴 worker만 Kakao Admin Key를 별도 검증합니다. 회원 탈퇴 worker는 Apple revoke 때문에 `.p8`도 검증하지만 cache/push worker는 요구하지 않습니다. 필수 환경변수 누락 로그에는 secret 값 없이 key 이름과 `ENVIRONMENT_VALIDATION_ERROR`만 기록합니다.
 
 ---
 

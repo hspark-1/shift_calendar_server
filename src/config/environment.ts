@@ -13,10 +13,25 @@ const required_environment_variables = [
   "JWT_REFRESH_SECRET",
 ] as const;
 
+export class EnvironmentValidationError extends Error {
+  readonly code = "ENVIRONMENT_VALIDATION_ERROR";
+
+  constructor(
+    readonly environment_variable: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "EnvironmentValidationError";
+  }
+}
+
 export function getRequiredEnvironmentVariable(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
-    throw new Error(`필수 환경변수 ${name}이(가) 설정되지 않았습니다.`);
+    throw new EnvironmentValidationError(
+      name,
+      `필수 환경변수 ${name}이(가) 설정되지 않았습니다.`,
+    );
   }
   return value;
 }
@@ -137,6 +152,24 @@ export function validateGoogleAuthEnvironment(): void {
   }
 }
 
+export function validatePushWorkerEnvironment(): void {
+  if (!getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false)) return;
+  getRequiredEnvironmentVariable("FIREBASE_PROJECT_ID");
+  getRequiredEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
+}
+
+export function validateAccountDeletionWorkerEnvironment(): void {
+  if (
+    !getBooleanEnvironmentVariable(
+      "ACCOUNT_DELETION_WORKER_ENABLED",
+      false,
+    )
+  ) {
+    return;
+  }
+  getRequiredEnvironmentVariable("KAKAO_ADMIN_KEY");
+}
+
 export function validateEnvironment(): void {
   for (const variable_name of required_environment_variables) {
     getRequiredEnvironmentVariable(variable_name);
@@ -233,15 +266,6 @@ export function validateEnvironment(): void {
     !["STAGE", "PROD"].includes(push_app_environment)
   ) {
     throw new Error("PUSH_APP_ENVIRONMENT는 STAGE 또는 PROD여야 합니다.");
-  }
-
-  if (getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false)) {
-    getRequiredEnvironmentVariable("FIREBASE_PROJECT_ID");
-    getRequiredEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
-  }
-
-  if (getBooleanEnvironmentVariable("ACCOUNT_DELETION_WORKER_ENABLED", false)) {
-    getRequiredEnvironmentVariable("KAKAO_ADMIN_KEY");
   }
 
   const db_pool_max = getPositiveIntegerEnvironmentVariable("DB_POOL_MAX", 10);

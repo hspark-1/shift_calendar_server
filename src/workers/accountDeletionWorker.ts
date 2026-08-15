@@ -8,6 +8,7 @@ import {
 } from "../config/database";
 import {
   getPositiveIntegerEnvironmentVariable,
+  validateAccountDeletionWorkerEnvironment,
   validateAppleAuthEnvironment,
   validateEnvironment,
 } from "../config/environment";
@@ -259,6 +260,7 @@ export async function processAccountDeletionBatch(): Promise<number> {
 
 async function runHealthCheck(): Promise<void> {
   validateEnvironment();
+  validateAccountDeletionWorkerEnvironment();
   validateAppleAuthEnvironment();
   try {
     await connectDatabase();
@@ -293,6 +295,7 @@ async function shutdown(signal: string): Promise<void> {
 
 async function runWorker(): Promise<void> {
   validateEnvironment();
+  validateAccountDeletionWorkerEnvironment();
   validateAppleAuthEnvironment();
   await connectDatabase();
   const poll_ms = getPositiveIntegerEnvironmentVariable(

@@ -4,6 +4,16 @@
 
 ## 2026-08-16
 
+### [DONE] 프로세스별 worker secret 환경 검증 분리
+
+- **목적**: Stage worker flag 활성화 시 API·cache worker까지 Firebase/Kakao worker 전용 secret을 요구하며 전체 서비스가 시작 실패하는 문제를 해결한다.
+- **변경**: 공통 환경 검증에서 push/회원 탈퇴 worker 전용 필수값 검사를 분리해 각 worker 엔트리포인트에서만 실행하고, 누락 key를 secret 값 없이 구조화 로그에 남긴다.
+- **영향범위**: API/cache/push/회원 탈퇴 worker 시작 검증과 배포 장애 진단. feature flag 값과 secret 자체는 변경하지 않는다.
+- **파일**: `src/config/environment.ts`, `src/utils/logger.ts`, `src/workers/{pushWorker,accountDeletionWorker}.ts`, `test/environmentValidation.test.cjs`, `_docs/{PROJECT_CONTEXT,WORKLOG}.md`.
+- **테스트**: TypeScript build, 공통/Push/회원 탈퇴 프로세스 환경 검증·안전 로그와 기존 회원 탈퇴 테스트 10건, `git diff --check` 성공. develop에는 main 전용 배포 파일이 없어 전체 테스트는 main 병합 후 실행한다.
+- **롤백**: 변경을 revert하고 worker 전용 secret을 모든 프로세스에 주입해야 한다.
+- **다음**: main 병합 후 전체 테스트와 Stage의 API·세 worker health를 다시 확인한다. 탈퇴 worker가 `KAKAO_ADMIN_KEY` 누락으로 실패하면 새 구조화 로그의 `environment_variable`을 기준으로 호스트 secret을 보완한다.
+
 ### [DONE] 전체 schema의 초기화 역할 이식성 수정
 
 - **목적**: `POSTGRES_USER=group_debug` 격리 DB에 존재하지 않는 `postgres` 역할로 GRANT해 회원 탈퇴 통합 테스트가 실패하는 문제를 해결한다.

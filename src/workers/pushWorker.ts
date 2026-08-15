@@ -9,6 +9,7 @@ import {
 import {
   getPositiveIntegerEnvironmentVariable,
   validateEnvironment,
+  validatePushWorkerEnvironment,
 } from "../config/environment";
 import {
   getPushAppEnvironment,
@@ -546,6 +547,7 @@ export async function cleanupTerminalPushRecords(): Promise<void> {
 
 async function runHealthCheck(): Promise<void> {
   validateEnvironment();
+  validatePushWorkerEnvironment();
   try {
     await connectDatabase();
     await checkDatabaseConnection();
@@ -566,6 +568,7 @@ async function shutdown(signal: string): Promise<void> {
 
 async function runWorker(): Promise<void> {
   validateEnvironment();
+  validatePushWorkerEnvironment();
   await connectDatabase();
   const poll_ms = getPositiveIntegerEnvironmentVariable("PUSH_JOB_POLL_MS", 1000);
   let provider: PushProvider | null = null;
