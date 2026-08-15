@@ -84,3 +84,18 @@ test("워커는 provider 선행, DB purge, Redis tombstone 후에만 완료한�
   assert.match(provider, /appleid\.apple\.com\/auth\/revoke/);
   assert.match(provider, /kapi\.kakao\.com\/v1\/user\/unlink/);
 });
+
+test("회원 탈퇴 worker health는 활성화 시 migration schema를 검증한다", () => {
+  const worker = readRepositoryFile("src/workers/accountDeletionWorker.ts");
+  const health_body = worker.slice(
+    worker.indexOf("async function runHealthCheck"),
+    worker.indexOf("async function shutdown"),
+  );
+  assert.match(health_body, /isAccountDeletionWorkerEnabled\(\)/);
+  assert.match(
+    health_body,
+    /SELECT account_status, deletion_requested_at FROM users LIMIT 0/,
+  );
+  assert.match(health_body, /AccountDeletionRequest\.count\(\)/);
+  assert.match(health_body, /AccountDeletionProviderTask\.count\(\)/);
+});

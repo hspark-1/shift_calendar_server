@@ -263,6 +263,16 @@ async function runHealthCheck(): Promise<void> {
   try {
     await connectDatabase();
     await checkDatabaseConnection();
+    if (isAccountDeletionWorkerEnabled()) {
+      await Promise.all([
+        sequelize.query(
+          "SELECT account_status, deletion_requested_at FROM users LIMIT 0",
+          { type: QueryTypes.SELECT },
+        ),
+        AccountDeletionRequest.count(),
+        AccountDeletionProviderTask.count(),
+      ]);
+    }
     if (process.env.REDIS_URL?.trim()) {
       const status = await checkRedisConnection({ force_connection: true });
       if (status !== "ready") throw new Error("REDIS_NOT_READY");

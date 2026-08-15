@@ -10,8 +10,12 @@
 
 - 카카오 OAuth 로그인
 - 네이버 OAuth 로그인
+  <<<<<<< HEAD
+- Google ID Token 서버 검증 로그인(항상 활성)
+- # Apple 서버 검증형 로그인(항상 활성, 계정 삭제/revoke 연동 포함)
 - Apple 서버 검증형 로그인
 - Google ID Token 서버 검증 로그인
+  > > > > > > > origin/develop
 - 근무 템플릿 관리 (3교대 등)
 - 근무표 생성/수정/삭제
 - 개인 일정(Event) 관리
@@ -128,7 +132,8 @@ Flutter google_sign_in
 - 외부 HTTP와 Redis 작업을 DB transaction 안에서 실행하지 않고 PostgreSQL lease worker로 재시도합니다.
 - Google/Naver는 현재 서버가 revoke 가능한 OAuth token을 보관하지 않으므로 클라이언트 연동 해제와 내부 데이터 삭제를 분리합니다.
 - `DELETE /api/v1/auth/account`는 `confirmation=true`와 JWT `auth_time` 10분 조건을 확인한 뒤 `202`로 접수합니다. 접수 즉시 사용자를 `DELETION_PENDING`으로 바꾸고 Refresh Token·푸시 기기를 무효화합니다.
-- `src/workers/accountDeletionWorker.ts`는 provider 해제 → DB purge → Redis tombstone/purge 순서를 lease·backoff로 재시도합니다. API와 worker 플래그의 기본값은 모두 `false`입니다.
+- `src/workers/accountDeletionWorker.ts`는 provider 해제 → DB purge → Redis tombstone/purge 순서를 lease·backoff로 재시도합니다. Stage/Center에서는 `deploy/config/feature-flags.{stage,production}.env`가 API와 worker 플래그의 정본이며 기본값은 모두 `false`입니다.
+- 배포 검증은 `ACCOUNT_DELETION_ENABLED=true`와 `ACCOUNT_DELETION_WORKER_ENABLED=false` 조합을 거절합니다. 활성화 전에 탈퇴 migration, `KAKAO_ADMIN_KEY`, Apple secret과 Redis/DB 연결을 준비하고 Stage E2E를 먼저 통과해야 합니다.
 - 구현·운영 정본은 `_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`이며, Stage 실제 Apple/Kakao·Redis 장애 E2E 전에는 Production에서 활성화하지 않습니다.
 
 #### 캐시 적용 요청과 key 공유 계약
@@ -139,6 +144,26 @@ Flutter google_sign_in
 - 캘린더 응답 중 `events`는 캐시 대상이 아니며 본인 일정은 `events`, 친구 일정은 `v_visible_events_for_friend`에서 매번 조회합니다.
 - 인증 또는 날짜 validation이 먼저 실패한 `401`/`400` 요청은 캐시 서비스에 진입하지 않으므로 Redis key를 생성하지 않습니다.
 - `DBSIZE`는 요청 횟수가 아니라 현재 key 수입니다. 이미 존재하는 소유자·월 snapshot의 재조회는 `DBSIZE`를 증가시키지 않습니다.
+
+### Push Worker 알림 구조
+
+```text
+친구·그룹 도메인 transaction
+  ├─ notifications INSERT (인앱 알림 원본)
+  └─ push_jobs INSERT (title/body/data snapshot, TTL 1시간)
+      → commit
+      → Push Worker가 FOR UPDATE SKIP LOCKED + lease로 claim
+      → 수신자의 같은 환경 최신 활성 기기 한 대를 최초 1회 선택
+      → push_deliveries에 선택을 고정
+      → 전송 직전 최신 FCM token 재조회
+      → Firebase Admin sendEach() → Android/iOS FCM
+```
+
+- API 서버는 FCM을 직접 호출하지 않으며 `notifications`가 항상 원본입니다.
+- 대상 타입은 `FRIEND_REQUEST`, `FRIEND_ACCEPTED`, `FRIEND_REJECTED`, `GROUP_INVITATION`, `GROUP_INVITATION_ACCEPTED`, `GROUP_INVITATION_REJECTED`입니다.
+- 선택 순서는 `last_seen_at DESC`, `target_updated_at DESC NULLS LAST`, `device_id ASC`이며 같은 job에서 다른 기기로 fallback하지 않습니다.
+- 전달은 at-least-once입니다. FCM 성공 후 DB 반영 전 종료 시 중복될 수 있으므로 collapse ID와 클라이언트 `notification_id` 중복 제거를 함께 사용합니다.
+- 원본 요청·초대가 응답/취소/만료되면 미전송 job을 취소합니다. 이미 provider 호출이 시작된 경합은 best-effort 한계입니다.
 
 ### 폴더 구조
 
@@ -155,6 +180,7 @@ src/
 │   ├── authRoutes.ts    # 인증 관련 라우트
 │   ├── deviceRoutes.ts  # 현재 설치 기기 등록/동기화
 │   ├── calendarRoutes.ts # 캘린더/근무표 라우트
+│   ├── deviceRoutes.ts  # 현재 설치 기기 idempotent 동기화
 │   └── scheduleRoutes.ts # 스케줄 라우트 (레거시)
 ├── middlewares/
 │   ├── auth.ts          # JWT 인증 미들웨어
@@ -175,6 +201,8 @@ src/
 │   ├── notificationService.ts # 인앱 알림 + push job 원자적 생성
 │   ├── firebasePushProvider.ts # FCM provider adapter
 │   ├── kakaoService.ts
+│   ├── googleService.ts # Google ID Token 검증, 계정 정책, 신규 transaction
+│   ├── appleService.ts # challenge, code 교환, JWKS, authorization 암호화
 │   └── shiftTemplateService.ts
 ├── workers/
 │   ├── workShiftCacheWorker.ts # PostgreSQL Outbox 기반 Redis 무효화 worker
@@ -184,9 +212,14 @@ src/
 │   └── phone.ts         # 전화번호 저장 형식 검증 및 하이픈 정규화
 ├── models/              # Sequelize 모델
 │   ├── User.ts
+│   ├── UserDevice.ts
+│   ├── PushJob.ts
+│   ├── PushDelivery.ts
 │   ├── Event.ts
 │   ├── WorkShift.ts
 │   ├── RefreshToken.ts
+│   ├── OAuthLoginChallenge.ts
+│   ├── OAuthAuthorization.ts
 │   └── ... (템플릿 관련 모델들)
 └── types/
     ├── express.d.ts     # Express Request 타입 확장
@@ -196,8 +229,14 @@ test/
 ├── workShiftMonthCacheService.test.cjs # 월 분할, key, ETag 단위 테스트
 ├── cacheIntegration.test.cjs           # PostgreSQL/Redis 통합 테스트
 ├── deploymentCacheRollout.test.cjs     # Redis/worker 배포·rollback 순서 정적 테스트
+├── pushNotification.test.cjs           # 푸시 retry/migration/API/lease 계약 테스트
+├── appleAuth.test.cjs                   # Apple crypto/JWKS/계약 단위·정적 테스트
+├── appleAuthIntegration.test.cjs        # Apple DB transaction/atomic consume 통합 테스트
+├── googleAuth.test.cjs                  # Google claim/계약/migration/CI 단위·정적 테스트
+├── googleAuthIntegration.test.cjs       # Google DB transaction/동시성/rollback 통합 테스트
 └── fixtures/
-    └── cacheIntegrationSchema.sql      # 격리 테스트 DB 초기화용 최소 schema
+    ├── cacheIntegrationSchema.sql       # 캐시 격리 테스트 DB 초기화용 최소 schema
+    └── googleAuthMigrationBaseSchema.sql # Google 격리 테스트 최소 기반 schema
 ```
 
 #### `src/config/environment.ts`
@@ -223,6 +262,25 @@ test/
 - **의존성**: PostgreSQL expand migration, 환경별 공유 Redis, `WORK_SHIFT_CACHE_ENABLED=true`
 - **사용 예**: API는 `node dist/index.js`, worker는 `node dist/workers/workShiftCacheWorker.js`, worker health는 `--healthcheck`
 - 캐시 flag가 `false`인 worker 본체는 Outbox를 claim하지 않고 대기하지만 health 명령은 PostgreSQL과 Redis를 모두 검사합니다. 활성화 시 API와 worker 컨테이너를 같은 `true` 환경으로 재생성합니다.
+
+#### Apple 로그인 모듈
+
+- **`src/services/appleService.ts` 역할**: 플랫폼별 challenge, Android callback allowlist, ES256 client secret, code 교환, JWKS 검증, 사용자/authorization transaction 처리
+- **`src/models/OAuthLoginChallenge.ts` 역할**: raw credential 없이 일회성 state/nonce hash와 만료·소비 상태 매핑
+- **`src/models/OAuthAuthorization.ts` 역할**: Apple subject/client 연결과 계정 삭제 revoke용 암호화 refresh token 매핑
+- **`src/openapi/appleAuthOpenApi.json` 역할**: 3개 public endpoint와 Apple 오류 wrapper 계약
+- **`migrations/stage_apple_auth_apply_pgadmin.sql` 역할**: Stage DB명·복원 백업·승인문구·PG16·기존 schema를 검증하고 Apple DDL과 strict postflight를 한 transaction으로 실행해 checksum/초기 0건 증거 출력
+- **의존성**: PostgreSQL Apple add-only migration. 활성화 시에만 API 전용 `.p8` 선택적 override, 환경별 고정 AES key, Apple App/Services ID 설정
+- **사용 예**: pgAdmin Stage 적용은 실행 파일의 세 승인값만 수정해 전체를 1회 실행하고, DB migration과 필수 Apple secret 설치 뒤 이미지를 배포합니다.
+
+#### Google 로그인 모듈
+
+- **`src/services/googleService.ts` 역할**: Google ID Token 검증, claim 정규화, 이메일 자동 연결 금지, provider subject advisory lock, 신규 사용자·기본 템플릿·refresh token transaction 처리
+- **`src/openapi/googleAuthOpenApi.json` 역할**: `/auth/google/token`의 200/201 성공, validation/token/email/link/upstream/disabled 오류 계약
+- **`migrations/google_auth_{preflight,postflight}.sql` 역할**: PostgreSQL 16/대상 DB/권한/충돌을 사전 감사하고 nullable `google_id`와 partial unique index를 strict 사후 검증
+- **`migrations/stage_google_auth_apply_pgadmin.sql`, `center_google_auth_apply_pgadmin.sql` 역할**: 환경별 DB·백업·승인 guard와 DDL/postflight를 pgAdmin 단일 transaction으로 실행
+- **의존성**: `google-auth-library`, Google Cloud Web application OAuth client ID, PostgreSQL add-only migration
+- **사용 예**: DB를 먼저 적용하고 실제 `GOOGLE_SERVER_CLIENT_ID`를 설정한 Stage에 배포하여 실기기 E2E를 완료합니다.
 
 #### Push Worker 모듈
 
@@ -520,6 +578,17 @@ export async function handler(req: AuthenticatedRequest, res: Response) {
 - **네이버 OAuth**: `src/services/naverService.ts`
   - WebView 방식: `POST /api/v1/auth/naver` (authorization code)
   - SDK 방식: `POST /api/v1/auth/naver/token` (access_token 직접 전송)
+- **Google OIDC**: `src/services/googleService.ts`
+  - `POST /api/v1/auth/google/token`에서 Google ID Token만 수신
+  - `GOOGLE_SERVER_CLIENT_ID`를 audience 하나로 고정하고 검증된 `sub`를 `users.google_id`로 저장
+  - 같은 검증 이메일의 기존 계정은 `409 ACCOUNT_LINK_REQUIRED`; 자동 연결 금지
+  - 공개키/네트워크 장애 시 `503 GOOGLE_UPSTREAM_UNAVAILABLE`
+- **Apple OAuth**: `src/services/appleService.ts`
+  - Challenge: `POST /api/v1/auth/apple/challenge`
+  - Android form callback: `POST /api/v1/auth/apple/callback`
+  - 로그인 완료: `POST /api/v1/auth/apple`
+  - token endpoint 결과의 검증된 `id_token`을 정본으로 사용하고 client 입력 이메일을 받지 않음
+  - 같은 검증 이메일의 기존 계정과 충돌하면 `ACCOUNT_LINK_REQUIRED`; 자동 연결 금지
 - **Apple 로그인**: `src/services/appleService.ts`
   - `POST /api/v1/auth/apple/challenge`에서 일회성 state/nonce를 발급
   - `POST /api/v1/auth/apple`에서 code 교환과 JWKS/claim 검증 후 ShiftMate JWT 발급
@@ -668,6 +737,10 @@ const work_shifts = await WorkShift.findAll({
 - `POST /kakao/token` - 카카오 OAuth 로그인 (SDK)
 - `POST /naver` - 네이버 OAuth 로그인 (WebView)
 - `POST /naver/token` - 네이버 OAuth 로그인 (SDK)
+- `POST /google/token` - Google ID Token 서버 검증 로그인
+- `POST /apple/challenge` - Apple 일회성 state/nonce challenge 발급
+- `POST /apple/callback` - Android/Web form_post를 고정 앱 intent로 303 전달
+- `POST /apple` - Apple code 서버 교환·검증 후 ShiftMate JWT 발급
 - `POST /refresh` - 토큰 갱신
 - `POST /logout` - 로그아웃
 - `POST /logout-all` - 모든 기기 로그아웃 (인증 필요)
@@ -720,6 +793,7 @@ const work_shifts = await WorkShift.findAll({
 - `PUT /friend-requests/:request_id/respond` - 받은 친구 요청 수락/거절
 - `GET /notifications` - 알림 목록 조회 및 조회된 알림 읽음 처리
 - `GET /notifications/unread-count` - 미읽음 알림 개수 조회
+- `PUT /devices/current` - 인증 사용자의 현재 설치 UUID·권한·FCM target 멱등 동기화
 
 **친구 요청/알림 응답 계약**:
 
@@ -733,8 +807,8 @@ const work_shifts = await WorkShift.findAll({
 
 #### Swagger/OpenAPI
 
-- **그룹 API 구현됨**: `API_DOCS_ENABLED=true`일 때 `/api-docs`와 `/api-docs/openapi.json` 노출
-- **범위 제한**: 현재 OpenAPI 3.0.3 문서는 그룹 P0/P1와 공통 bearer/error/pagination schema만 포함하며 기존 API 전체 문서는 아직 미포함
+- **그룹·기기·Apple·Google 인증 API 구현됨**: `API_DOCS_ENABLED=true`일 때 `/api-docs`와 `/api-docs/openapi.json` 노출
+- **범위 제한**: 현재 OpenAPI 3.0.3 문서는 그룹 P0/P1, `PUT /devices/current`, Apple 로그인 3개 endpoint, Google token 로그인 endpoint와 관련 schema를 포함하며 기존 API 전체 문서는 아직 미포함
 
 ### 3.7 로깅/모니터링
 
@@ -773,8 +847,12 @@ catch (error) {
 - **요청 로그**: morgan이 자동으로 HTTP 요청/응답 로깅
 - **에러 로그**: 인증/전역 오류는 `logError()` 사용
 - **비즈니스 로그**: Service에서 `console.log()` 사용 (예: "카카오 로그인 성공")
+- **Apple 인증 로그**: `logAppleAuthEvent()`는 provider/platform/user/action/result/error_code/duration만 기록하고 code/token/raw state·nonce/email은 기록하지 않음
+- **Google 인증 로그**: `logGoogleAuthEvent()`는 request_id/action/result/error_code/duration, 성공 시 내부 user_id/is_new_user만 기록하고 ID Token/email/sub/claim은 기록하지 않음
 
 ### 3.8 환경변수 표
+
+> 로컬·테스트에서는 `.env`/프로세스 환경을 사용합니다. Stage/Center의 boolean feature flag 6개는 홈서버 `.env`에서 직접 관리하지 않고 `deploy/config/feature-flags.{stage,production}.env`를 Git 정본으로 사용합니다.
 
 #### 필수 환경변수
 
@@ -795,37 +873,58 @@ catch (error) {
 
 #### 선택 환경변수
 
-| 변수명                                | 설명                                  | 기본값             |
-| ------------------------------------- | ------------------------------------- | ------------------ |
-| `PORT`                                | 서버 포트                             | `3000`             |
-| `NODE_ENV`                            | `development`/`test`/`production`     | `development`      |
-| `DB_SSL`                              | DB SSL 사용 여부 (`true`/`false`)     | `false`            |
-| `DB_POOL_MAX`                         | 인스턴스당 DB 최대 연결 수            | `10`               |
-| `DB_POOL_MIN`                         | 인스턴스당 DB 최소 연결 수            | `0`                |
-| `DB_POOL_ACQUIRE_MS`                  | DB 연결 획득 제한시간                 | `30000`            |
-| `DB_POOL_IDLE_MS`                     | 유휴 DB 연결 유지시간                 | `10000`            |
-| `TRUST_PROXY_HOPS`                    | 신뢰할 Nginx 프록시 hop 수            | 개발 `0`, 운영 `1` |
-| `SHUTDOWN_TIMEOUT_MS`                 | graceful shutdown 최대 대기시간       | `10000`            |
-| `CORS_ALLOWED_ORIGINS`                | 쉼표로 구분한 정확한 허용 Origin 목록 | 환경별 기본 목록   |
-| `INSTANCE_NAME`                       | health/log에서 식별할 컨테이너 이름   | `unknown`          |
-| `REQUEST_BODY_LIMIT`                  | JSON/form 요청 본문 최대 크기         | `100kb`            |
-| `AUTH_RATE_LIMIT_WINDOW_MS`           | 인증 요청 제한 구간                   | `60000`            |
-| `AUTH_RATE_LIMIT_MAX`                 | 구간당 인스턴스별 인증 요청 최대 횟수 | `10`               |
-| `WORK_SHIFT_CACHE_ENABLED`            | 월별 근무표 Redis 캐시/worker 활성화  | `false`            |
-| `REDIS_URL`                           | 비밀번호 포함 환경별 Redis 내부 URL   | 캐시 활성 시 필수  |
-| `CACHE_KEY_PREFIX`                    | Stage/Center 분리 Redis key prefix    | 캐시 활성 시 필수  |
-| `WORK_SHIFT_CACHE_TTL_SECONDS`        | snapshot 기본 TTL                     | `86400`            |
-| `WORK_SHIFT_CACHE_TTL_JITTER_SECONDS` | TTL 최대 jitter                       | `3600`             |
-| `WORK_SHIFT_CACHE_LOCK_MS`            | stampede 방지 lock 만료               | `5000`             |
-| `WORK_SHIFT_CACHE_WAIT_MS`            | lock 대기 요청의 최대 재조회 시간     | `500`              |
-| `REDIS_CONNECT_TIMEOUT_MS`            | Redis 연결 제한시간                   | `500`              |
-| `REDIS_COMMAND_TIMEOUT_MS`            | Redis 명령 제한시간                   | `100`              |
-| `CACHE_OUTBOX_POLL_MS`                | worker idle polling 간격              | `1000`             |
-| `CACHE_OUTBOX_BATCH_SIZE`             | worker 1회 claim 최대 이벤트          | `100`              |
-| `GROUP_MEMBER_LIMIT`                  | 그룹 최대 활성 멤버                   | `20`               |
-| `GROUP_INVITATION_TTL_DAYS`           | 그룹 초대 만료 일수                   | `7`                |
-| `GROUP_CALENDAR_MAX_RANGE_DAYS`       | 그룹 캘린더 양 끝 포함 최대 일수      | `100`              |
-| `API_DOCS_ENABLED`                    | `/api-docs`와 원본 OpenAPI 노출       | `false`            |
+| 변수명                                | 설명                                     | 기본값                         |
+| ------------------------------------- | ---------------------------------------- | ------------------------------ |
+| `PORT`                                | 서버 포트                                | `3000`                         |
+| `NODE_ENV`                            | `development`/`test`/`production`        | `development`                  |
+| `DB_SSL`                              | DB SSL 사용 여부 (`true`/`false`)        | `false`                        |
+| `DB_POOL_MAX`                         | 인스턴스당 DB 최대 연결 수               | `10`                           |
+| `DB_POOL_MIN`                         | 인스턴스당 DB 최소 연결 수               | `0`                            |
+| `DB_POOL_ACQUIRE_MS`                  | DB 연결 획득 제한시간                    | `30000`                        |
+| `DB_POOL_IDLE_MS`                     | 유휴 DB 연결 유지시간                    | `10000`                        |
+| `TRUST_PROXY_HOPS`                    | 신뢰할 Nginx 프록시 hop 수               | 개발 `0`, 운영 `1`             |
+| `SHUTDOWN_TIMEOUT_MS`                 | graceful shutdown 최대 대기시간          | `10000`                        |
+| `CORS_ALLOWED_ORIGINS`                | 쉼표로 구분한 정확한 허용 Origin 목록    | 환경별 기본 목록               |
+| `INSTANCE_NAME`                       | health/log에서 식별할 컨테이너 이름      | `unknown`                      |
+| `REQUEST_BODY_LIMIT`                  | JSON/form 요청 본문 최대 크기            | `100kb`                        |
+| `AUTH_RATE_LIMIT_WINDOW_MS`           | 인증 요청 제한 구간                      | `60000`                        |
+| `AUTH_RATE_LIMIT_MAX`                 | 구간당 인스턴스별 인증 요청 최대 횟수    | `10`                           |
+| `WORK_SHIFT_CACHE_ENABLED`            | 월별 근무표 Redis 캐시/worker 활성화     | `false`                        |
+| `REDIS_URL`                           | 비밀번호 포함 환경별 Redis 내부 URL      | 캐시 활성 시 필수              |
+| `CACHE_KEY_PREFIX`                    | Stage/Center 분리 Redis key prefix       | 캐시 활성 시 필수              |
+| `WORK_SHIFT_CACHE_TTL_SECONDS`        | snapshot 기본 TTL                        | `86400`                        |
+| `WORK_SHIFT_CACHE_TTL_JITTER_SECONDS` | TTL 최대 jitter                          | `3600`                         |
+| `WORK_SHIFT_CACHE_LOCK_MS`            | stampede 방지 lock 만료                  | `5000`                         |
+| `WORK_SHIFT_CACHE_WAIT_MS`            | lock 대기 요청의 최대 재조회 시간        | `500`                          |
+| `REDIS_CONNECT_TIMEOUT_MS`            | Redis 연결 제한시간                      | `500`                          |
+| `REDIS_COMMAND_TIMEOUT_MS`            | Redis 명령 제한시간                      | `100`                          |
+| `CACHE_OUTBOX_POLL_MS`                | worker idle polling 간격                 | `1000`                         |
+| `CACHE_OUTBOX_BATCH_SIZE`             | worker 1회 claim 최대 이벤트             | `100`                          |
+| `GROUP_MEMBER_LIMIT`                  | 그룹 최대 활성 멤버                      | `20`                           |
+| `GROUP_INVITATION_TTL_DAYS`           | 그룹 초대 만료 일수                      | `7`                            |
+| `GROUP_CALENDAR_MAX_RANGE_DAYS`       | 그룹 캘린더 양 끝 포함 최대 일수         | `100`                          |
+| `API_DOCS_ENABLED`                    | `/api-docs`와 원본 OpenAPI 노출          | `false`                        |
+| `PUSH_JOB_ENQUEUE_ENABLED`            | 신규 지원 알림의 push job 생성           | `false`                        |
+| `PUSH_WORKER_ENABLED`                 | Push Worker claim/전송 활성화            | `false`                        |
+| `PUSH_APP_ENVIRONMENT`                | 기기·자격 증명 환경 (`STAGE`/`PROD`)     | 환경별 필수                    |
+| `GOOGLE_APPLICATION_CREDENTIALS`      | read-only Firebase service account 경로  | worker 활성 시 필수            |
+| `FIREBASE_PROJECT_ID`                 | 환경별 Firebase project ID               | worker 활성 시 필수            |
+| `PUSH_JOB_POLL_MS`                    | worker idle polling 간격                 | `1000`                         |
+| `PUSH_JOB_BATCH_SIZE`                 | 1회 claim/sendEach 최대 job              | `20`                           |
+| `PUSH_JOB_LEASE_SECONDS`              | 처리 lease                               | `120`                          |
+| `PUSH_MAX_ATTEMPTS`                   | 최대 provider 시도 수                    | `6`                            |
+| `PUSH_JOB_TTL_SECONDS`                | job·FCM TTL                              | `3600`                         |
+| `PUSH_TERMINAL_RETENTION_DAYS`        | terminal job/delivery 보관일             | `30`                           |
+| `APPLE_TEAM_ID`                       | Apple Developer Team ID                  | 활성 시 필수                   |
+| `APPLE_KEY_ID`                        | Sign in with Apple key ID                | 활성 시 필수                   |
+| `APPLE_IOS_CLIENT_ID`                 | iOS Bundle ID                            | `com.hspark.shiftmate`         |
+| `APPLE_SERVICE_ID`                    | 환경별 Android/Web Services ID           | 활성 시 필수                   |
+| `APPLE_REDIRECT_URI`                  | 환경별 exact HTTPS callback              | 활성 시 필수                   |
+| `APPLE_PRIVATE_KEY_PATH`              | API 전용 `.p8` mount 경로                | `/run/secrets/apple_signin.p8` |
+| `APPLE_TOKEN_ENCRYPTION_KEY`          | 32바이트 base64 AES-GCM 영속 키          | 활성 시 필수                   |
+| `APPLE_CHALLENGE_TTL_SECONDS`         | state/nonce challenge TTL(60~600)        | `300`                          |
+| `APPLE_JWKS_CACHE_SECONDS`            | Apple JWKS cache 상한(60~86400)          | `21600`                        |
+| `GOOGLE_SERVER_CLIENT_ID`             | 서버 검증 audience인 Web OAuth Client ID | 활성 시 필수                   |
 
 #### 환경별 차이
 
@@ -852,7 +951,7 @@ AUTH_RATE_LIMIT_MAX=10
 
 `DB_SSL=true`는 PostgreSQL 접속 경로에 TLS가 실제로 구성된 경우에만 사용합니다. 현재 비공개 실행 환경 내부 Docker 네트워크의 PostgreSQL 16 연결은 `DB_SSL=false`가 기준입니다.
 
-`JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다.
+`JWT_SECRET`/`JWT_REFRESH_SECRET` 누락, 두 값의 동일 설정, 잘못된 숫자/boolean 환경변수, `DB_SYNC=true`는 서버 시작 전에 오류로 처리합니다. API는 Apple Team/Key/Client/redirect, `.p8` 읽기, 32바이트 encryption key와 Google `GOOGLE_SERVER_CLIENT_ID` 형식을 DB 연결 전에 항상 검증합니다. cache/push worker는 API 전용 `.p8`을 요구하지 않습니다.
 
 ---
 
@@ -895,6 +994,10 @@ AUTH_RATE_LIMIT_MAX=10
 - `test/fixtures/cacheIntegrationSchema.sql`은 통합 테스트에 필요한 정본 컬럼·제약·공개 view만 구성하는 테스트 전용 파일이며, 실행 시 대상 DB의 `public` schema를 삭제하고 재생성
 - 통합 테스트는 `RUN_CACHE_INTEGRATION=true`를 스크립트가 설정하며 CI 또는 폐기 가능한 전용 DB에서만 실행하고 운영/공유 개발 DB에는 실행 금지
 - PostgreSQL/Redis 연결 정보와 캐시 환경변수를 제공한 뒤 `npm run test:integration`으로 사용
+- `npm run test:apple-integration`: 고정 격리 PostgreSQL 16에서 신규 사용자 transaction, atomic consume/replay 경쟁, 이메일 자동 연결 금지, refresh token 누락 rollback, 기존 authorization 재로그인, Android 고정 callback을 검증
+- `test/fixtures/appleAuthMigrationBaseSchema.sql`: Apple preflight/apply/postflight/rollback 실DB 검증용 최소 schema이며 운영 DB에서 실행 금지
+- `npm run test:google-integration`: 고정 격리 PostgreSQL 16에서 Google migration, 신규 사용자 transaction, 기존 사용자 profile 불변, 이메일 자동 연결 금지, subject 동시 요청 단일 사용자 생성, rollback을 검증
+- `test/fixtures/googleAuthMigrationBaseSchema.sql`: Google migration·로그인 통합 테스트용 최소 schema이며 실행 시 대상 `public` schema를 재생성하므로 운영/공유 개발 DB에서 실행 금지
 
 ---
 
@@ -907,7 +1010,7 @@ AUTH_RATE_LIMIT_MAX=10
 - `user_id` (UUID, PK)
 - `email`, `name`, `profile_image_url`
 - `phone`: nullable unique, `000-000-0000` 또는 `000-0000-0000` 형식만 저장
-- `kakao_id`, `apple_id`, `naver_id` (OAuth)
+- `kakao_id`, `apple_id`, `google_id`, `naver_id` (OAuth)
 - `timezone`
 - `account_status`: `ACTIVE | DELETION_PENDING`
 - `deletion_requested_at`: 탈퇴 접수 시각. `ACTIVE`인 동안 `null`
@@ -923,6 +1026,12 @@ AUTH_RATE_LIMIT_MAX=10
 - `account_deletion_requests`: 사용자 탈퇴 접수, worker lease, DB/Redis purge 진행 상태를 보관하고 완료 시 `user_id`를 제거합니다.
 - `account_deletion_provider_tasks`: Apple revoke와 Kakao unlink의 공급자별 멱등 상태·재시도를 보관하며 token·이메일·provider subject는 저장하지 않습니다.
 - 상세 컬럼, FK 변경, 삭제 순서와 rollout은 `_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`가 정본입니다.
+
+#### OAuthLoginChallenge / OAuthAuthorization
+
+- `oauth_login_challenges`: Apple `state`/`nonce` SHA-256 hash, 플랫폼별 client/redirect, 5분 만료와 원자적 소비 시각. raw credential은 저장하지 않습니다.
+- `oauth_authorizations`: `user_id` FK, Apple provider subject/client unique, AES-256-GCM refresh token 암호문/IV/auth tag, revoke 상태를 저장합니다.
+- Apple authorization은 앱 JWT `refresh_tokens`와 수명·용도가 다르며 서로 대체하지 않습니다.
 
 #### WorkShift (근무표)
 
@@ -969,6 +1078,13 @@ AUTH_RATE_LIMIT_MAX=10
 - `payload`: 관련 사용자/친구 요청 ID 등 JSON 데이터
 - `actions`: 프론트 버튼/이동 동작을 표현하는 JSON 배열
 - 친구 요청 수신 알림은 `FRIEND_REQUEST`로 생성하고, 수락/거절 처리 후 원본 알림을 `FRIEND_REQUEST_ACCEPTED` 또는 `FRIEND_REQUEST_REJECTED`로 갱신
+
+#### UserDevice / PushJob / PushDelivery
+
+- `user_devices`: 환경별 설치 UUID와 로그인 사용자, Android/iOS, 권한·활성 상태, FCM target, 앱 버전, 최신 활동 시각을 관리합니다. raw target은 API 응답과 로그에 노출하지 않습니다.
+- `push_jobs`: `notifications.notification_id`당 최대 1건이며 수신자와 표시/data snapshot, `LATEST_ACTIVE`, TTL, retry/lease 상태를 저장합니다. 과거 알림은 backfill하지 않습니다.
+- `push_deliveries`: job에서 최초 선택한 기기 1대를 고정하고 provider message ID, target SHA-256 hash, 시도/오류/전송 시각을 기록합니다.
+- Stage/Production은 DB, Firebase project, credential, `PUSH_APP_ENVIRONMENT`를 모두 분리합니다.
 
 #### ShiftTemplate (근무 템플릿)
 
@@ -1134,6 +1250,7 @@ JWT_REFRESH_SECRET=your-refresh-secret
 KAKAO_CLIENT_ID=your-kakao-client-id
 KAKAO_CLIENT_SECRET=your-kakao-client-secret
 KAKAO_REDIRECT_URI=http://localhost:3000/test/callback.html
+GOOGLE_SERVER_CLIENT_ID=replace-with-web-oauth-client-id.apps.googleusercontent.com
 NODE_ENV=development
 TRUST_PROXY_HOPS=0
 ```
@@ -1149,6 +1266,12 @@ npm run build
 
 # 프로덕션 실행
 npm start
+
+# Push Worker (빌드 후)
+npm run start:push-worker
+
+# Push Worker readiness (메시지 미전송)
+node dist/workers/pushWorker.js --healthcheck
 ```
 
 개발 실행은 `ts-node/register`를 사용하므로 `tsconfig.json`의 `ts-node.files=true`가 `src/types/express.d.ts` 로딩을 보장합니다.
@@ -1206,6 +1329,39 @@ curl --fail http://127.0.0.1:3000/health
 
 ### 공개 저장소 배포 경계
 
+- **배포 저장소**: `hspark-1/shift_calendar_server-deploy`의 `main`
+- **파일 역할**:
+  - `.github/workflows/validate-main.yml`: main PR에서 build·단위/정적 계약, launcher/deploy Bash, sudoers, YAML과 문서 동기화를 검증하는 branch protection 필수 check
+  - `.github/workflows/deploy-production.yml`: main push 자동 실행과 수동 재실행, unit/cache/push/회원 탈퇴/Apple/Google auth integration 검증, `linux/amd64` 이미지 빌드·GHCR push, self-hosted exact checkout과 launcher 호출
+  - `.github/workflows/rollback-production.yml`: 기존 commit SHA 이미지를 Stage와 Center에 함께 재배포
+  - `deploy/compose.production.yaml`: Blue/Green API 6개, cache/Push/회원 탈퇴 worker 각 2개, singleton Redis, Firebase secret과 API·탈퇴 worker용 Apple secret을 정의하며 main 배포마다 `/opt/shiftmate/compose.yaml`로 검증·원자 동기화되는 Center base Compose 정본
+  - `deploy/compose.stage.yaml`: Stage API 3201, Redis, cache/Push/회원 탈퇴 worker, Firebase secret과 API·탈퇴 worker용 Apple secret을 정의하며 main 배포마다 `/opt/shiftmate-stage/compose.yaml`로 검증·원자 동기화되는 Stage base Compose 정본
+  - `deploy/config/feature-flags.production.env`, `feature-flags.stage.env`: 비밀값 없는 6개 boolean flag의 환경별 Git 정본. `deploy/shiftmate-deploy-launcher`, `deploy/shiftmate-deploy`와 두 Compose에 의존하며 main 배포마다 각 홈서버 project의 `feature-flags.env`로 검증·원자 동기화됩니다. 기능 활성화 예시는 Stage 파일의 대상 key만 `true`로 변경해 배포·검증한 뒤 별도 commit에서 Production 파일을 변경하는 방식입니다.
+  - `deploy/stage.deploy.env.example`: 홈서버 Stage API/cache worker/push worker/회원 탈퇴 worker/Redis 서비스명과 외부 health URL의 root 전용 설정 예시
+  - `deploy/shiftmate-deploy`: 하나의 이미지 digest를 Stage API/세 worker에 먼저 적용한 뒤 Center 비활성 색상 API/세 worker에 배포하고, 전체 health 검사·Nginx 전환·통합 실패 복원 수행
+  - `deploy/shiftmate-bootstrap`: 기존 운영 구성을 Blue/Green으로 전환하는 최초 1회용 스크립트
+  - `deploy/nginx/shiftmate-upstream-{blue,green}.conf`: Center Blue/Green 포트를 `shiftmate_center_api_cluster`로 정의
+  - `deploy/nginx/shiftmate-stage-upstream.conf`: 기존 Stage 3201을 `shiftmate_stage_api_cluster`로 정의하는 고정 snippet
+  - `deploy/shiftmate-deploy-launcher`: root trust anchor. self-hosted exact checkout의 repository/workspace/commit/image SHA와 배포 엔진·두 base Compose·두 feature flag config의 tree mode/blob을 검증하고 root 임시 번들로 실행
+  - `deploy/sudoers/github-runner-shiftmate`: `github-runner`가 root 소유 launcher만 비밀번호 없이 호출하도록 허용하며 저장소 스크립트 직접 sudo는 금지
+  - `DEPLOY_README.md`: 저장소 루트에서 바로 확인하는 홈서버 CI/CD 실행 가이드로, 정본 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`와 동일한 절차 유지
+  - `_docs/CI_CD_DEPLOYMENT_GUIDE.md`: 홈서버 사전 구성, runner 설치, 최초 배포, 롤백 및 장애 대응 절차
+- **의존성**: Private GitHub 저장소, GHCR, `shiftmate-production` label의 전용 self-hosted runner, Docker Compose, Nginx, 기존 운영 `.env`와 외부 Docker 네트워크, Stage 3201 서비스 및 실제 HTTPS health URL
+- **캐시 배포 의존성**: Center/Stage 별도 Redis, Stage API/worker/Redis 서비스명, 환경별 `REDIS_URL`/`CACHE_KEY_PREFIX`, 사전 expand migration
+- **Push 배포 의존성**: 환경별 Firebase project/service account, `/opt/shiftmate{,-stage}/secrets` root:root 700과 그 아래 `firebase.json` root:root 444, Stage Push Worker 서비스, push expand migration, 최초 비활성인 enqueue/worker flag
+- **Apple 배포 의존성**: Apple add-only migration을 먼저 적용하고 Services ID/redirect/encryption key와 `apple_signin.p8`(`root:root 0444`)을 Stage/Center에 준비한 뒤 배포
+- **사용 예**: 환경별 feature flag config를 변경한 commit을 main에 반영해 자동 배포를 시작합니다. self-hosted job은 같은 SHA를 checkout하고 launcher 검증 후 해당 commit의 배포 엔진, 두 base Compose와 두 flag config를 함께 적용합니다.
+- **문서 동기화 규칙**: 배포 절차 변경 시 `DEPLOY_README.md`와 `_docs/CI_CD_DEPLOYMENT_GUIDE.md`를 함께 갱신하고 내용 일치를 검사
+- **원칙**: 배포·롤백은 동일한 `shiftmate-deploy` 경로를 사용하고 Stage API/세 worker와 Center API 3개/세 worker는 같은 불변 GHCR digest를 실행하며 DB migration은 자동 실행하지 않음
+- **Stage 복구 원칙**: 기존 Stage readiness 실패는 컨테이너 상태·최근 로그를 남기는 진단 신호이며 새 이미지 적용을 차단하지 않음. 새 Stage API readiness와 세 worker health는 적용 후 필수 gate로 유지하고 실패 시 이전 override를 복원
+- **Compose profile 검증**: Center API 6개와 worker 6개는 모두 `blue` 또는 `green` profile에 속하므로 전체 구성 검사에는 두 profile을 명시
+- **Runner 권한 계약**: sudoers는 `/usr/local/sbin/shiftmate-deploy-launcher`만 허용. launcher는 고정 repository/actor/workspace, exact source SHA, 배포 엔진·두 Compose·두 flag config의 Git tree mode/blob과 불변 GHCR commit 이미지를 거부 우선 방식으로 검증하고 root 임시 번들만 실행
+- **배포 config 적용 계약**: main의 `deploy/compose.{production,stage}.yaml`과 `deploy/config/feature-flags.{production,stage}.env`를 root 소유 홈서버 Compose/`feature-flags.env`로 검증 후 원자 동기화합니다. flag config는 정확한 6개 key와 `true|false`만 허용하며, 탈퇴 API 활성·worker 비활성 조합은 거절합니다. 최초 전환 시 `.env`의 동일 key line을 값 노출 없이 자동 제거하며, 전체 배포 실패 시 두 Compose·두 flag config·정리 전 `.env`를 함께 복원합니다. `.deploy.env`, secret 값과 DB는 자동 변경하지 않습니다.
+- **Stage image 적용 계약**: 자동 동기화된 Stage base Compose에 root 관리 `compose.deploy.yaml`을 합성해 API/cache worker/push worker/회원 탈퇴 worker image만 불변 digest로 덮어씀
+- **Firebase secret 계약**: service account JSON은 Git·이미지·`.env`에서 제외하고 Compose project의 `./secrets/firebase.json`을 Push Worker의 `/run/secrets/firebase.json`에만 read-only file bind mount하며 `/dev/null` fallback을 허용하지 않음. image는 non-root `node`로 실행되므로 호스트 secret 디렉터리 `0700`으로 탐색을 제한하고 파일은 container가 읽을 수 있는 `0444`로 고정
+- **Apple secret 계약**: base Compose가 `.p8`을 API와 회원 탈퇴 worker의 `/run/secrets/apple_signin.p8`에 항상 mount합니다. cache/push worker에는 mount하지 않으며 AES key는 환경별 `.env` secret으로 관리합니다.
+- **Google 설정 계약**: 서버에는 API key나 client secret을 두지 않고 `GOOGLE_SERVER_CLIENT_ID`에 Web OAuth Client ID를 필수 설정하며 iOS/Android client ID는 Flutter 플랫폼 설정에 사용합니다.
+- **Nginx 라우팅 계약**: 운영 proxy는 `shiftmate_center_api_cluster`, Stage proxy는 `shiftmate_stage_api_cluster`만 참조하며 배포 스크립트는 Center active upstream만 교체하고 Stage 고정 upstream은 변경하지 않음
 - 공개 저장소는 애플리케이션 코드, 범용 migration, 테스트와 API 계약만 관리합니다.
 - 환경별 Compose, workflow, 호스트 경로, runner, upstream, secret 위치와 실제 인프라 식별자는 별도 비공개 구성에서 관리합니다.
 - DB migration은 자동 실행하지 않고 백업과 대상 확인 후 개발자가 수동 실행합니다.
@@ -1219,7 +1375,12 @@ curl --fail http://127.0.0.1:3000/health
 
 ### Swagger/Postman
 
-- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹 API 전용 `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
+- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹·기기·Apple·Google 인증 API `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
+- **Apple 로그인 서버 가이드**: `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`
+- **Google 로그인 서버 가이드**: `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`
+  - **파일 역할**: Google Cloud OAuth client 발급, 서버 환경변수, DB migration, 단계 활성화, E2E·롤백 절차를 운영자와 Flutter 개발자에게 제공
+  - **의존성**: `POST /api/v1/auth/google/token`, Google Web/iOS/Android OAuth client, `users.google_id` add-only migration
+  - **사용 예**: Stage 활성화 전 OAuth client와 `GOOGLE_SERVER_CLIENT_ID`를 준비하고 migration·실기기 검증 순서를 확인할 때 사용
 - **Flutter 그룹 연동 가이드**: `_docs/GROUP_FRONTEND_API_GUIDE.md`
 - **근무 타입 색상 API 가이드**: `_docs/SHIFT_TYPE_COLOR_API_GUIDE.md`
   - **파일 역할**: Flutter 프론트팀에 `color`, `base_color`, `color_intensity` 요청/응답, 레거시 fallback, 오류 코드, 미리보기 계산 및 연동 체크리스트 제공
@@ -1228,7 +1389,8 @@ curl --fail http://127.0.0.1:3000/health
 - **테스트 페이지**:
   - `http://localhost:3000/test/kakao-login.html` (카카오 로그인 테스트)
   - `http://localhost:3000/test/naver-login.html` (네이버 로그인 테스트)
-- **배포 가이드**: `_docs/DEPLOYMENT_GUIDE.md` 참고
+- **기존 수동 배포 가이드**: `_docs/DEPLOYMENT_GUIDE.md` 참고
+- **GitHub Blue/Green 자동 배포 가이드**: `_docs/CI_CD_DEPLOYMENT_GUIDE.md` 참고
 
 ### API 엔드포인트
 
@@ -1364,6 +1526,10 @@ P0/P1 그룹 요청
   - 역할: psql meta-command 없이 Stage preflight, public schema 그룹 DDL, strict postflight를 단일 transaction으로 실행하는 pgAdmin Query Tool 전용 SQL
   - 의존성: 파일 상단에 입력하는 실제 Stage DB 이름, 복원 가능한 백업 식별자, 확인 문자열
   - 사용 예: 세 설정값을 변경하고 pgAdmin에서 전체 파일을 Execute(F5)
+- **`migrations/pgadmin_center_add_group_feature.sql`**
+  - 역할: Stage에서 검증한 동일 그룹 DDL을 Center 전용 DB명·백업 파일명·확인 문자열·advisory lock으로 보호하고 strict postflight 뒤에만 commit하는 pgAdmin Query Tool 전용 SQL
+  - 의존성: PostgreSQL 16 Center primary/write 연결, 고정 DB명 `shiftmate_center`, 별도 복원 검증을 마친 pgAdmin Custom/`pg_dump -Fc` 백업 파일
+  - 사용 예: `SELECT current_database();` 결과가 `shiftmate_center`인지 확인하고 백업 파일명 placeholder만 변경한 뒤 부분 선택 없이 Execute(F5)
 - **`src/models/Group.ts`, `GroupMember.ts`, `GroupInvitation.ts`**
   - 역할: 최종 DDL의 그룹·멤버십 이력·초대 상태 Sequelize 매핑
   - 의존성: `src/config/database.ts`, 기존 `users`

@@ -935,6 +935,88 @@ Flutter 색상 선택기는 기준 색상을 흰색과 혼합해 농도가 적�
 
 ---
 
+## ADR-0019: 별도 배포 저장소와 GHCR 기반 Blue/Green 운영 배포
+
+> 상태: Blue/Green 배포 결정은 유지하며, 배포 엔진 실행·갱신 trust boundary는 ADR-0028로 대체합니다.
+
+### 배경(문제)
+
+홈서버의 Center Express 인스턴스 3개와 Stage 인스턴스 1개를 같은 이미지로 교체해야 하며, 빌드 실패나 health 실패가 기존 운영 상태를 남기지 않아야 합니다. Self-hosted runner에는 Docker와 Nginx를 변경할 권한이 필요하지만 저장소 워크플로가 임의 root 명령을 실행할 수 있게 해서는 안 됩니다. 또한 애플리케이션 개발 원격과 운영 배포 자동화의 변경 경계를 분리해야 합니다.
+
+### 선택지(대안)
+
+1. 별도 배포 저장소에서 애플리케이션 소스와 고정 배포 자동화를 함께 관리하고 GHCR·Blue/Green 전환 사용
+2. 애플리케이션 저장소의 push마다 홈서버에서 직접 pull·build·restart
+3. 홈서버에서 SSH 기반 수동 배포
+4. Kubernetes 또는 외부 관리형 배포 서비스 도입
+
+### 결정(무엇을 선택)
+
+**`hspark-1/shift_calendar_server-deploy`의 `main`을 운영 배포 기준으로 사용하고, commit SHA 이미지와 홈서버 Blue/Green 전환을 적용**합니다.
+
+- GitHub Actions는 수동 `workflow_dispatch`, `main`, 확인 체크를 검증
+- GitHub-hosted runner에서 Node 22 빌드 후 `linux/amd64` 이미지를 `sha-<commit>`으로 GHCR에 push
+- 홈서버 self-hosted runner의 sudoers는 root 소유 `/usr/local/sbin/shiftmate-deploy` 경로만 허용하고, 이미지·actor 인자는 스크립트가 엄격히 검증
+- pull한 하나의 불변 image digest를 기존 Stage Compose의 API/cache worker/push worker image override에 먼저 적용하고 API readiness와 두 worker health를 확인
+- 현재 활성 색상의 반대편 Center API 인스턴스 3개와 cache/push worker에 같은 digest를 적용하고 내부 health를 모두 확인
+- Nginx upstream reload 후 Center와 Stage 외부 `/api/v1/health`가 모두 성공해야 배포 상태를 확정
+- Center Blue/Green upstream 이름은 `shiftmate_center_api_cluster`, Stage 3201 고정 upstream 이름은 `shiftmate_stage_api_cluster`로 분리
+- Center 동적 upstream 교체는 Stage 고정 upstream snippet을 변경하지 않음
+- 실패 시 Stage API/worker image override와 컨테이너, Center upstream·상태 파일·신규 API/두 worker 컨테이너를 이전 상태로 복원. 최초 Push Worker 도입 전 override에는 이전 이미지가 없으므로 실패 시 새 Push Worker를 중지·제거하고 기존 API/cache worker만 복원
+- 롤백도 과거 commit SHA를 대상으로 같은 배포 경로를 재사용
+- DB migration은 이미지 배포와 분리하여 개발자가 수동 실행
+- 홈서버 Stage base Compose도 `deploy/compose.stage.yaml`에서 버전 관리하고 root 소유 `/opt/shiftmate-stage/compose.yaml`로 수동 설치
+
+### 근거(왜)
+
+- 빌드 실패는 홈서버 상태를 변경하지 않음
+- 신규 인스턴스가 준비된 후에만 트래픽을 전환하므로 중단 시간을 최소화
+- commit 태그를 pull한 뒤 digest로 고정해 실제 실행 이미지를 불변으로 유지
+- 한 번 빌드한 동일 digest를 Stage와 Center에 적용해 환경별 이미지 차이를 방지
+- self-hosted runner를 Docker 그룹에 넣지 않고 검증된 root 스크립트 하나만 허용
+- sudoers command argument wildcard·정규식 지원 여부에 의존하지 않고, 수정 불가능한 root 스크립트의 인자 개수·이미지 형식·actor 검증으로 권한 범위를 제한
+- 별도 배포 원격으로 운영 자동화 변경과 일반 개발 배포 권한을 구분
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- Stage 1개와 Center 3개의 내부 health 및 양쪽 외부 health를 모두 검증
+- 정상 상태의 Stage 1개와 Center 3개가 같은 image digest를 사용
+- 배포와 롤백의 절차 및 실패 복구 경로 통일
+- 운영 `.env`, DB 암호, JWT secret을 GitHub에 전달하지 않음
+- Blue/Green 상태와 이미지 digest를 `/opt/shiftmate/.deploy.env`에서 명시적으로 추적
+- 환경별 Firebase service account를 Git·이미지·`.env`와 분리하고, root 전용 `0700` 디렉터리 아래 non-root Worker가 bind mount로 읽을 수 있는 `0444` 파일로 저장해 Push Worker에만 mount
+
+**트레이드오프**:
+
+- 배포 저장소의 애플리케이션 소스를 운영 배포 대상 commit과 동기화해야 함
+- 한 번에 두 색상의 컨테이너가 기동되는 동안 추가 CPU·메모리 필요
+- Stage는 단일 컨테이너 재생성이므로 배포 중 짧은 중단이 발생할 수 있음
+- 이미지 롤백은 DB schema를 되돌리지 못하므로 migration은 하위 호환 순서를 지켜야 함
+- 홈서버 runner, Nginx include, sudoers를 최초 1회 수동 구성해야 함
+- root 소유 배포 스크립트의 인자 검증이 sudo 권한 안전성의 일부이므로 스크립트 권한과 검증 로직을 함께 유지해야 함
+
+### 구현 위치
+
+- **배포 워크플로**: `.github/workflows/deploy-production.yml`
+- **롤백 워크플로**: `.github/workflows/rollback-production.yml`
+- **운영 Compose**: `deploy/compose.production.yaml`
+- **Stage Compose**: `deploy/compose.stage.yaml`
+- **Stage 배포 설정 예시**: `deploy/stage.deploy.env.example`
+- **배포 엔진**: `deploy/shiftmate-deploy`
+- **최초 전환**: `deploy/shiftmate-bootstrap`
+- **Center Nginx upstream**: `deploy/nginx/shiftmate-upstream-blue.conf`, `deploy/nginx/shiftmate-upstream-green.conf`
+- **Stage Nginx upstream**: `deploy/nginx/shiftmate-stage-upstream.conf`
+- **Runner sudoers**: `deploy/sudoers/github-runner-shiftmate`
+- **운영 절차**: `_docs/CI_CD_DEPLOYMENT_GUIDE.md`
+
+### 추후 과제(언제 다시 평가)
+
+- 자동 테스트가 추가되면 이미지 push 전 CI 단계에 포함
+- 운영 migration 자동화가 필요해지면 expand/contract 호환성과 별도 승인 단계를 먼저 설계
+- 다중 홈서버 또는 지역 이중화가 필요해지면 현재 단일 호스트 Blue/Green 구조 재평가
+
 ---
 
 ## ADR-0020: 공유 Redis 월별 근무표 캐시와 PostgreSQL Outbox
@@ -1110,12 +1192,15 @@ Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 �
 - FCM 성공 후 DB 반영 전 프로세스 종료 시 중복 가능
 - 선택 기기 오류 시 같은 알림을 다른 기기로 보내지 않아 해당 push는 유실될 수 있음
 - 고정된 `firebase-admin 13.10.0`의 간접 의존성에 moderate audit advisory가 있으며, 사용자 지정 버전 계약 때문에 14.x 전환은 별도 검증이 필요
+- Push Worker까지 Stage/Center 통합 배포·health·rollback 단위에 포함되므로 환경별 service account 파일이 없으면 배포 준비가 실패
+- Compose 로컬 file secret은 host bind mount라 image의 non-root `node` 사용자가 읽을 수 있도록 JSON 자체는 `0444`가 필요하며, host 접근 통제는 root 소유 `0700` 상위 디렉터리가 담당
 
 ### 구현 위치
 
 - **DB**: `migrations/add_push_notification_support.sql`, `migrations/final_schema.sql`, `schema.drawio`
 - **서비스/모델**: `src/services/notificationService.ts`, `src/services/deviceService.ts`, `src/models/UserDevice.ts`, `src/models/PushJob.ts`, `src/models/PushDelivery.ts`
 - **Worker/provider**: `src/workers/pushWorker.ts`, `src/services/firebasePushProvider.ts`
+- **배포**: `deploy/compose.production.yaml`, `deploy/shiftmate-deploy`, `deploy/stage.deploy.env.example`, `.github/workflows/deploy-production.yml`
 - **HTTP/계약**: `src/routes/deviceRoutes.ts`, `src/openapi/deviceOpenApi.json`, `_docs/PUSH_NOTIFICATION_GUIDE.md`
 
 ### 추후 과제(언제 다시 평가)
@@ -1125,6 +1210,74 @@ Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 �
 - FID 기반 전송이 안정화되면 provider adapter와 `target_type`을 확장
 
 ---
+
+## ADR-0023: 서버 검증형 Apple 로그인과 계정 삭제 전 이중 feature gate
+
+### 배경(문제)
+
+Flutter에 Apple 로그인 진입점이 준비되어 있지만, Apple authorization code의 짧은 단일 사용 수명, 플랫폼별 client/redirect 차이, nonce/state replay, JWKS 검증, 비공개 relay 이메일, 기존 계정 충돌을 서버 신뢰 경계에서 처리해야 합니다. 또한 앱에서 계정을 만들 수 있으면 App Store 제출 전에 앱 내 계정 삭제와 Apple token revoke가 필요합니다.
+
+### 선택지(대안)
+
+1. 서버가 challenge와 code 교환/JWKS 검증을 담당하고, 로그인 1단계를 비활성 배포한 뒤 계정 삭제/revoke를 2단계로 완료해 이중 gate 활성화
+2. Flutter가 identity token만 전달하고 서버가 서명 확인 없이 사용자 정보를 신뢰
+3. 기존 이메일 사용자에게 Apple subject를 자동 연결
+4. 계정 삭제/revoke 없이 로그인 버튼부터 활성화
+
+### 결정(무엇을 선택)
+
+**서버 검증형 Apple 로그인 1단계를 add-only로 구현하되 `APPLE_AUTH_ENABLED=false`로 배포하고, 계정 삭제/revoke 2단계와 실기기 검증 전에는 Flutter `APPLE_LOGIN_ENABLED`도 활성화하지 않습니다.**
+
+- iOS는 Bundle ID와 redirect 없음, Android는 환경별 Services ID와 exact HTTPS callback을 challenge에 고정
+- 32바이트 random state/nonce 원문은 앱에만 반환하고 DB에는 SHA-256 hash만 저장
+- 로그인 시작 시 `UPDATE ... RETURNING`으로 challenge를 원자 소비하고 실패해도 되돌리지 않음
+- token endpoint는 5초 timeout, 같은 code 자동 재시도 없음
+- Apple JWKS RS256, issuer, audience, exp, iat, non-empty sub, raw nonce, verified email을 검증
+- token endpoint 결과의 `id_token`을 정본으로 사용하고 client `identity_token`은 선택적 교차 검증
+- 같은 검증 이메일의 기존 사용자에게 Apple subject를 자동 연결하지 않고 `ACCOUNT_LINK_REQUIRED`
+- 신규 사용자, 기본 템플릿, encrypted OAuth authorization, ShiftMate JWT를 하나의 DB transaction으로 처리
+- Apple refresh token은 AES-256-GCM으로 복구 가능하게 저장하고 기존 ShiftMate refresh token hash와 분리
+- 최초 `false` 배포는 Apple secret 없는 base Compose로 수행하고, 활성화 직전에 선택적 override로 `.p8`을 API 컨테이너에만 read-only mount하며 cache/push worker에는 제공하지 않음
+
+### 근거(왜)
+
+- code, subject, 이메일, nonce의 신뢰 판정을 앱 변조 경계 밖인 서버에 집중
+- 원자 소비로 동시 요청과 replay 중 하나만 Apple 교환에 진입
+- Apple code 단일 사용 특성상 네트워크 재시도가 오히려 유효 code를 소모한 불명확 상태를 만들 수 있음
+- 검증 이메일만으로 기존 계정을 연결하면 계정 탈취와 공급자 정책 차이를 숨길 수 있음
+- 계정 삭제 시 Apple refresh token 원문이 필요하므로 앱 JWT hash 저장소와 다른 암호화 저장 책임이 필요
+- 서버와 앱 두 gate를 유지하면 미완성 삭제 경로가 Production 사용자에게 노출되지 않음
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- iOS/Android가 같은 서버 검증·오류·ShiftMate JWT 계약 사용
+- raw OAuth credential 비저장과 로그 allowlist로 유출 면적 축소
+- add-only DB와 비활성 flag로 이전 API 이미지 롤백 가능
+- Apple secret 준비와 무관하게 비활성 서버 이미지를 먼저 배포·회귀 검증 가능
+- Stage에서 신규/기존/충돌/replay/callback을 Production 노출 전에 검증 가능
+
+**트레이드오프**:
+
+- `.p8`, 환경별 Services ID/redirect, 영속 AES key의 운영·백업 책임 추가
+- Apple upstream 장애 시 로그인은 `502`로 실패하며 자동 재시도하지 않음
+- 이메일 충돌 사용자는 향후 별도 계정 연결 UX가 생기기 전 Apple로 로그인할 수 없음
+- 계정 삭제/revoke 2단계가 완료될 때까지 구현된 로그인 endpoint와 앱 버튼은 비활성 상태로 유지
+
+### 구현 위치
+
+- **DB**: `migrations/apple_auth_{preflight,postflight}.sql`, `migrations/add_apple_auth_support.sql`, `migrations/rollback_apple_auth_support.sql`
+- **서비스/모델**: `src/services/appleService.ts`, `src/models/OAuthLoginChallenge.ts`, `src/models/OAuthAuthorization.ts`
+- **HTTP/OpenAPI**: `src/routes/authRoutes.ts`, `src/controllers/authController.ts`, `src/openapi/appleAuthOpenApi.json`
+- **배포**: `.env.example`, `deploy/compose{,.apple-auth}.{production,stage}.yaml`, `deploy/shiftmate-deploy`
+- **테스트/문서**: `test/appleAuth*.test.cjs`, `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`
+
+### 추후 과제(언제 다시 평가)
+
+- 2단계에서 실제 데이터 보존·익명화 정책을 확정한 뒤 `DELETE /api/v1/auth/account`와 Apple `/auth/revoke` 구현
+- Apple 연결 해제/재연결과 같은 이메일 기존 계정 연결은 재인증 UX·감사 로그를 별도 ADR로 설계
+- Stage iOS/Android 실기기와 relay email, 취소, 5분 만료, code replay 검증 완료 후에만 두 feature flag 활성화 승인
 
 ## ADR-0023: 서버 검증형 Apple 로그인과 기본 비활성화
 
@@ -1180,7 +1333,65 @@ Flutter 그룹 목록과 그룹 캘린더 미리보기의 더미 데이터를 �
 
 ### 배경(문제)
 
-Flutter가 전달하는 Google ID Token의 진위를 서버가 확인하고 기존 ShiftMate JWT로 교환해야 하며, 같은 이메일의 기존 계정을 자동 연결할지 결정해야 합니다.
+Flutter가 iOS/Android Google 로그인에서 받은 ID Token을 서버로 전달할 수 있지만, 앱이 전달한 사용자 정보나 이메일을 그대로 신뢰하면 issuer·audience·서명·만료·이메일 검증 여부를 서버가 보장할 수 없습니다. 동일 이메일로 이미 가입한 다른 로그인 계정과 Google subject를 자동 연결하는 것도 명시적 재인증 없이 계정 소유권을 합치는 위험이 있습니다.
+
+### 선택지(대안)
+
+1. 서버가 공식 Google 검증 라이브러리로 ID Token을 검증하고 `sub`를 공급자 식별자로 저장하며 이메일 충돌은 별도 계정 연결로 보냄
+2. Flutter가 전달한 `sub`, 이메일, 이름, 사진을 서버가 그대로 신뢰
+3. 검증된 이메일이 같으면 기존 사용자에 Google subject를 자동 연결
+4. 플랫폼별 iOS/Android OAuth Client ID를 서버 audience로 각각 허용
+
+### 결정(무엇을 선택)
+
+**`POST /api/v1/auth/google/token`에서 Google ID Token을 서버가 검증하고, 단일 Web OAuth Client ID를 audience로 사용하며, 같은 이메일의 기존 계정은 자동 연결하지 않습니다.**
+
+- `google-auth-library` singleton의 `verifyIdToken()`으로 서명·issuer·audience·만료를 검증
+- `email_verified === true`, 정규화된 이메일, non-empty `sub`만 수용
+- 서버 `GOOGLE_SERVER_CLIENT_ID`에는 Flutter의 `serverClientId`와 같은 Web OAuth Client ID를 설정
+- `users.google_id` nullable partial unique index를 공급자 subject의 정본으로 사용
+- 기존 Google 사용자는 저장된 이름·프로필 사진을 로그인 때 자동 갱신하지 않음
+- 같은 이메일의 Google 미연결 사용자는 고정 `ACCOUNT_LINK_REQUIRED` 409 응답
+- 신규 사용자·기본 근무 템플릿·ShiftMate JWT 발급을 한 DB transaction에서 수행하고 subject advisory lock과 unique recovery로 동시 가입을 단일화
+- `GOOGLE_AUTH_ENABLED=false`를 기본값으로 두고 DB migration·Stage E2E 후에만 활성화
+- 서버에는 Google API key·OAuth client secret·`google-services.json`을 요구하지 않음
+
+### 근거(왜)
+
+- 토큰 신뢰 판정을 변조 가능한 앱 경계 밖의 서버에 집중
+- Web OAuth Client ID 하나를 backend audience로 고정해 iOS/Android가 같은 서버 계약 사용
+- Google `sub`를 이메일과 분리된 불변 공급자 식별자로 사용
+- 자동 이메일 연결을 금지해 다른 인증 방식 계정의 재인증 절차를 생략하지 않음
+- add-only nullable schema와 기본 false flag로 기존 인증 경로 및 이전 이미지 롤백을 유지
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**좋은 점**:
+
+- 위조·잘못된 audience·만료 token과 미검증 이메일을 서버에서 거부
+- iOS/Android가 동일한 응답·오류·ShiftMate JWT 계약 사용
+- 동시 최초 로그인에도 사용자와 기본 템플릿이 중복 생성되지 않음
+- OAuth 설정이 준비되지 않은 환경은 명시적 503으로 안전하게 비활성 유지
+
+**트레이드오프**:
+
+- Google 공개 인증서 조회 장애 시 신규 token 검증이 503으로 실패할 수 있음
+- 이메일 충돌 사용자는 향후 별도 계정 연결 UX 전까지 Google로 로그인할 수 없음
+- Google Cloud에서 Web/iOS/Android OAuth Client를 환경에 맞게 만들고 Android signing fingerprint를 관리해야 함
+
+### 구현 위치
+
+- **DB**: `migrations/google_auth_{preflight,postflight}.sql`, `migrations/add_google_auth_support.sql`, `migrations/rollback_google_auth_support.sql`, `migrations/{stage,center}_google_auth_apply_pgadmin.sql`, `migrations/final_schema.sql`
+- **서비스/모델**: `src/services/googleService.ts`, `src/models/User.ts`
+- **HTTP/OpenAPI**: `src/routes/authRoutes.ts`, `src/controllers/authController.ts`, `src/openapi/googleAuthOpenApi.json`
+- **환경/로그**: `src/config/environment.ts`, `.env.example`, `src/utils/logger.ts`
+- **테스트/문서**: `test/googleAuth*.test.cjs`, `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`
+
+### 추후 과제(언제 다시 평가)
+
+- 명시적 재인증과 감사 로그를 포함한 공급자 계정 연결/해제 UX가 확정되면 `ACCOUNT_LINK_REQUIRED` 이후 흐름을 별도 ADR로 설계
+- Stage의 iOS/Android release 서명 실기기에서 신규·기존·충돌·취소·만료 token 검증이 완료된 뒤 환경별 flag 활성화 승인
+  Flutter가 전달하는 Google ID Token의 진위를 서버가 확인하고 기존 ShiftMate JWT로 교환해야 하며, 같은 이메일의 기존 계정을 자동 연결할지 결정해야 합니다.
 
 ### 선택지(대안)
 
@@ -1309,12 +1520,14 @@ Apple 계정 삭제/revoke와 Google 서버 검증 구현이 완료된 뒤에도
 
 - Google은 `GOOGLE_SERVER_CLIENT_ID`를 항상 필수 검증
 - Apple API는 Team/Key/Client/redirect, `.p8`, 32바이트 encryption key를 항상 필수 검증
+- Apple `.p8`은 Stage/Center base Compose에서 API 컨테이너에만 mount
+- 배포 스크립트는 boolean 값을 파싱하지 않고 두 환경의 `.p8` 존재·권한을 항상 확인
 - 긴급 차단은 feature flag가 아니라 프록시/WAF 또는 이전 이미지 rollback으로 수행
 
 ### 근거(왜)
 
-- 배포 설정과 런타임 활성 상태를 하나로 고정해 boolean 값 파싱 실패를 제거
-- 잘못 구성된 OAuth를 요청 시점까지 숨기지 않고 시작 전에 명확히 실패
+- 배포 설정과 런타임 활성 상태를 하나로 고정해 `true` 문자열 파싱 및 override 누락 실패를 제거
+- 잘못 구성된 OAuth를 요청 시점까지 숨기지 않고 시작 전 명확히 실패
 - 인증 API 계약에서 도달 불가능한 `*_AUTH_DISABLED` 응답 제거
 
 ### 결과/영향(좋은 점/트레이드오프)
@@ -1327,8 +1540,273 @@ Apple 계정 삭제/revoke와 Google 서버 검증 구현이 완료된 뒤에도
 
 - `src/config/environment.ts`
 - `src/services/{appleService,googleService}.ts`
+- `deploy/compose.{production,stage}.yaml`, `deploy/shiftmate-deploy`
 - `src/openapi/{appleAuthOpenApi,googleAuthOpenApi}.json`
 
 ### 추후 과제(언제 다시 평가)
 
 - 공급자 장기 장애로 운영 계층 차단이 반복되면 별도 circuit breaker 정책을 검토
+
+---
+
+## ADR-0027: 비정상 Stage를 새 이미지로 복구할 수 있는 배포 사전검사
+
+### 배경(문제)
+
+통합 배포 스크립트가 이미지 pull과 Stage 재생성 전에 기존 `127.0.0.1:3201` readiness를 최대 60초 검사하고 실패 즉시 종료했습니다. 따라서 Stage API가 이미 중지되었거나 시작 실패 상태이면 정상적인 새 이미지가 있어도 복구 배포를 시작할 수 없었고, 로그에는 반복된 `curl` 연결 실패만 남았습니다.
+
+### 선택지(대안)
+
+1. 기존 Stage readiness를 계속 필수 사전 조건으로 유지하고 운영자가 수동 복구한 뒤 재배포
+2. 기존 Stage readiness 검사를 완전히 제거
+3. 기존 Stage readiness는 단일 진단 검사로 유지하되 실패 시 컨테이너 상태·최근 로그를 남기고 새 이미지 배포를 계속하며, 적용 후 Stage 검증은 필수 gate로 유지
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다. 기존 Stage 장애는 새 이미지 복구를 차단하지 않지만, 새 Stage API와 두 worker의 검증 실패는 계속 전체 배포를 중단합니다.**
+
+- 배포 시작 시 기존 Stage readiness를 한 번 확인
+- 실패하면 Stage API의 Compose 상태와 최근 200줄 로그를 배포 로그에 기록
+- GHCR digest 확인, Redis health, 새 Stage API/cache worker/push worker 재생성을 계속 수행
+- 새 Stage readiness 또는 worker health 실패 시 기존 image override와 해당 컨테이너를 복원
+- 이전 Stage 자체가 이미 unhealthy였으면 복원 health 경고를 명시하고 Center 전환은 수행하지 않음
+
+### 근거(왜)
+
+- 기존 Stage 상태는 배포 전제조건이 아니라 새 버전 검증 대상 환경의 현재 상태임
+- 신규 digest 적용 후의 readiness와 worker health가 실제 배포 안전성을 판단하는 신뢰 가능한 gate임
+- 기존 상태·로그를 먼저 남겨 포트 미바인딩과 서버 시작 오류를 구분할 수 있음
+- Center Blue/Green 전환은 새 Stage 검증 뒤에만 실행되므로 Production 보호 경계는 유지됨
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- Stage가 내려간 상태에서도 정상 새 이미지로 자동 복구 가능
+- 반복된 60초 `curl` 오류 대신 즉시 컨테이너 상태와 서버 시작 오류 확인 가능
+- 새 이미지도 실패하면 기존의 이미 비정상인 Stage로 복원될 수 있으므로 운영자가 로그 원인을 별도로 해결해야 함
+
+### 구현 위치
+
+- `deploy/shiftmate-deploy`
+- `test/deploymentCacheRollout.test.cjs`
+- `_docs/CI_CD_DEPLOYMENT_GUIDE.md`, `deploy/DEPLOY_README.md`
+
+### 추후 과제(언제 다시 평가)
+
+- Stage 고가용성 또는 별도 Blue/Green이 필요해지면 단일 3201 재생성 구조를 재평가
+
+---
+
+## ADR-0028: 고정 root launcher와 main 정본 배포 엔진 자동 반영
+
+### 배경(문제)
+
+기존 self-hosted deploy job은 저장소를 checkout하지 않고 홈서버의 root 소유 `/usr/local/sbin/shiftmate-deploy`를 직접 실행했습니다. 애플리케이션 main과 GHCR 이미지는 자동 반영됐지만 배포 엔진 변경은 별도 수동 설치가 필요해, Stage 복구 수정이 main에 있어도 홈서버에서 구버전 엔진이 계속 실행됐습니다.
+
+### 선택지(대안)
+
+1. 배포 엔진을 계속 홈서버에 고정하고 변경 때마다 수동 설치
+2. self-hosted runner가 checkout한 저장소 스크립트를 제한 없이 직접 sudo 실행
+3. root 소유 고정 launcher만 sudoers에 허용하고, launcher가 exact main checkout과 배포 엔진 blob을 검증한 뒤 root 임시 복사본으로 실행
+
+### 결정(무엇을 선택)
+
+**3번을 선택하고 main push를 자동 배포 trigger로 추가합니다.**
+
+- GitHub-hosted build와 self-hosted deploy job이 같은 `github.sha`를 checkout
+- launcher는 `hspark-1/shift_calendar_server-deploy`, actor `hspark-1`, `/opt/actions-runner/_work`의 고정 workspace만 허용
+- source SHA, Git HEAD, `deploy/shiftmate-deploy`의 tree mode `100755`와 blob hash를 검증
+- 일반 deploy에서는 GHCR image tag SHA와 source SHA 일치를 추가 강제
+- rollback에서는 현재 main의 검증된 배포 엔진으로 입력한 과거 SHA 이미지를 배포
+- 검증 후 `/run`의 root 전용 임시 복사본과 초기화한 환경으로 배포 엔진 실행
+- sudoers는 launcher만 허용하고 저장소 스크립트 직접 sudo 실행은 허용하지 않음
+- main PR은 `Validate main / validate`에서 build·정적 계약·Bash·sudoers·YAML·문서 동기화를 통과해야 merge 가능
+
+### 근거(왜)
+
+- main의 배포 엔진 변경이 이미지 배포와 같은 커밋 단위로 자동 반영됨
+- runner workspace 파일의 경로·소유자·Git object 일치를 확인하고 root 실행 전 별도 복사해 단순 경로 바꿔치기와 실행 중 변경 범위를 줄임
+- 고정 launcher는 최초 1회 설치 후 일상적으로 변경하지 않는 홈서버 trust anchor로 유지
+- rollback 동작은 과거의 잠재적으로 오래된 배포 엔진이 아니라 현재 main의 복구 로직을 사용
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- `deploy/shiftmate-deploy` 변경 후 홈서버 수동 동기화가 필요하지 않음
+- main push가 앱과 배포 엔진을 자동 배포하므로 장애 수정 반영 시간이 단축됨
+- main의 배포 스크립트는 검증 후 root로 실행되므로 main branch와 workflow 변경 권한이 홈서버 root trust boundary에 포함됨
+- main 직접 push 제한, PR·필수 status check와 `deploy/**`·workflow 별도 검토가 필수 운영 통제가 됨
+- launcher 또는 sudoers 자체 변경에는 의도적으로 홈서버 최초/예외 설치가 필요함
+
+### 구현 위치
+
+- `deploy/shiftmate-deploy-launcher`
+- `deploy/sudoers/github-runner-shiftmate`
+- `.github/workflows/{deploy-production,rollback-production}.yml`
+- `.github/workflows/validate-main.yml`
+- `test/deploymentCacheRollout.test.cjs`
+
+### 추후 과제(언제 다시 평가)
+
+- GitHub artifact attestation 또는 commit 서명을 필수화할 때 launcher의 provenance 검증 확장
+- runner 설치 경로나 repository 이름 변경 시 고정 workspace 계약을 명시적으로 migration
+
+---
+
+## ADR-0029: exact main base Compose 자동 동기화와 통합 rollback
+
+> 상태: base Compose 결정은 유지하며, feature flag config와 동일 `.env` key 정리는 ADR-0030으로 배포 bundle을 확장합니다.
+
+### 배경(문제)
+
+ADR-0028은 main의 배포 엔진을 자동 반영했지만 Stage/Center base Compose는 운영자가 별도로 설치하는 정책을 유지했습니다. Apple secret mount가 main Compose에는 있어도 홈서버 실행 파일에는 없어 API가 재시작한 사례처럼, 저장소 정본과 `/opt/shiftmate{,-stage}/compose.yaml`의 불일치가 main push 자동 배포를 깨뜨렸습니다.
+
+### 선택지(대안)
+
+1. base Compose 변경마다 운영자가 두 파일을 수동 설치
+2. self-hosted runner checkout 파일을 검증 없이 root 운영 경로로 복사
+3. 고정 launcher가 exact commit의 배포 엔진과 두 Compose mode/blob을 함께 검증해 root 임시 번들로 만들고, 배포 엔진이 문법·필수 서비스를 검증한 뒤 원자 설치하며 전체 실패 시 직전 파일을 복원
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다.**
+
+- launcher는 `deploy/shiftmate-deploy`의 `100755`와 `deploy/compose.{production,stage}.yaml`의 `100644` tree mode 및 blob hash를 source SHA 기준으로 검증
+- 검증된 세 파일만 `/run/shiftmate-deploy.*` root 전용 임시 번들로 복사하고 초기화한 환경에서 배포 엔진 실행
+- 배포 엔진은 Center source를 두 profile과 `/opt/shiftmate` project directory로, Stage source를 `/opt/shiftmate-stage` project directory로 `docker compose config --quiet` 검증
+- 기존 두 base Compose를 백업하고 target directory의 임시 파일에서 `root:root 0644`로 설치한 뒤 `mv`로 원자 교체
+- Center blue/green 전체 API·worker·Redis와 Stage 네 서비스 존재를 적용 전에 강제
+- 배포 실패 시 새 구성으로 시작한 target/Stage 서비스를 먼저 중지하고 두 base Compose, Stage image override, 상태와 upstream을 직전 상태로 복원
+- `.env`, `.deploy.env`, Firebase/Apple `secrets/`와 DB migration은 자동 쓰기 범위에서 제외
+- rollback workflow도 현재 main의 검증된 base Compose를 사용하며, 과거 이미지는 현재 운영 구성과 하위 호환되어야 함
+
+### 근거(왜)
+
+- main commit 하나가 애플리케이션 이미지, 배포 엔진과 실제 실행 Compose의 정본이 됨
+- runner workspace의 임의 파일을 root로 신뢰하지 않고 Git object 일치 검증과 root 임시 복사를 거침
+- Compose가 secret 값이 아니라 mount·서비스 topology만 관리하므로 환경별 secret을 보존하면서 자동화 가능
+- base Compose 변경과 애플리케이션 변경을 같은 배포 rollback 경계에 포함해야 부분 적용을 방지할 수 있음
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- 이후 두 Compose 변경에는 홈서버 수동 `install`이 필요하지 않음
+- 문법 오류, profile/서비스 누락은 컨테이너 변경 전에 중단됨
+- Stage 또는 Center 검증 실패 시 저장소의 새 Compose도 적용 전 파일로 되돌아감
+- launcher trust boundary가 두 Compose까지 확장되므로 이번 기능을 활성화하려면 고정 launcher를 홈서버에 마지막으로 1회 갱신해야 함
+- rollback에서 현재 main Compose와 과거 이미지의 호환성을 유지해야 하며 breaking Compose 변경은 expand/contract 순서를 따라야 함
+
+### 구현 위치
+
+- `deploy/shiftmate-deploy-launcher`
+- `deploy/shiftmate-deploy`
+- `test/deploymentCacheRollout.test.cjs`
+- `_docs/CI_CD_DEPLOYMENT_GUIDE.md`, `deploy/DEPLOY_README.md`
+
+### 추후 과제(언제 다시 평가)
+
+- base Compose 이외 Nginx snippet까지 같은 정본 동기화 경계에 포함할 필요가 생길 때 별도 검증·rollback 정책을 설계
+- GitHub artifact attestation 또는 서명 검증을 도입할 때 세 파일 bundle provenance로 확장
+
+---
+
+## ADR-0030: 환경별 feature flag config를 Git 배포 정본으로 관리
+
+### 배경(문제)
+
+Stage/Center의 cache, push, API docs, 회원 탈퇴 활성 플래그를 홈서버 `.env`에서 직접 수정하면 환경·프로세스 간 값 누락, 오타, 적용 대상 재생성 누락과 변경 이력 부재가 발생할 수 있습니다. base Compose와 배포 엔진은 main에서 자동 반영되지만 기능 활성 상태만 홈서버 수동 파일에 남아 배포 commit과 런타임 상태가 분리되어 있었습니다.
+
+### 선택지(대안)
+
+1. 기존처럼 홈서버 `.env`를 직접 수정
+2. 애플리케이션 TypeScript 상수로 모든 환경의 flag를 고정
+3. 비밀값 없는 Stage/Production flag config를 Git에서 분리 관리하고 exact commit 배포·검증·rollback 경계에 포함
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다.**
+
+- `deploy/config/feature-flags.production.env`, `feature-flags.stage.env`를 환경별 정본으로 사용
+- 관리 key는 `WORK_SHIFT_CACHE_ENABLED`, `PUSH_JOB_ENQUEUE_ENABLED`, `PUSH_WORKER_ENABLED`, `API_DOCS_ENABLED`, `ACCOUNT_DELETION_ENABLED`, `ACCOUNT_DELETION_WORKER_ENABLED` 6개로 제한
+- 각 값은 exact lowercase `true` 또는 `false`만 허용하고 누락·중복·미등록 key를 배포 전에 거절
+- launcher가 source SHA의 두 config mode/blob을 검증해 root 임시 bundle에 포함
+- 배포 엔진이 Compose보다 먼저 `feature-flags.env`를 원자 설치하고 API/worker를 같은 배포에서 재생성
+- 최초 전환 때 기존 `.env`의 동일 key line만 자동 제거해 이중 정본을 없애고, 실패 시 정리 전 `.env`와 직전 config를 복원
+- secret, URL, credential, 수치형 tuning 값은 계속 홈서버 `.env`에서 관리
+
+### 근거(왜)
+
+- flag 변경을 PR 리뷰, commit 이력, CI 정적 검증과 Stage → Center 배포 절차에 포함할 수 있음
+- Stage와 Production 값을 분리하면서도 API와 worker가 같은 환경 config를 공유해 프로세스별 누락을 방지
+- TypeScript 상수로 고정하지 않아 환경별 rollout과 enqueue → worker 같은 두 commit 단계 활성화를 유지
+- 기존 배포 실패 복원 경계에 config와 `.env` 정리를 포함해 부분 적용을 방지
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- 이후 운영 flag 변경에 홈서버 접속·`sudoedit`이 필요하지 않음
+- config-only 변경도 현재 파이프라인 특성상 새 commit SHA 이미지 build와 Stage/Center 전체 검증을 거침
+- 첫 적용 commit의 값이 현재 홈서버 값보다 우선하므로 merge 전에 환경별 원하는 상태를 config에서 명시적으로 검토해야 함
+- 긴급 flag 변경도 main 배포 경로를 사용하며 GitHub Actions 자체가 불가한 경우에는 별도 수동 복구 절차가 필요함
+
+### 구현 위치
+
+- `deploy/config/feature-flags.{production,stage}.env`
+- `deploy/compose.{production,stage}.yaml`
+- `deploy/shiftmate-deploy-launcher`, `deploy/shiftmate-deploy`
+- `test/deploymentCacheRollout.test.cjs`
+- `_docs/CI_CD_DEPLOYMENT_GUIDE.md`, `deploy/DEPLOY_README.md`
+
+### 추후 과제(언제 다시 평가)
+
+- flag별 승인자 또는 예약 활성화가 필요해지면 config schema와 workflow environment approval을 확장
+- 이미지 rebuild 없는 config-only 배포가 필요해지면 동일 검증 bundle을 사용하는 별도 workflow를 설계하되 현재 Stage/Center health gate는 유지
+
+---
+
+## ADR-0031: 회원 탈퇴 worker를 config 제어 배포 topology에 포함
+
+### 배경(문제)
+
+회원 탈퇴 API와 worker 플래그는 환경별 Git config에 포함되어 있었지만 Stage/Center Compose와 Blue/Green 배포 대상에는 전용 worker가 없었습니다. 따라서 config에서 worker를 활성화해도 실제 처리 프로세스가 실행되지 않아 접수된 계정 삭제가 `PENDING`에 머무를 수 있었습니다.
+
+### 선택지(대안)
+
+1. API 프로세스 안에서 회원 탈퇴 polling도 함께 실행
+2. 운영자가 홈서버에서 worker 컨테이너를 수동 실행
+3. Stage와 Center 색상별 전용 worker를 base Compose·health gate·rollback 범위에 포함하고 환경별 config로 실행 여부를 제어
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다.**
+
+- Stage에 회원 탈퇴 worker 1개, Center Blue/Green에 색상별 1개를 추가
+- API·cache·push worker와 동일한 불변 image digest로 배포
+- Apple revoke용 `.p8` secret과 worker 전용 `DB_POOL_MAX=2`를 Compose에서 주입
+- worker flag가 꺼져도 프로세스는 idle 상태로 배포하고 PostgreSQL·Redis 연결 health를 유지
+- worker flag가 켜지면 health에서 탈퇴 테이블과 `users` 탈퇴 컬럼까지 검증
+- `ACCOUNT_DELETION_ENABLED=true`인데 worker flag가 `false`인 config는 배포 전 거절
+- 최초 도입 배포 실패 시 직전 Compose에 없던 신규 worker 컨테이너를 제거하고 기존 topology로 복원
+- main 이미지 build 전에 회원 탈퇴 PostgreSQL 통합 테스트를 실행
+
+### 근거(왜)
+
+- API 접수와 비동기 purge 실행을 분리해 외부 provider 장애와 장시간 삭제가 API 요청 시간을 점유하지 않음
+- Git config 변경만으로 Stage/Production의 활성 상태를 감사 가능한 commit 단위로 제어
+- API만 켜져 삭제 요청이 처리되지 않는 구성 오류를 사전에 차단
+- 기존 Stage 우선·Center Blue/Green health/rollback 경계를 그대로 재사용
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- 두 flag가 `false`인 현재 config에서는 탈퇴 기능은 계속 비활성이고 worker는 idle 상태
+- 활성화 전 `add_account_deletion_support.sql`, `KAKAO_ADMIN_KEY`, Apple/Redis/DB 설정이 필수
+- 배포 서비스 수는 Stage 5개, Center 전체 profile 기준 13개로 증가
+- 이전 image가 신규 worker command를 포함하지 않는 시점으로 rollback할 때는 현재 Compose와 image 호환성을 확인해야 함
+
+### 구현 위치
+
+- `deploy/compose.{production,stage}.yaml`
+- `deploy/shiftmate-deploy`, `deploy/stage.deploy.env.example`
+- `src/workers/accountDeletionWorker.ts`
+- `.github/workflows/deploy-production.yml`
+- `test/{deploymentCacheRollout,appleAuth}.test.cjs`
+
+### 추후 과제(언제 다시 평가)
+
+- 탈퇴 처리량 또는 provider rate limit 때문에 병렬도 분리가 필요해질 때 환경별 replica·batch 설정을 재평가

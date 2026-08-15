@@ -2,7 +2,121 @@
 
 # 작업 일지
 
+## 2026-08-16
+
+### [DONE] config 기반 회원 탈퇴 API·worker 배포 제어
+
+- **목적**: 호스트 `.env`가 아닌 저장소 추적 `deploy/config/feature-flags.{stage,production}.env`를 정본으로 회원 탈퇴 API 접수와 전용 worker 처리를 환경별 제어한다.
+- **변경**: Stage 1개와 Center Blue/Green 색상별 account deletion worker를 추가하고 tracked feature flag config, Apple secret, worker 전용 DB pool, migration-aware healthcheck를 연결했다. 동일 image 적용·health gate·최초 도입 호환 rollback에 worker를 포함하고, 탈퇴 API만 켜지는 위험한 config 조합을 배포 전에 거절한다. main 이미지 build 전에 회원 탈퇴 PostgreSQL 통합 테스트도 실행한다.
+- **영향범위**: 환경별 6개 feature flag 정본, Stage/Center Compose topology, 배포 엔진 rollback, worker health, CI와 운영 문서.
+- **파일**: `deploy/compose.{stage,production}.yaml`, `deploy/shiftmate-deploy`, `deploy/stage.deploy.env.example`, `src/workers/accountDeletionWorker.ts`, `.github/workflows/deploy-production.yml`, `test/{accountDeletion,appleAuth,deploymentCacheRollout}.test.cjs`, `_docs/{PROJECT_CONTEXT,DECISIONS,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`.
+- **테스트**: `npm test` 60 pass/6 skip, `bash -n`, Ruby YAML parse, Stage/Center `docker compose config --quiet`, 배포 문서 `cmp`, `git diff --check` 성공. 로컬 Docker daemon과 PostgreSQL 55432가 없어 destructive fixture를 쓰는 회원 탈퇴 integration은 로컬에서 실행하지 않았고 main build job에서 필수 실행하도록 추가했다.
+- **롤백**: config에서 `ACCOUNT_DELETION_ENABLED=false`, `ACCOUNT_DELETION_WORKER_ENABLED=false`를 선행 배포하고 이전 이미지로 rollback한다. DB 스키마와 진행 요청은 보존한다.
+- **다음**: Stage/Center DB migration과 secret 준비 후 Stage config의 두 탈퇴 flag를 함께 활성화해 실제 Apple/Kakao·DB purge·Redis tombstone E2E를 검증한다. 현재 두 config 값은 모두 `false`로 유지한다.
+
+### [DONE] Git 정본 feature flag config 자동 배포
+
+- **목적**: 홈서버의 Stage/Center `.env`를 사람이 직접 수정하지 않고, 저장소의 환경별 feature flag config 변경을 main 배포와 같은 검증·원자 적용·롤백 경로로 반영한다.
+- **변경**:
+  - Stage/Production별 `deploy/config/feature-flags.*.env`를 추가하고 cache, push enqueue/worker, API docs, 회원 탈퇴 API/worker의 정확한 6개 boolean key만 허용
+  - launcher가 두 config의 exact source SHA tree mode/blob을 검증하고 root 임시 bundle에 포함
+  - 배포 엔진이 key 누락·중복·미등록 key·`true|false` 외 값을 거절한 뒤 두 config와 base Compose를 원자 설치
+  - Compose가 `.env` 다음에 `feature-flags.env`를 읽어 API/cache worker/push worker에 같은 환경별 flag를 주입
+  - 최초 전환 때 홈서버 `.env`의 동일 6개 key line만 값 노출 없이 자동 제거하고, 전체 실패 시 직전 config·Compose·정리 전 `.env`를 함께 복원
+  - 로컬 `.env.example`, PROJECT_CONTEXT, ADR-0030과 동일한 CI/CD 운영 문서를 새 정본 계약으로 갱신
+- **영향범위**: 배포 config/launcher/Compose/rollback, 정적 테스트, 환경변수 예시와 운영 문서. DB 스키마와 secret 값은 변경하지 않는다.
+- **파일**: `deploy/config/*`, `deploy/{compose.production.yaml,compose.stage.yaml,shiftmate-deploy-launcher,shiftmate-deploy}`, `test/deploymentCacheRollout.test.cjs`, `.env.example`, `_docs/{PROJECT_CONTEXT,DECISIONS,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**:
+  - `npm test`: 59 pass, 명시적 integration 6 skip, 0 fail
+  - 배포 정적 계약 16 pass, launcher/deploy/bootstrap `bash -n`, sudoers `visudo -cf` 통과
+  - Docker Compose v2.38.2로 임시 Stage/Center project와 실제 두 flag config를 합성해 `config --quiet` 통과
+  - workflow/Compose YAML parse, 두 CI/CD 문서 byte 일치, `git diff --check` 통과
+- **롤백**: 변경 커밋을 revert해 `.env` 기반 flag 주입으로 복귀한다. 배포 도중 실패하면 배포 엔진이 직전 Compose와 환경별 flag config를 함께 자동 복원하도록 한다.
+- **다음**: 첫 배포 전에 Stage/Production 파일의 6개 값이 현재 의도한 운영 상태인지 검토하고, 변경된 bundle 계약 때문에 홈서버 고정 launcher를 1회 갱신한 뒤 main 배포를 실행한다.
+
+### [DONE] main 정본 Stage/Center base Compose 자동 동기화
+
+- **목적**: `deploy/compose.stage.yaml`과 `deploy/compose.production.yaml` 변경을 main 배포 시 홈서버 실행 경로에 자동 반영해 수동 `install` 작업과 정본 불일치를 제거한다.
+- **변경**:
+  - launcher가 exact source SHA에서 배포 엔진 `100755`와 Stage/Center Compose `100644`의 mode·blob을 검증하고 root 전용 `/run` 임시 번들로 복사
+  - 배포 엔진이 두 source Compose를 실제 홈서버 project directory 기준으로 문법 검사하고 Center blue/green 전체 서비스와 Stage 네 서비스 존재를 설치 전에 강제
+  - 기존 두 base Compose를 백업하고 target directory 임시 파일에 `root:root 0644`로 쓴 뒤 `mv`로 원자 교체
+  - 배포 실패 시 새 구성의 target/Stage 서비스를 먼저 중지하고 두 base Compose, Stage override, 상태와 upstream을 직전 상태로 복원
+  - `.env`, `.deploy.env`, `secrets/`, DB는 자동 쓰기 범위에서 제외하고 PROJECT_CONTEXT, ADR-0029와 동일한 CI/CD 가이드를 갱신
+- **영향범위**: root launcher 검증 경계, Stage/Center base Compose 설치·rollback, 배포 정적 테스트와 CI/CD 운영 문서. `.env`, `.deploy.env`, `secrets/`, DB는 변경하지 않는다.
+- **파일**: `deploy/{shiftmate-deploy-launcher,shiftmate-deploy}`, `test/deploymentCacheRollout.test.cjs`, `_docs/{PROJECT_CONTEXT,DECISIONS,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**:
+  - `npm test`: 58 pass, 명시적 integration 6 skip, 0 fail
+  - launcher/deploy `bash -n`, 배포 정적 테스트 15 pass
+  - Docker Compose v2.38.2로 임시 Center/Stage project directory와 source Compose `config --quiet` 통과
+  - Compose/workflow YAML parse, CI/CD 정본과 배포 README byte 일치, `git diff --check` 통과
+  - 로컬에 `shellcheck`가 없어 별도 실행하지 못했으며 `Validate main` workflow의 Bash 검증으로 보완
+- **롤백**: 변경 커밋을 revert하고 기존 수동 base Compose 설치 정책으로 복귀한다. 배포 중 실패 시 스크립트가 서버의 직전 Compose 파일을 자동 복원한다.
+- **다음**: 커밋을 main에 push한 뒤 홈서버 runner checkout의 SHA를 확인하고 고정 launcher를 1회 갱신한다. 첫 자동 run이 구형 launcher 인자 계약으로 실패하면 갱신 후 failed job을 재실행하며, 이후 Compose 변경은 자동 반영된다.
+
+## 2026-08-15
+
+### [DONE] main 정본 배포 엔진 자동 반영 launcher 전환
+
+- **목적**: 홈서버의 배포 엔진을 매번 수동 교체하지 않고, main의 정확한 커밋에 포함된 `deploy/shiftmate-deploy`가 자동 배포와 수동 롤백에 사용되게 한다.
+- **변경**:
+  - root 소유 고정 launcher가 repository/actor/workspace/source SHA/Git tree mode·blob/image SHA를 검증하고 `/run`의 root 임시 복사본만 초기화한 환경으로 실행
+  - Deploy workflow에 main push trigger와 self-hosted exact-SHA checkout을 추가하고, 수동 실행 confirm 경로도 유지
+  - Rollback workflow는 현재 main의 검증된 배포 엔진으로 지정한 과거 SHA 이미지를 배포
+  - sudoers 직접 실행 대상을 기존 배포 엔진에서 launcher로 축소하고 main branch protection·최초 1회 설치·긴급 rollback 절차 문서화
+  - main PR에서 build·정적 계약·Bash·sudoers·YAML·문서 동기화를 확인하는 `Validate main` 필수 check 추가
+  - 배포 정적 테스트, PROJECT_CONTEXT와 ADR-0028 갱신
+- **영향범위**: GitHub Actions 배포/롤백 workflow, 홈서버 sudo trust boundary, 배포 스크립트 실행 경로와 운영 문서. 애플리케이션 런타임과 DB 스키마는 변경하지 않는다.
+- **파일**: `deploy/{shiftmate-deploy-launcher,sudoers/github-runner-shiftmate}`, `.github/workflows/{validate-main,deploy-production,rollback-production}.yml`, `test/deploymentCacheRollout.test.cjs`, `_docs/{PROJECT_CONTEXT,DECISIONS,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**:
+  - `npm test`: 57 pass, 명시적 integration 6 skip, 0 fail
+  - launcher/deploy/bootstrap `bash -n` 통과
+  - `visudo -cf deploy/sudoers/github-runner-shiftmate` 통과
+  - Validate/Deploy/Rollback workflow와 Stage/Center Compose YAML parse 통과
+  - CI/CD 정본과 배포 README byte 일치, `git diff --check` 통과
+- **롤백**: launcher 호출과 checkout을 revert하고 기존 root 소유 `/usr/local/sbin/shiftmate-deploy` 직접 실행 정책으로 복귀한다. 홈서버 sudoers 복원은 별도 승인된 root 작업으로 수행한다.
+- **다음**: main push 전에 홈서버에 launcher와 새 sudoers를 최초 1회 설치하고 branch protection을 설정한다. 이후 `deploy/shiftmate-deploy` 변경은 main commit checkout을 통해 자동 반영한다.
+
 ## 2026-08-14
+
+### [DONE] 비정상 Stage가 배포 복구를 차단하는 사전 health gate 수정
+
+- **목적**: 기존 Stage API가 중지·재시작 중이거나 unhealthy인 경우에도 새 불변 이미지로 Stage를 복구하고, 새 Stage 검증 실패 시에만 기존 상태로 롤백할 수 있게 한다.
+- **변경**:
+  - 기존 Stage readiness의 30회 재시도·즉시 실패를 단일 진단 검사로 변경
+  - 실패 시 Stage API Compose 상태와 최근 200줄 로그를 남기고 GHCR pull 및 새 Stage 적용을 계속
+  - 새 Stage API readiness와 cache/push worker health는 기존 필수 gate로 유지하고 실패 시 이전 override 복원
+  - 정적 회귀 테스트, PROJECT_CONTEXT, ADR-0027과 동일한 두 CI/CD 운영 문서를 갱신
+- **영향범위**: `deploy/shiftmate-deploy`의 배포 시작 전 Stage 검사, 배포 정적 테스트, CI/CD 문서. 애플리케이션 런타임과 DB 스키마는 변경하지 않는다.
+- **파일**: `deploy/shiftmate-deploy`, `test/deploymentCacheRollout.test.cjs`, `_docs/{PROJECT_CONTEXT,DECISIONS,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**:
+  - `npm test`: 55 pass, 명시적 integration 6 skip, 0 fail
+  - `bash -n deploy/shiftmate-deploy` 통과
+  - CI/CD 정본과 배포 README byte 일치 확인
+- **롤백**: 해당 배포 스크립트·테스트·문서 변경을 revert하고 기존 Stage 사전 readiness 필수 정책으로 복귀한다.
+- **다음**: 변경을 배포 `main`에 반영한 뒤 홈서버의 root 소유 `/usr/local/sbin/shiftmate-deploy`를 새 파일로 교체하고 workflow를 새로 실행한다. 새 Stage도 실패하면 이제 출력되는 `server_start_failed`와 환경변수·DB 오류를 기준으로 원인을 해결한다.
+
+### [DONE] Apple·Google 로그인 상시 활성화와 배포 빌드 검증
+
+- **목적**: Apple·Google 로그인을 `.env` boolean feature flag 없이 항상 사용할 수 있게 하고, 배포 시 `true` 환경값 처리 때문에 빌드가 실패하지 않도록 검증한다.
+- **변경**:
+  - 인증 서비스와 시작 환경 검증에서 `APPLE_AUTH_ENABLED`, `GOOGLE_AUTH_ENABLED` 분기 및 비활성 오류 계약을 제거하고 두 로그인을 항상 활성화
+  - `.env`/`.env.example`에서 두 boolean 변수를 제거하고 Apple/Google 필수 설정을 시작 전에 항상 검증
+  - Apple 선택적 Compose override 2개를 제거하고 Stage/Center base Compose가 API에만 `.p8`을 상시 mount하도록 변경
+  - 배포 스크립트의 boolean 파싱과 `true`/override 분기를 제거하고 두 환경 `.p8` 존재·`root:root 0444`를 항상 사전 검증
+  - OpenAPI의 `APPLE_AUTH_DISABLED`/`GOOGLE_AUTH_DISABLED` 계약, 관련 테스트·운영 가이드 제거 및 ADR-0026 추가
+- **영향범위**: Apple·Google public 인증 endpoint, API 시작 전 환경 검증, Stage/Center Compose 및 배포 preflight, 인증 계약 테스트와 문서.
+- **브랜치 적용 경계**:
+  - `develop`: `.env.example`, `src/config`, `src/services`, `src/openapi`, 범용 migration, Apple·Google 인증 테스트와 공개 프로젝트/OAuth 문서
+  - 배포 `main`: `develop` 대상 전체에 더해 `deploy/`, `_docs/CI_CD_DEPLOYMENT_GUIDE.md`, 배포 전용 Stage migration·정적 테스트를 포함한 완전한 배포 이미지 정본
+- **파일**: `src/{config/environment.ts,services/appleService.ts,services/googleService.ts,openapi/appleAuthOpenApi.json,openapi/googleAuthOpenApi.json}`, `deploy/{compose.production.yaml,compose.stage.yaml,shiftmate-deploy}`, 삭제된 `deploy/compose.apple-auth.{production,stage}.yaml`, `.env.example`, 인증·배포 테스트, OAuth migration 안내문, `_docs/{PROJECT_CONTEXT,DECISIONS,APPLE_SIGN_IN_SERVER_GUIDE,GOOGLE_SIGN_IN_SERVER_GUIDE,OAUTH_API_GUIDE,DEPLOYMENT_GUIDE,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**:
+  - `npm test`: 54 pass, 명시적 integration 6 skip, 0 fail
+  - `APPLE_AUTH_ENABLED=true GOOGLE_AUTH_ENABLED=true npm run build`: 성공. 구형 `true` 값이 남아 있어도 빌드 경로가 읽지 않음을 확인
+  - Stage/Center `docker compose config --quiet`, Bash 문법, OpenAPI JSON parse, 배포 문서 byte 일치, `git diff --check`: 모두 통과
+  - 실제 `linux/amd64` Docker image build는 로컬 Docker daemon 미실행으로 수행하지 못함. Dockerfile은 build 단계에서 런타임 OAuth 환경변수를 읽지 않음
+- **롤백**: 본 변경 파일을 revert하고 기존 feature flag 기반 활성화 정책으로 복원한다.
+- **다음**: 배포 호스트의 Stage/Center `.env`에서도 두 구형 변수를 제거하고, 두 환경의 Apple `.p8` 및 필수 OAuth 값을 준비한 뒤 CI의 `linux/amd64` image build와 Stage 실기기 로그인을 확인한다.
 
 ### [DONE] develop 브랜치 Apple·Google 로그인 상시 활성화 적용
 
@@ -47,6 +161,199 @@
 - **테스트**: 현재 코드·`migrations/final_schema.sql`·두 draw.io의 사용자 FK/인증/cache 구조를 대조하고 공식 Apple/Kakao/Google/Naver 문서를 확인했다. Markdown diff whitespace와 draw.io XML parse를 검증했다.
 - **롤백**: 이번 문서 변경을 revert한다. 구현·운영 데이터 변경은 없으므로 별도 DB rollback은 필요 없다.
 - **다음**: 설계의 개인정보 보존 기간·완료 SLA를 승인한 뒤 migration/preflight → model/service/worker → OpenAPI → 격리 PostgreSQL/Redis 통합 테스트 순서로 구현한다.
+
+## 2026-08-13
+
+### [DONE] Google 컬럼 통합 테스트 fixture 동기화
+
+- **목적**: `User` 모델의 `google_id` 추가 후 구형 최소 DB fixture에서 통합 테스트가 사용자 생성 단계에 실패하는 문제 해결
+- **변경**: 현재 사용자 모델을 사용하는 캐시·그룹·Push·Apple fixture에 nullable `google_id`를 추가하고 Google 정적 계약으로 고정. Google migration 전 상태를 검증하는 전용 fixture는 의도적으로 유지
+- **영향범위**: 격리 PostgreSQL 통합 테스트 fixture와 Google 정적 테스트만 변경하며 운영 DB와 런타임 코드에는 영향 없음
+- **파일**: `test/fixtures/{cacheIntegrationSchema,groupIntegrationBaseSchema,pushIntegrationBaseSchema,appleAuthMigrationBaseSchema}.sql`, `test/googleAuth.test.cjs`, `_docs/WORKLOG.md`
+- **테스트**: `npm test` 49 pass, 5개의 명시적 integration skip, 0 fail. `git diff --check` 통과. PostgreSQL 통합 테스트는 로컬 Docker daemon 미실행으로 수행하지 못했으며 CI 격리 서비스에서 확인 필요
+- **롤백**: 본 fixture·테스트·작업 일지 변경을 revert
+- **다음**: `main` 반영 후 CI의 캐시 23건과 Push·Apple·Google PostgreSQL 통합 테스트 결과 확인
+
+### [DONE] Google 인증 CI의 gitignore 파일 의존성 제거
+
+- **목적**: 깨끗한 원격 체크아웃에 존재하지 않는 `AGENTS.md` 때문에 Google 인증 정적 계약 테스트가 실패하지 않도록 저장소 추적 파일만 검증한다.
+- **변경**: Google 스키마 동기화 검사에서 gitignore 대상인 `AGENTS.md` 의존성과 테스트명 표기를 제거하고, 원격에 추적되는 모델·실행 DDL·schema.drawio 검증은 유지했다.
+- **영향범위**: Google 인증 정적 계약 테스트만 변경하며 런타임 코드와 DB에는 영향이 없다.
+- **파일**: `test/googleAuth.test.cjs`, `_docs/WORKLOG.md`
+- **테스트**: `npm test` 47 pass, 7개의 명시적 integration skip, 0 fail. `git diff --check` 통과.
+- **롤백**: 본 테스트 및 작업 일지 변경을 revert한다.
+- **다음**: 배포 저장소 `main`에 반영한 뒤 실패한 workflow를 재실행한다.
+
+## 2026-08-11
+
+### [DONE] Google ID Token 기반 소셜 로그인 서버 구현
+
+- **목적**: Flutter가 전달하는 Google ID Token을 서버에서 검증하고 기존 ShiftMate JWT를 발급하는 `/api/v1/auth/google/token` 계약을 구현한다.
+- **완료일**: 2026-08-12
+- **변경**:
+  - 공식 `google-auth-library`로 ID Token 서명·issuer·audience·만료와 verified email을 검증하고 Google `sub`를 사용자 식별 정본으로 사용
+  - `/api/v1/auth/google/token`의 rate limit·validation, 신규 201/기존 200, 명시적 `is_new_user`, 공통 오류/request ID, 민감정보 제외 구조화 로그와 OpenAPI 추가
+  - 같은 이메일의 기존 계정 자동 연결을 금지하고, 신규 사용자·기본 템플릿·refresh token을 한 transaction으로 생성하며 subject advisory lock으로 동시 가입 단일화
+  - nullable `users.google_id`와 partial unique index의 preflight/apply/postflight/승인형 rollback, Stage/Center pgAdmin 단일 transaction 파일, 정본 schema·draw.io 동기화
+  - 기본 false feature flag, Web OAuth Client ID 시작 검증, CI 실DB 통합 테스트, Google Cloud 발급·배포·인수·롤백 가이드와 ADR-0024 추가
+- **영향범위**: 인증 public API, `users` 스키마/모델, 환경변수, OpenAPI, 테스트와 배포 문서. 기존 카카오·네이버·Apple 로그인 및 캘린더 공개 규칙은 변경하지 않는다.
+- **파일**: `src/{services/googleService.ts,controllers/authController.ts,routes/authRoutes.ts,models/User.ts,config/environment.ts,utils/logger.ts,index.ts,openapi.ts}`, `src/openapi/googleAuthOpenApi.json`, `migrations/*google*`, `migrations/final_schema.sql`, `test/googleAuth*.test.cjs`, `test/fixtures/googleAuthMigrationBaseSchema.sql`, `.env.example`, `.github/workflows/deploy-production.yml`, `package*.json`, `schema.drawio`, `_docs/{GOOGLE_SIGN_IN_SERVER_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`
+- **롤백**: `GOOGLE_AUTH_ENABLED=false`로 신규 Google 로그인을 차단하고 이전 서버 이미지를 배포하며 nullable `google_id` 컬럼/index는 유지한다. 데이터가 0건이고 별도 승인을 받은 경우에만 rollback SQL을 사용한다.
+- **테스트**:
+  - `npm test`: 49 pass, 5개의 명시적 integration skip, 0 fail
+  - `npm run test:google-integration`: 격리 PostgreSQL 16에서 migration·HTTP 201·transaction·기존 profile 불변·이메일 충돌·동시성·rollback 7 pass
+  - 격리 PostgreSQL 16.14에서 psql preflight/apply/postflight, 데이터 존재 rollback 차단과 0건 승인 rollback, Stage/Center pgAdmin 단일 파일, 정본 `final_schema.sql` 실행 검증
+  - Google OpenAPI/package JSON, schema/visibility draw.io XML, GitHub Actions YAML parse와 `git diff --check` 통과
+  - `npm audit --audit-level=high`: high/critical 0건. 고정 `firebase-admin 13.10.0` 간접 의존성의 기존 moderate 8건은 별도 버전 전환 대상
+- **다음**: 운영자가 `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`에 따라 Web/iOS/Android OAuth Client ID와 Android 실제 서명 fingerprint를 준비하고, Stage DB 백업·migration 후 서버를 false로 먼저 배포한다. 실제 Stage/Center DB 적용과 feature flag 활성화는 이번 작업에서 수행하지 않았다.
+
+## 2026-08-06
+
+### [DONE] Apple Developer Portal 생성 절차 문서 보강
+
+- **목적**: 운영자가 별도 질의 없이 Stage/Center Services ID와 Sign in with Apple key를 생성하고 서버 환경변수·secret에 정확히 연결할 수 있게 한다.
+- **변경**: Primary App ID 활성화와 endpoint 보류 사유, Stage/Center Services ID·Domain·Return URL, Sign in with Apple 전용 key 생성·Configure·Key ID/`.p8` 1회 다운로드 보관, APNs key 재사용 조건, 환경변수와 호스트 secret 경로를 운영 가이드에 추가하고 필수 문구를 회귀 테스트로 고정했다.
+- **영향범위**: Apple 운영 문서와 문서 회귀 테스트. API·DB·배포 환경·Apple Developer 계정은 변경하지 않는다.
+- **파일**: `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`, `test/appleAuth.test.cjs`, `_docs/WORKLOG.md`
+- **테스트**: `npm test` 39 pass/4 의도된 integration skip, `git diff --check` 통과. Stage/Center exact 값, key 생성 단계, secret 경로와 endpoint 보류 문구를 정적 검증했다.
+- **롤백**: 문서 및 회귀 테스트 변경 커밋을 revert한다.
+- **다음**: 운영자가 가이드 5장의 Portal 생성 절차를 완료하고 실제 Key ID와 `.p8`을 안전하게 보관한다. 앞선 Stage 배포 오류는 별도로 환경 검증을 통과하기 전까지 재배포하지 않는다.
+
+### [DONE] Apple Stage pgAdmin 단일 migration 실행 파일
+
+- **목적**: 홈서버 원격 접근이 복구되기 전에도 운영자가 Apple DB 선적용을 누락 없이 한 transaction으로 실행하고 결과 증거를 전달할 수 있게 한다.
+- **변경**: PostgreSQL 16/대상 DB/복원 시험 백업 식별자/승인문구/primary·권한/`users.apple_id` index/기존 객체를 검증한 뒤 Apple OAuth DDL과 21개 컬럼·11개 제약·6개 index·COMMENT·0건 strict postflight를 같은 transaction에서 수행하는 pgAdmin Query Tool 전용 SQL 추가. 원본 migration SHA-256과 DB/backup/초기 건수를 Data Output에 남기고 psql 경로와의 중복 실행 금지를 문서화했다.
+- **영향범위**: Stage DB migration 실행 절차와 문서·정적 테스트. 실제 Stage/Center DB, API 배포, Apple feature flag와 앱 버튼은 변경하지 않는다.
+- **파일**: `migrations/stage_apple_auth_apply_pgadmin.sql`, `.gitignore`, `test/appleAuth.test.cjs`, `_docs/{APPLE_SIGN_IN_SERVER_GUIDE,PROJECT_CONTEXT,DEPLOYMENT_GUIDE,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**: `npm test` 38 pass/4 의도된 integration skip, `npm run test:apple-integration` 8 pass. 격리 PostgreSQL 16.14에서 정상 apply와 21컬럼/11제약/6 index/checksum/0건 출력 통과, 재실행은 기존 relation preflight에서 exit 3으로 차단되고 기존 두 테이블 0건 보존, 승인문구 누락은 exit 3 후 대상 relation 0개로 전체 rollback됨을 확인했다.
+- **롤백**: 실행 파일과 문서·테스트 커밋을 revert한다. 실제 적용 후에는 테이블을 즉시 drop하지 않고 API를 `APPLE_AUTH_ENABLED=false`로 유지한다.
+- **다음**: 운영자가 복원 시험 완료 백업을 확보해 이 파일을 실제 Stage에 적용하고 Data Output을 보존한 뒤 false 배포 선행 조건으로 연결한다.
+
+### [TODO] Apple 로그인 서버 1단계 false 배포
+
+- **목적**: 검증된 Apple 로그인 서버 이미지를 Stage → Center에 `APPLE_AUTH_ENABLED=false`로 배포하고 기존 인증 및 `503 APPLE_AUTH_DISABLED`를 확인한다.
+- **현재 상태**:
+  - 서버 1단계와 선택적 Apple secret override를 `a69445b`(`feat(auth): add gated Apple sign-in server`)로 커밋하고 `shift_calendar_server-deploy/main`에 push 완료
+  - GitHub Actions 최근 성공 배포는 `1e7abea`, self-hosted runner `homeserver-firebat-n100`은 online·idle임을 GitHub API에서 확인
+  - 첨부 가이드가 요구하는 실제 Stage/Center DB 백업·Apple preflight/migration/postflight 결과는 아직 확보되지 않음
+  - 문서에 기록된 `hyunseo@192.168.0.5` SSH는 host key 변경 없이 batch mode로 확인했으나 port 22 timeout으로 연결되지 않음
+- **영향범위**: 실제 Stage/Center DB와 API/worker 이미지. Flutter Production `APPLE_LOGIN_ENABLED`와 Center Apple flag/override는 변경하지 않는다.
+- **테스트**: 배포 전 로컬 `npm test` 38 pass/4 skip, Apple PostgreSQL 통합 8 pass, actual Compose base/override 4개 조합과 `git diff --check` 통과. 원격 배포 검증은 대기 중이다.
+- **롤백**: GitHub의 기존 성공 이미지 `1e7abea`를 Stage → Center 통합 rollback 경로로 재배포하고 OAuth add-only 테이블은 보존한다.
+- **다음**: 홈서버 접근 경로를 복구하거나 운영자가 `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`의 DB 백업·preflight/migration/postflight 결과를 제공한 뒤 `Deploy production` workflow를 실행·감시한다.
+
+### [DONE] Apple 비활성 최초 배포와 secret 주입 순서 교정
+
+- **목적**: `APPLE_AUTH_ENABLED=false` 이미지가 Apple `.p8` 없이 먼저 배포되고, Stage 활성화 직전에만 API 전용 secret을 주입하도록 원래 rollout 순서를 복원한다.
+- **변경**:
+  - Stage/Center base Compose에서 Apple secret을 제거해 `false` 최초 배포가 `.p8` 없이 해석·기동되도록 수정
+  - `compose.apple-auth.{stage,production}.yaml`을 추가해 활성화할 환경의 API에만 `.p8`을 mount하고 worker에는 전달하지 않음
+  - root 배포 스크립트가 두 `.env`의 flag를 값을 노출하지 않고 읽어 `true`이면 override를 강제하며, override가 있을 때만 `.p8` 존재와 `root:root 0444`를 검증
+  - 원래 rollout인 DB 선적용 → secret 없는 `false` 배포/503 회귀 → Stage secret·override 주입/활성화 → 2단계 뒤 Center 활성화 순서로 문서·ADR 교정
+- **영향범위**: Stage/Center Compose 조합, root 배포 스크립트의 preflight, Apple 배포 문서와 정적 회귀 테스트. API·DB 동작은 변경하지 않는다.
+- **파일**: `deploy/compose.apple-auth.{stage,production}.yaml`, `deploy/compose.{stage,production}.yaml`, `deploy/shiftmate-deploy`, `test/{appleAuth,deploymentCacheRollout}.test.cjs`, `_docs/{APPLE_SIGN_IN_SERVER_GUIDE,CI_CD_DEPLOYMENT_GUIDE,DEPLOYMENT_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **롤백**: 선택적 override와 조건부 검증을 제거하고 기존 base Compose secret mount로 되돌린다.
+- **테스트**: `npm test` 38 pass/4 의도된 integration skip, `npm run test:apple-integration` 8 pass, Bash 문법, 4개 Compose와 Workflow YAML parse, base/선택적 override 실제 Compose 병합 4개 조합, API 전용 secret 대상, 가이드 byte 일치, `git diff --check` 통과.
+- **다음**: 실제 Stage/Center DB 백업·migration과 두 `.env`의 false를 확인한 뒤 Apple secret/override 없이 첫 이미지를 배포하고 `503 APPLE_AUTH_DISABLED` 및 기존 인증 회귀를 기록한다.
+
+### [DONE] Apple 소셜 로그인 서버 1단계 구현
+
+- **목적**: 서버가 Apple authorization code와 identity token을 직접 검증한 뒤 기존 ShiftMate JWT를 발급하되, 계정 삭제/revoke 2단계가 완료되기 전에는 기능을 비활성 상태로 배포한다.
+- **변경**:
+  - iOS/Android별 일회성 state/nonce challenge, Android form callback의 고정 intent allowlist, challenge atomic consume 구현
+  - Apple ES256 client secret, token endpoint 5초 timeout·무재시도, JWKS RS256/issuer/audience/nonce/claim 검증 구현
+  - 검증 이메일 자동 계정 연결을 금지하고 신규 사용자·기본 템플릿·OAuth authorization·ShiftMate JWT를 단일 transaction으로 처리
+  - Apple refresh token을 앱 JWT refresh token과 분리해 AES-256-GCM 암호화 저장하고 신규 authorization refresh token 누락 시 전체 rollback
+  - `oauth_login_challenges`, `oauth_authorizations` add-only migration과 read-only preflight, strict postflight, 0건 전용 rollback 추가
+  - 3개 endpoint OpenAPI, Apple 공통 오류 wrapper, 민감값 없는 구조화 로그, API 시작 전 환경 검증 추가
+  - 비활성 최초 배포 후 선택적 Stage/Center override로 Sign in with Apple `.p8`을 API 컨테이너에만 mount하고 배포 스크립트가 활성 환경의 파일 권한을 검증
+  - CI image build 전에 Apple PostgreSQL 통합 테스트를 추가하고 `APPLE_AUTH_ENABLED=false` 기본값 및 계정 삭제 전 이중 gate를 ADR-0023으로 고정
+- **영향범위**: 인증 public API, PostgreSQL OAuth 보조 테이블, API 컨테이너 secret, OpenAPI/CI/배포 문서. 기존 카카오·네이버 로그인 동작은 변경하지 않는다. `visibility_flow.drawio`의 친구 공개 규칙은 변경하지 않고 `schema.drawio`에 OAuth 테이블만 추가했다.
+- **파일**: `src/{config/environment,index,controllers/authController,routes/authRoutes,services/appleService,openapi}.ts`, `src/models/{OAuthLoginChallenge,OAuthAuthorization,index}.ts`, `src/openapi/appleAuthOpenApi.json`, `migrations/*apple_auth*`, `migrations/final_schema.sql`, `AGENTS.md`, `schema.drawio`, `.env.example`, `.gitignore`, `deploy/{compose.production,compose.stage,shiftmate-deploy}`, `.github/workflows/deploy-production.yml`, `test/appleAuth*.test.cjs`, `test/fixtures/appleAuthMigrationBaseSchema.sql`, `_docs/{APPLE_SIGN_IN_SERVER_GUIDE,OAUTH_API_GUIDE,PROJECT_CONTEXT,DECISIONS,DEPLOYMENT_GUIDE,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**:
+  - `npm test`: 38 pass, 4 의도된 integration skip, 0 fail
+  - `npm run test:apple-integration`: PostgreSQL 16에서 8 pass, 0 fail(공개 HTTP 계약, 신규 transaction, atomic consume/replay, invalid_grant 무재시도, 이메일 충돌, refresh token 누락 rollback, 기존 authorization, Android callback)
+  - 실제 PostgreSQL 16에서 `apple_auth_preflight.sql` → migration → `apple_auth_postflight.sql`(21컬럼/제약/6 index/초기 0건) → 빈 테이블 rollback 전 과정 통과
+  - OAuth DDL을 포함한 `migrations/final_schema.sql` 전체를 격리 PostgreSQL 16에서 실행 통과
+  - TypeScript build, Compose/API-only secret 정적 계약, ES256/AES-GCM/JWKS 단위 검증 통과
+  - 배포 shell `bash -n`, JSON/YAML/drawio XML parse, 배포 가이드 byte 일치, `git diff --check` 통과
+- **롤백**: Flutter 버튼을 계속 숨기고 `APPLE_AUTH_ENABLED=false`로 API를 재생성한 뒤 이전 이미지를 배포한다. 신규 테이블과 `users.apple_id`는 보존한다. 두 OAuth 테이블이 모두 0건이고 별도 승인이 있을 때만 `rollback_apple_auth_support.sql`을 사용한다.
+- **다음**: 계정 삭제 데이터 보존·익명화 정책을 별도 감사한 뒤 Apple `/auth/revoke`와 인증된 `DELETE /api/v1/auth/account`를 2단계로 구현하고 iOS/Android 실기기 E2E를 완료한다. Flutter `AuthResponse.fromJson()`의 integer `expires_at` milliseconds 경로에서 잘못된 `* 1000`도 제거하고 회귀 테스트를 추가한다. 그 전에는 Flutter Production `APPLE_LOGIN_ENABLED`와 Center `APPLE_AUTH_ENABLED`를 활성화하지 않는다.
+
+## 2026-08-05
+
+### [DONE] Stage Push Worker healthcheck 및 최초 rollback 수정
+
+- **목적**: `Deploy production #6`에서 새 Push Worker가 시작된 뒤 healthcheck에 실패하고, 최초 도입 rollback이 구버전 fallback worker를 재생성해 추가 경고를 만든 문제를 수정한다.
+- **변경**:
+  - Compose 로컬 file secret이 host bind mount라 `root:root 600` JSON을 non-root `node` Worker가 읽지 못하는 권한 원인을 확인
+  - 환경별 `secrets` 디렉터리는 `root:root 700`, `firebase.json`은 `root:root 444`로 배포 전 검증해 host 사용자 접근은 차단하면서 Worker 읽기를 허용
+  - worker health 실패 시 container log와 별도로 Docker healthcheck subprocess의 exit code/output을 배포 로그에 출력
+  - 기존 Stage image override에 Push Worker가 없었던 최초 도입 실패는 신규 Push Worker를 중지·제거하고 기존 API/cache worker만 복원
+  - 배포 정적 테스트, ADR/프로젝트 컨텍스트, Push/CI/CD 운영 가이드의 권한·rollback 계약 갱신
+- **영향범위**: Stage/Center Firebase secret host permission, Push Worker health 진단, 첫 도입 rollback. 앱·DB schema는 변경하지 않는다.
+- **파일**: `deploy/shiftmate-deploy`, `test/deploymentCacheRollout.test.cjs`, `deploy/DEPLOY_README.md`, `_docs/{CI_CD_DEPLOYMENT_GUIDE,DEPLOYMENT_GUIDE,PROJECT_CONTEXT,PUSH_NOTIFICATION_GUIDE,DECISIONS,WORKLOG}.md`
+- **테스트**:
+  - `npm test`: 28 pass, 3 의도된 integration skip, 0 fail
+  - `bash -n deploy/shiftmate-deploy deploy/shiftmate-bootstrap` 통과
+  - Ruby Psych로 Stage/Center Compose와 GitHub Actions workflow YAML parse 통과
+  - 정본/배포 README byte 일치, `git diff --check` 통과
+- **롤백**: 배포 스크립트·문서·테스트를 이전 버전으로 revert하고 Push Worker flag를 비활성 상태로 유지한다.
+- **다음**: 홈서버의 두 secret 디렉터리와 JSON 권한을 새 계약으로 교정하고, 새 `shiftmate-deploy`를 root 경로에 설치한 뒤 최신 `main`으로 새 workflow를 실행한다. 실패한 #6 재실행은 이전 commit을 사용하므로 선택하지 않는다.
+
+### [DONE] Deploy production npm ci lockfile 불일치 수정
+
+- **목적**: GitHub Actions `Deploy production #4` build가 `@opentelemetry/api@1.9.1` 누락으로 `npm ci`에서 중단된 문제를 재현하고 lockfile을 Node 22/npm 기준으로 동기화한다.
+- **변경**:
+  - 버전 없이 남아 npm 10 Arborist를 중단시킨 nested `@opentelemetry/api` placeholder 제거
+  - npm 10.9.4로 optional `@opentelemetry/api@1.9.1`의 정상 version/resolved/integrity metadata 생성
+  - 직접·일반 dependency에 잘못 남은 `peer` 표시를 npm 10 dependency graph 기준으로 정규화
+  - 모든 non-link lockfile package에 version이 있고 OpenTelemetry metadata가 완성됐는지 회귀 테스트 추가
+- **영향범위**: npm lockfile과 CI 재현성. 런타임 코드·DB·서버 파일은 변경하지 않는다.
+- **파일**: `package-lock.json`, `test/deploymentCacheRollout.test.cjs`, `_docs/WORKLOG.md`
+- **테스트**:
+  - GitHub Actions 계열 npm 10.9.4 `npm ci`: 353 package clean install 성공
+  - `npm test`: 27 pass, 3 의도된 integration skip, 0 fail
+  - `npm audit --omit=dev`: high/critical 0, 기존 Firebase Admin 간접 의존성 moderate 8
+  - `git diff --check` 통과
+- **롤백**: lockfile 수정 커밋을 revert하고 이전 dependency graph로 복귀한다.
+- **다음**: 수정 커밋 push 후 Actions에서 최신 `main`을 선택해 새 `Run workflow`를 실행한다. `Re-run all jobs`는 실패한 실행의 이전 commit SHA를 그대로 사용하므로 선택하지 않는다.
+
+### [DONE] Stage Compose 저장소 정본 추가
+
+- **목적**: 홈서버에만 있던 `/opt/shiftmate-stage/compose.yaml`을 배포 저장소에서 관리하고 Center Compose와 같은 변경·검증·설치 경로를 제공한다.
+- **변경**:
+  - 전달받은 Stage API/cache worker/Redis 구성과 resource/security 설정을 보존한 `deploy/compose.stage.yaml` 추가
+  - port 없는 Push Worker, worker 전용 `DB_POOL_MAX=2`, Stage Firebase Compose secret 추가
+  - Stage 서비스명을 정본 Compose와 `stage.deploy.env.example`에서 동일하게 고정
+  - 배포 정적 테스트·YAML parse와 설치·백업·롤백 문서에 Stage Compose 계약 포함
+- **영향범위**: 배포 저장소와 홈서버 Stage Compose 설치 절차. 이번 변경에서 실제 홈서버 파일이나 컨테이너는 직접 수정하지 않는다.
+- **파일**: `deploy/compose.stage.yaml`, `deploy/stage.deploy.env.example`, `test/deploymentCacheRollout.test.cjs`, `_docs/{CI_CD_DEPLOYMENT_GUIDE,DEPLOYMENT_GUIDE,PUSH_NOTIFICATION_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`, `deploy/DEPLOY_README.md`
+- **테스트**:
+  - `npm test`: 26 pass, 3 의도된 integration skip, 0 fail
+  - Ruby Psych로 Stage/Center Compose와 GitHub Actions YAML parse 통과
+  - `bash -n` 배포 스크립트, 배포 가이드 byte 일치, `git diff --check` 통과
+- **롤백**: 홈서버의 기존 Compose 백업을 복원하고 저장소 Stage Compose 파일과 관련 문서·테스트를 revert한다.
+- **다음**: `deploy/compose.stage.yaml`을 root 소유 `/opt/shiftmate-stage/compose.yaml`로 설치하고 `.deploy.env`의 외부 health URL만 실제 Stage 도메인으로 설정한다.
+
+### [DONE] Push Worker Stage/Center 배포 자동화 완성
+
+- **목적**: 배포 저장소 `main`의 API/Cache Worker 전용 Blue/Green 경로에 Push Worker와 환경별 Firebase secret을 추가하고, Stage부터 비활성 상태로 안전하게 배포할 수 있게 한다.
+- **변경**:
+  - Center Blue/Green Push Worker를 Firebase Compose secret과 함께 정의하고 `/dev/null` credential fallback 제거
+  - Stage Push Worker 서비스명을 `.deploy.env`, image override, 배포·health·rollback 단위에 추가
+  - Stage/Center Firebase Admin JSON의 `root:root 600` 파일을 배포 전 검증하고 worker 전용 `DB_POOL_MAX=2` 경계를 고정
+  - CI에 격리 PostgreSQL 16 Push integration을 이미지 build 이전 단계로 추가
+  - 홈서버 `.env`, `/opt/shiftmate{,-stage}/secrets/firebase.json`, Stage Compose와 순차 feature flag 활성화 절차 문서화
+- **영향범위**: 별도 배포 저장소의 Compose, 배포 스크립트·테스트·운영 문서. 실제 홈서버 파일과 Stage/Center 컨테이너는 이번 코드 변경에서 직접 수정하지 않는다.
+- **파일**: `deploy/compose.production.yaml`, `deploy/shiftmate-deploy`, `deploy/stage.deploy.env.example`, `.github/workflows/deploy-production.yml`, `test/deploymentCacheRollout.test.cjs`, `.env.example`, `_docs/{CI_CD_DEPLOYMENT_GUIDE,DEPLOYMENT_GUIDE,PUSH_NOTIFICATION_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`
+- **테스트**:
+  - `npm test`: 25 pass, 3 의도된 integration skip, 0 fail
+  - Ruby Psych로 Center Compose와 GitHub Actions YAML parse 통과
+  - `bash -n deploy/shiftmate-deploy deploy/shiftmate-bootstrap`, 배포 가이드 byte 일치, `git diff --check` 통과
+  - 로컬 Docker daemon이 실행 중이지 않아 Push PostgreSQL integration은 재실행하지 못했으며, 배포 CI가 격리 PostgreSQL 16에서 `npm run test:push-integration`을 image build 전에 필수 실행하도록 고정
+- **롤백**: Push Worker 서비스·secret·배포 스크립트 확장을 제거하고 API/Cache Worker 전용 배포 경로로 복귀한다.
+- **다음**: 운영자가 Stage/Production Firebase Admin JSON과 홈서버 파일을 준비하고, DB migration 후 두 flag `false`로 배포한 다음 Stage에서 enqueue → worker 순서로 활성화한다.
 
 ## 2026-08-13
 
