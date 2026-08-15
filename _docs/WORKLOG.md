@@ -4,6 +4,16 @@
 
 ## 2026-08-16
 
+### [DONE] 회원 탈퇴 통합 테스트의 psql 메타 명령 분리
+
+- **목적**: Sequelize가 `final_schema.sql`의 psql 전용 `\set`을 SQL로 실행해 CI가 실패하는 문제를 해결한다.
+- **변경**: 통합 테스트 fixture 로더가 줄 시작의 psql 메타 명령을 제거한 뒤 PostgreSQL protocol로 실행하도록 제한한다.
+- **영향범위**: 회원 탈퇴 PostgreSQL 통합 테스트의 스키마 초기화 경로만 변경하며 migration 정본은 유지한다.
+- **파일**: `test/accountDeletionIntegration.test.cjs`, `_docs/WORKLOG.md`.
+- **테스트**: TypeScript build, 회원 탈퇴 단위 테스트 6건, driver 전달 SQL의 psql meta command 제거 검사, `git diff --check` 성공. 로컬 PostgreSQL 55432가 없어 실제 통합 실행은 CI 재실행으로 확인한다.
+- **롤백**: 해당 테스트 loader 변경을 revert한다.
+- **다음**: develop 병합 후 main CI에서 schema 초기화와 전체 삭제 시나리오가 완료되는지 확인한다.
+
 ### [DONE] config 기반 회원 탈퇴 API·worker 배포 제어
 
 - **목적**: 호스트 `.env`가 아닌 저장소 추적 `deploy/config/feature-flags.{stage,production}.env`를 정본으로 회원 탈퇴 API 접수와 전용 worker 처리를 환경별 제어한다.

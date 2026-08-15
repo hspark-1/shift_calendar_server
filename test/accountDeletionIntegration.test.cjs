@@ -11,6 +11,14 @@ const is_isolated_debug_database =
   process.env.DB_NAME === "shift_calendar_group_debug" &&
   process.env.DB_USER === "group_debug";
 
+function readSqlForDatabaseDriver(relative_path) {
+  return fs
+    .readFileSync(path.join(__dirname, "..", relative_path), "utf8")
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("\\"))
+    .join("\n");
+}
+
 if (process.env.RUN_ACCOUNT_DELETION_INTEGRATION !== "true") {
   test("회원 탈퇴 PostgreSQL 16 통합 테스트는 명시적으로 활성화한다", { skip: true }, () => {});
 } else if (!destructive_reset_is_explicitly_allowed || !is_isolated_debug_database) {
@@ -46,10 +54,7 @@ if (process.env.RUN_ACCOUNT_DELETION_INTEGRATION !== "true") {
 
   test.before(async () => {
     await connectDatabase();
-    const schema = fs.readFileSync(
-      path.join(__dirname, "..", "migrations", "final_schema.sql"),
-      "utf8",
-    );
+    const schema = readSqlForDatabaseDriver("migrations/final_schema.sql");
     await sequelize.query(schema);
   });
 
