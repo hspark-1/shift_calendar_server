@@ -1622,6 +1622,10 @@ P0/P1 그룹 요청
   - 역할: Kakao 사용자 연결·동시 로그인·기본 템플릿·Refresh Token transaction과 rollback을 격리 PostgreSQL 16에서 검증
   - 의존성: `127.0.0.1:55432`의 고정 격리 DB와 명시적 schema reset 승인
   - 사용 예: `npm run debug:group-db:up && npm run test:kakao-integration`
+- **`deploy/secrets/kakao_admin_key.example`**
+  - 역할: Kakao Admin Key 파일의 한 줄 plain-text 형식을 보여주는 main 전용 placeholder
+  - 의존성: 실제 credential을 차단하는 `.gitignore`; 운영 파일명은 확장자 없는 `kakao_admin_key`
+  - 사용 예: 내용을 실제 Admin Key 원문으로 교체한 별도 파일을 환경별 홈서버 `secrets/`에 설치
   - 사용 예: `API_DOCS_ENABLED=true`인 개발 환경에서 확인
 - **`test/appleAuth*.test.cjs`, `test/googleAuth*.test.cjs`**
   - 역할: crypto/claim/HTTP/transaction/migration 회귀 검증

@@ -70,7 +70,17 @@ ACCOUNT_DELETION_ENABLED=false
 ACCOUNT_DELETION_WORKER_ENABLED=false
 ```
 
-회원 탈퇴는 API와 worker를 함께 켜야 합니다. 배포 검증은 `ACCOUNT_DELETION_ENABLED=true`인데 `ACCOUNT_DELETION_WORKER_ENABLED=false`인 config를 거절합니다. 두 flag를 켜기 전에 `add_account_deletion_support.sql`을 적용하고, 홈서버 `.env`에 `KAKAO_ADMIN_KEY`와 Apple/Redis/DB 필수 secret·접속값을 준비합니다. Stage에서 실제 provider revoke·DB purge·Redis tombstone E2E를 통과한 다음 Production config를 별도 commit으로 활성화합니다.
+회원 탈퇴는 API와 worker를 함께 켜야 합니다. 배포 검증은 `ACCOUNT_DELETION_ENABLED=true`인데 `ACCOUNT_DELETION_WORKER_ENABLED=false`인 config를 거절합니다. 두 flag를 켜기 전에 `add_account_deletion_support.sql`을 적용하고, 환경별 `secrets/kakao_admin_key`와 Apple/Redis/DB 필수 secret·접속값을 준비합니다. Kakao Admin Key 파일은 `root:root 0444`로 account-deletion worker에만 mount하며 공용 `.env`의 `KAKAO_ADMIN_KEY`는 제거합니다. Stage에서 실제 provider revoke·DB purge·Redis tombstone E2E를 통과한 다음 Production config를 별도 commit으로 활성화합니다.
+
+`deploy/secrets/kakao_admin_key.example`은 형식 확인용 placeholder입니다. 실제 파일은 확장자 없는 `kakao_admin_key`이며 Kakao Developers의 Admin Key 원문만 공백·따옴표 없이 한 줄로 저장합니다. `KakaoAK` 접두사는 파일에 넣지 않습니다. 저장소 안의 실제 secret 경로는 `.gitignore`로 차단되며, 홈서버에는 다음처럼 설치합니다.
+
+```text
+REPLACE_WITH_KAKAO_ADMIN_KEY
+```
+
+Kakao SDK 로그인 1차 배포 전에 현재 Kakao 앱을 Production 정본으로 확정하고 신규 Stage 앱의 Native App Key·Android package/key hash·iOS Bundle ID를 등록합니다. API `.env`에는 환경별 숫자형 `KAKAO_APP_ID`를 설정합니다. Stage 탈퇴 worker를 중지하고 미완료 Kakao provider task 0건과 복원 백업을 확인한 뒤 `migrations/stage_kakao_app_transition_pgadmin.sql`로 Stage `users.kakao_id`만 초기화합니다. Stage/Production에서 `kakao_legacy_route_access` 로그가 연속 7일 0건일 때만 별도 2차 배포로 Web 경로와 레거시 환경변수를 제거합니다.
+
+구 이미지로 rollback해야 하면 `secrets/kakao_admin_key`의 값을 구 account-deletion worker 전용 환경으로만 다시 주입합니다. App ID 검증 장애는 검증을 해제하지 않고 환경별 Native App Key·App ID 설정을 수정합니다.
 
 Firebase Admin service account JSON은 `.env`에 내용을 넣지 않는다. 환경별 secret 디렉터리는 `root:root 0700`, JSON은 `root:root 0444`로 저장하고 Compose secret으로 `/run/secrets/firebase.json`에 읽기 전용 mount한다. Compose의 로컬 file secret은 bind mount이므로 호스트 파일 권한이 유지되며, image의 non-root `node` 사용자가 읽으려면 파일 read bit가 필요하다. 호스트의 다른 사용자는 `0700` 상위 디렉터리를 통과할 수 없어 JSON에 접근할 수 없다.
 

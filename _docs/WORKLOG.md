@@ -4,7 +4,17 @@
 
 ## 2026-08-17
 
-### [TODO] Kakao 변경의 develop 공통 코드와 main 배포 보안 자산 분리
+### [DONE] Kakao Admin Key plain-text secret 예시 추가
+
+- **목적**: 운영자가 Admin Key를 가공하지 않고 올바른 파일명·한 줄 형식으로 설치하면서 실제 credential은 Git에서 차단하도록 한다.
+- **변경**: main 전용 `deploy/secrets/kakao_admin_key.example`에 가짜 placeholder 한 줄을 추가하고, 실제 `deploy/secrets/*` credential은 ignore하되 예시만 추적하도록 했다. 실제 파일에는 Admin Key 원문만 넣고 `KakaoAK` 접두사·따옴표·공백을 넣지 않는 규칙을 문서와 테스트에 고정했다.
+- **영향범위**: 배포 예시·문서·정적 테스트만 변경하며 실제 Stage/Production secret 파일은 생성하거나 수정하지 않는다.
+- **롤백**: 예시와 문서·테스트 변경을 revert한다. 실제 홈서버 secret에는 영향이 없다.
+- **파일**: `deploy/secrets/kakao_admin_key.example`, `.gitignore`, `test/deploymentCacheRollout.test.cjs`, `_docs/{PROJECT_CONTEXT,CI_CD_DEPLOYMENT_GUIDE,WORKLOG}.md`, `deploy/DEPLOY_README.md`.
+- **테스트**: `npm test` 83건 중 76 pass/7 explicit integration skip/0 fail, 실제 secret ignore·예시 추적 확인, 두 배포 문서 byte 일치, `git diff --check` 성공.
+- **다음**: 운영자는 예시 파일을 직접 수정하지 않고 환경별 홈서버의 확장자 없는 `secrets/kakao_admin_key` 파일을 별도로 생성해 `root:root 0444`로 설치한다.
+
+### [DONE] Kakao 변경의 develop 공통 코드와 main 배포 보안 자산 분리
 
 - **목적**: Kakao SDK 토큰 로그인 공통 구현은 develop을 통해 main에 병합하고, 운영 topology와 secret preflight 등 배포 보안 자산은 main에만 유지한다.
 - **변경 예정**: 공통 소스·OpenAPI·테스트·개발 문서를 develop에 커밋한 뒤 main에 병합하고, Compose·배포 workflow/script·Stage 전환 SQL·운영 문서를 main 전용 커밋으로 분리한다.

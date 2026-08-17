@@ -83,4 +83,8 @@ visibility_flow.drawio
 service-account*.json
 firebase-admin*.json
 
+# Local deployment secrets (track placeholders only)
+deploy/secrets/*
+!deploy/secrets/kakao_admin_key.example
+
 shiftmate-api-*.tar.gz
