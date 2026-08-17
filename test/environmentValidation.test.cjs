@@ -1,4 +1,7 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -26,6 +29,8 @@ const managed_keys = [
   "FIREBASE_PROJECT_ID",
   "GOOGLE_APPLICATION_CREDENTIALS",
   "KAKAO_ADMIN_KEY",
+  "KAKAO_ADMIN_KEY_FILE",
+  "KAKAO_APP_ID",
 ];
 
 const original_environment = Object.fromEntries(
@@ -51,6 +56,7 @@ test.beforeEach(() => {
   delete process.env.FIREBASE_PROJECT_ID;
   delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
   delete process.env.KAKAO_ADMIN_KEY;
+  delete process.env.KAKAO_ADMIN_KEY_FILE;
 });
 
 test.after(() => {
@@ -81,10 +87,19 @@ test("회원 탈퇴 worker만 Kakao Admin Key를 검증한다", () => {
     () => validateAccountDeletionWorkerEnvironment(),
     (error) =>
       error instanceof EnvironmentValidationError &&
-      error.environment_variable === "KAKAO_ADMIN_KEY",
+      error.environment_variable === "KAKAO_ADMIN_KEY_FILE",
   );
-  process.env.KAKAO_ADMIN_KEY = "stage-admin-key";
-  assert.doesNotThrow(() => validateAccountDeletionWorkerEnvironment());
+  const secret_path = path.join(
+    os.tmpdir(),
+    `shiftmate-kakao-admin-${process.pid}`,
+  );
+  fs.writeFileSync(secret_path, "stage-admin-key\n", { mode: 0o600 });
+  try {
+    process.env.KAKAO_ADMIN_KEY_FILE = secret_path;
+    assert.doesNotThrow(() => validateAccountDeletionWorkerEnvironment());
+  } finally {
+    fs.unlinkSync(secret_path);
+  }
 });
 
 test("환경변수 누락 로그는 secret 값 없이 key만 제공한다", () => {
@@ -97,7 +112,7 @@ test("환경변수 누락 로그는 secret 값 없이 key만 제공한다", () =
     logError(
       "environment_test",
       new EnvironmentValidationError(
-        "KAKAO_ADMIN_KEY",
+        "KAKAO_ADMIN_KEY_FILE",
         "민감한 값은 로그에 포함되면 안 됩니다.",
       ),
     );
@@ -107,6 +122,6 @@ test("환경변수 누락 로그는 secret 값 없이 key만 제공한다", () =
 
   const output = JSON.parse(logged_value);
   assert.equal(output.error_code, "ENVIRONMENT_VALIDATION_ERROR");
-  assert.equal(output.environment_variable, "KAKAO_ADMIN_KEY");
+  assert.equal(output.environment_variable, "KAKAO_ADMIN_KEY_FILE");
   assert.doesNotMatch(logged_value, /민감한 값/);
 });

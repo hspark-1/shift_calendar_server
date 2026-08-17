@@ -220,8 +220,9 @@ router.post(
   [
     body("access_token")
       .isString()
-      .notEmpty()
-      .withMessage("access_token이 필요합니다."),
+      .isLength({ min: 1, max: 4096 })
+      .matches(/^\S+$/)
+      .withMessage("access_token 형식이 올바르지 않습니다."),
   ],
   validateRequestMiddleware,
   kakaoLoginWithToken

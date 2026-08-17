@@ -7,7 +7,11 @@ import {
   revokeRefreshToken,
   revokeAllUserTokens,
 } from "../services/authService";
-import { processKakaoLogin, getKakaoUserInfo } from "../services/kakaoService";
+import {
+  KakaoAuthError,
+  exchangeKakaoToken,
+  kakaoService,
+} from "../services/kakaoService";
 import { processNaverLogin, getNaverUserInfo } from "../services/naverService";
 import { ensureDefaultTemplate } from "../services/shiftTemplateService";
 import { normalizePhoneNumber } from "../utils/phone";
@@ -15,6 +19,7 @@ import {
   logAppleAuthEvent,
   logError,
   logGoogleAuthEvent,
+  logKakaoAuthEvent,
 } from "../utils/logger";
 import {
   AppleAuthError,
@@ -84,6 +89,45 @@ function sendGoogleAuthError(
   }
 
   logError("auth_google_login_failed", error, req.request_id);
+  res.status(500).json({
+    success: false,
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "서버 오류가 발생했습니다.",
+    },
+    request_id: req.request_id,
+  });
+}
+
+function sendKakaoAuthError(
+  req: Request,
+  res: Response,
+  error: unknown,
+  started_at: number,
+): void {
+  if (error instanceof KakaoAuthError) {
+    logKakaoAuthEvent({
+      request_id: req.request_id,
+      action: "token_login",
+      result: error.status_code >= 500 ? "error" : "denied",
+      error_code: error.code,
+      duration_ms: Date.now() - started_at,
+    });
+    res.status(error.status_code).json({
+      success: false,
+      error: { code: error.code, message: error.message },
+      request_id: req.request_id,
+    });
+    return;
+  }
+
+  logKakaoAuthEvent({
+    request_id: req.request_id,
+    action: "token_login",
+    result: "error",
+    error_code: "INTERNAL_SERVER_ERROR",
+    duration_ms: Date.now() - started_at,
+  });
   res.status(500).json({
     success: false,
     error: {
@@ -627,6 +671,13 @@ export async function accountDeletionStatus(
 
 // 카카오 OAuth 로그인
 export async function kakaoLogin(req: Request, res: Response): Promise<void> {
+  const started_at = Date.now();
+  logKakaoAuthEvent({
+    request_id: req.request_id,
+    action: "legacy_route_access",
+    result: "success",
+    duration_ms: 0,
+  });
   try {
     const { code, redirect_uri } = req.body;
 
@@ -644,74 +695,26 @@ export async function kakaoLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // 카카오 OAuth 처리: code → token → 사용자 정보
-    const kakao_user_info = await processKakaoLogin(code, redirect_uri);
-
-    // 기존 사용자 조회 (kakao_id 기준)
-    let user = await User.findOne({
-      where: { kakao_id: kakao_user_info.kakao_id },
+    const access_token = await exchangeKakaoToken(code, redirect_uri);
+    const result = await kakaoService.completeLogin({
+      access_token,
+      device_info: getDeviceInfo(req),
     });
-
-    if (!user) {
-      // 이메일로 기존 사용자 확인 (다른 OAuth로 가입된 경우)
-      const existing_email_user = await User.findOne({
-        where: { email: kakao_user_info.email },
-      });
-
-      if (existing_email_user) {
-        // 기존 계정에 카카오 ID 연결
-        existing_email_user.kakao_id = kakao_user_info.kakao_id;
-        await existing_email_user.save();
-        user = existing_email_user;
-        console.log(`카카오 계정 연결: user_id=${user.user_id}`);
-        // 기존 사용자도 템플릿이 없으면 생성
-        await ensureDefaultTemplate(user.user_id);
-      } else {
-        // 신규 사용자 생성
-        user = await User.create({
-          email: kakao_user_info.email,
-          name: kakao_user_info.name,
-          profile_image_url: kakao_user_info.profile_image_url,
-          kakao_id: kakao_user_info.kakao_id,
-          timezone: "Asia/Seoul", // 기본 타임존
-        });
-        console.log(`카카오 회원가입 성공: user_id=${user.user_id}`);
-        // 신규 사용자 기본 근무 템플릿 생성
-        await ensureDefaultTemplate(user.user_id);
-      }
-    } else {
-      console.log(`카카오 로그인 성공: user_id=${user.user_id}`);
-      // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
-      await ensureDefaultTemplate(user.user_id);
-    }
-
-    // JWT 토큰 생성 (DB에 refresh_token 저장)
-    const device_info = getDeviceInfo(req);
-    const tokens = await generateTokens(user, { device_info });
 
     res.json({
       success: true,
-      message:
-        user.created_at && Date.now() - user.created_at.getTime() < 1000
-          ? "회원가입이 완료되었습니다."
-          : "로그인 성공",
+      message: result.is_new_user
+        ? "회원가입이 완료되었습니다."
+        : "로그인 성공",
       data: {
-        user: user.toJSON(),
-        ...tokens,
+        user: result.user.toJSON(),
+        ...result.tokens,
+        is_new_user: result.is_new_user,
       },
+      request_id: req.request_id,
     });
   } catch (error) {
-    logError("auth_kakao_login_failed", error, req.request_id);
-
-    if (error instanceof Error) {
-      res.status(400).json({ success: false, message: error.message });
-      return;
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "카카오 로그인 처리 중 오류가 발생했습니다.",
-    });
+    sendKakaoAuthError(req, res, error, started_at);
   }
 }
 
@@ -720,84 +723,36 @@ export async function kakaoLoginWithToken(
   req: Request,
   res: Response
 ): Promise<void> {
+  const started_at = Date.now();
   try {
-    const { access_token } = req.body;
-
-    if (!access_token) {
-      res
-        .status(400)
-        .json({ success: false, message: "access_token이 필요합니다." });
-      return;
-    }
-
-    // 카카오 access_token으로 사용자 정보 조회
-    const kakao_user_info = await getKakaoUserInfo(access_token);
-
-    // 기존 사용자 조회 (kakao_id 기준)
-    let user = await User.findOne({
-      where: { kakao_id: kakao_user_info.kakao_id },
+    const result = await kakaoService.completeLogin({
+      access_token: req.body.access_token,
+      device_info: getDeviceInfo(req),
     });
 
-    if (!user) {
-      // 이메일로 기존 사용자 확인 (다른 OAuth로 가입된 경우)
-      const existing_email_user = await User.findOne({
-        where: { email: kakao_user_info.email },
-      });
-
-      if (existing_email_user) {
-        // 기존 계정에 카카오 ID 연결
-        existing_email_user.kakao_id = kakao_user_info.kakao_id;
-        await existing_email_user.save();
-        user = existing_email_user;
-        console.log(`카카오 계정 연결 (SDK): user_id=${user.user_id}`);
-        // 기존 사용자도 템플릿이 없으면 생성
-        await ensureDefaultTemplate(user.user_id);
-      } else {
-        // 신규 사용자 생성
-        user = await User.create({
-          email: kakao_user_info.email,
-          name: kakao_user_info.name,
-          profile_image_url: kakao_user_info.profile_image_url,
-          kakao_id: kakao_user_info.kakao_id,
-          timezone: "Asia/Seoul", // 기본 타임존
-        });
-        console.log(`카카오 회원가입 성공 (SDK): user_id=${user.user_id}`);
-        // 신규 사용자 기본 근무 템플릿 생성
-        await ensureDefaultTemplate(user.user_id);
-      }
-    } else {
-      console.log(`카카오 로그인 성공 (SDK): user_id=${user.user_id}`);
-      // 기존 사용자도 템플릿이 없으면 생성 (마이그레이션용)
-      await ensureDefaultTemplate(user.user_id);
-    }
-
-    // JWT 토큰 생성 (DB에 refresh_token 저장)
-    const device_info = getDeviceInfo(req);
-    const tokens = await generateTokens(user, { device_info });
+    logKakaoAuthEvent({
+      request_id: req.request_id,
+      user_id: result.user.user_id,
+      action: "token_login",
+      result: "success",
+      duration_ms: Date.now() - started_at,
+      is_new_user: result.is_new_user,
+    });
 
     res.json({
       success: true,
-      message:
-        user.created_at && Date.now() - user.created_at.getTime() < 1000
-          ? "회원가입이 완료되었습니다."
-          : "로그인 성공",
+      message: result.is_new_user
+        ? "회원가입이 완료되었습니다."
+        : "로그인 성공",
       data: {
-        user: user.toJSON(),
-        ...tokens,
+        user: result.user.toJSON(),
+        ...result.tokens,
+        is_new_user: result.is_new_user,
       },
+      request_id: req.request_id,
     });
   } catch (error) {
-    logError("auth_kakao_token_login_failed", error, req.request_id);
-
-    if (error instanceof Error) {
-      res.status(400).json({ success: false, message: error.message });
-      return;
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "카카오 로그인 처리 중 오류가 발생했습니다.",
-    });
+    sendKakaoAuthError(req, res, error, started_at);
   }
 }
 

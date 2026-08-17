@@ -293,7 +293,7 @@ Refresh Token을 어디에, 어떤 형태로 저장할지 결정해야 했습니
 
 ---
 
-## ADR-0007: 카카오 OAuth 2가지 방식 지원 (WebView + SDK)
+## ADR-0007: 카카오 OAuth 2가지 방식 지원 (WebView + SDK) — Superseded by ADR-0032
 
 ### 배경(문제)
 
@@ -1795,7 +1795,7 @@ Stage/Center의 cache, push, API docs, 회원 탈퇴 활성 플래그를 홈서�
 ### 결과/영향(좋은 점/트레이드오프)
 
 - 두 flag가 `false`인 현재 config에서는 탈퇴 기능은 계속 비활성이고 worker는 idle 상태
-- 활성화 전 `add_account_deletion_support.sql`, `KAKAO_ADMIN_KEY`, Apple/Redis/DB 설정이 필수
+- 활성화 전 `add_account_deletion_support.sql`, worker 전용 `KAKAO_ADMIN_KEY_FILE`, Apple/Redis/DB 설정이 필수
 - 배포 서비스 수는 Stage 5개, Center 전체 profile 기준 13개로 증가
 - 이전 image가 신규 worker command를 포함하지 않는 시점으로 rollback할 때는 현재 Compose와 image 호환성을 확인해야 함
 
@@ -1810,3 +1810,52 @@ Stage/Center의 cache, push, API docs, 회원 탈퇴 활성 플래그를 홈서�
 ### 추후 과제(언제 다시 평가)
 
 - 탈퇴 처리량 또는 provider rate limit 때문에 병렬도 분리가 필요해질 때 환경별 replica·batch 설정을 재평가
+
+---
+
+## ADR-0032: 환경별 Kakao 앱과 SDK Access Token 서버 검증 단일화
+
+### 배경(문제)
+
+Flutter는 Kakao Native SDK의 Access Token만 서버에 전달하지만 서버는 `user/me`만 호출해 토큰 발급 앱을 고정하지 않았고, 사용자·기본 템플릿·Refresh Token 생성도 단일 transaction이 아니었습니다. 또한 Kakao Admin Key가 공용 `.env`를 통해 API와 다른 worker에도 노출될 수 있었습니다.
+
+### 선택지(대안)
+
+1. 기존 Web authorization-code와 SDK 경로를 영구 병행
+2. SDK token을 사용자 정보 조회만으로 신뢰
+3. Stage/Production Kakao 앱을 분리하고 token info의 app ID·회원번호를 검증한 뒤 SDK 경로로 단일화
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다.**
+
+- 현재 앱은 Production 정본으로 유지하고 신규 Stage Kakao 앱을 사용
+- `access_token_info.app_id`와 `KAKAO_APP_ID`, token info와 `user/me`의 회원번호를 DB 접근 전에 검증
+- Kakao 사용자 연결, 기본 템플릿, ShiftMate Refresh Token을 advisory lock과 단일 transaction으로 처리
+- 기존 이메일의 다른 `kakao_id`는 덮어쓰지 않고 `409 KAKAO_ACCOUNT_CONFLICT`로 거부
+- 성공 HTTP 200을 유지하면서 `request_id`, `is_new_user`를 추가
+- Admin Key는 account-deletion worker 전용 Docker secret 파일로만 제공
+- Web 경로는 1차 배포 후 Stage/Production 7일 무사용을 확인한 다음 별도 2차 배포에서 제거
+
+### 근거(왜)
+
+- 다른 Kakao 앱의 유효 토큰으로 ShiftMate 계정을 생성·연결하는 경계를 차단
+- Stage 탈퇴 E2E가 Production 앱 연결과 토큰을 끊는 위험을 제거
+- 부분 사용자·템플릿·세션 생성을 rollback하고 동시 로그인 중복을 방지
+- Admin Key의 최소 권한·최소 노출 범위를 컨테이너 topology에서 강제
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- API 시작에 환경별 숫자형 `KAKAO_APP_ID`가 필수
+- Stage 앱 전환 전에 미완료 Kakao 탈퇴 task 0건, 복원 백업, `users.kakao_id` 초기화가 필요
+- 1차 배포 동안 레거시 client ID/secret/redirect 설정과 Web 코드가 일시적으로 남음
+- 2차 제거는 7일 무사용 운영 증거 없이는 진행하지 않음
+
+### 구현 위치
+
+- `src/services/kakaoService.ts`, `src/controllers/authController.ts`
+- `src/openapi/kakaoAuthOpenApi.json`
+
+### 추후 과제(언제 다시 평가)
+
+- 7일 무사용 증거 확보 후 ADR 상태를 완료로 갱신하고 레거시 Web 경로·환경변수·테스트 페이지를 제거

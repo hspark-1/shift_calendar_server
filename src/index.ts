@@ -10,6 +10,7 @@ import {
   getPositiveIntegerEnvironmentVariable,
   validateAppleAuthEnvironment,
   validateEnvironment,
+  validateKakaoAuthEnvironment,
 } from "./config/environment";
 import { requestContextMiddleware } from "./middlewares/requestContext";
 import routes from "./routes";
@@ -152,6 +153,7 @@ app.use(errorHandler);
 async function startServer(): Promise<void> {
   try {
     validateEnvironment();
+    validateKakaoAuthEnvironment();
     // Apple private key는 API 프로세스에만 mount합니다. 공용 환경변수를 읽는
     // cache/push worker가 API 전용 secret을 요구하지 않도록 여기서 분리 검증합니다.
     validateAppleAuthEnvironment();

@@ -113,6 +113,37 @@ export function logGoogleAuthEvent(event: GoogleAuthLogEvent): void {
   console.log(JSON.stringify(output));
 }
 
+export interface KakaoAuthLogEvent {
+  request_id?: string;
+  user_id?: string;
+  action: "token_login" | "legacy_route_access";
+  result: "success" | "denied" | "error";
+  error_code?: string;
+  duration_ms: number;
+  is_new_user?: boolean;
+}
+
+export function logKakaoAuthEvent(event: KakaoAuthLogEvent): void {
+  const output = {
+    level: event.result === "error" ? "error" : "info",
+    context: "kakao_auth",
+    request_id: event.request_id ?? null,
+    provider: "KAKAO",
+    user_id: event.user_id ?? null,
+    action: event.action,
+    result: event.result,
+    error_code: event.error_code ?? null,
+    duration_ms: event.duration_ms,
+    is_new_user: event.is_new_user ?? null,
+  };
+
+  if (event.result === "error") {
+    console.error(JSON.stringify(output));
+    return;
+  }
+  console.log(JSON.stringify(output));
+}
+
 export interface GroupLogEvent {
   request_id?: string;
   actor_user_id: string;

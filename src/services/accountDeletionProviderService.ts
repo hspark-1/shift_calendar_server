@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from "axios";
-import { getRequiredEnvironmentVariable } from "../config/environment";
+import { getKakaoAdminKey } from "../config/environment";
 import { OAuthAuthorization, User } from "../models";
 import { appleService } from "./appleService";
 
@@ -23,6 +23,8 @@ export class AccountDeletionProviderError extends Error {
 
 interface ProviderServiceDependencies {
   http_client?: Pick<AxiosInstance, "post">;
+  find_user_by_pk?: (user_id: string) => Promise<User | null>;
+  kakao_admin_key_provider?: () => string;
 }
 
 function getUpstreamErrorCode(error: unknown): string | number | null {
@@ -45,9 +47,15 @@ function isRetryableHttpError(error: unknown): boolean {
 
 export class AccountDeletionProviderService {
   private readonly http_client: Pick<AxiosInstance, "post">;
+  private readonly find_user_by_pk: (user_id: string) => Promise<User | null>;
+  private readonly kakao_admin_key_provider: () => string;
 
   constructor(dependencies: ProviderServiceDependencies = {}) {
     this.http_client = dependencies.http_client ?? axios;
+    this.find_user_by_pk =
+      dependencies.find_user_by_pk ?? ((user_id) => User.findByPk(user_id));
+    this.kakao_admin_key_provider =
+      dependencies.kakao_admin_key_provider ?? getKakaoAdminKey;
   }
 
   async revokeApple(user_id: string): Promise<void> {
@@ -104,7 +112,7 @@ export class AccountDeletionProviderService {
   }
 
   async unlinkKakao(user_id: string): Promise<void> {
-    const user = await User.findByPk(user_id);
+    const user = await this.find_user_by_pk(user_id);
     if (!user) {
       throw new AccountDeletionProviderError("PROVIDER_USER_NOT_FOUND", false);
     }
@@ -120,7 +128,7 @@ export class AccountDeletionProviderService {
         parameters.toString(),
         {
           headers: {
-            Authorization: `KakaoAK ${getRequiredEnvironmentVariable("KAKAO_ADMIN_KEY")}`,
+            Authorization: `KakaoAK ${this.kakao_admin_key_provider()}`,
             "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
           },
           timeout: 5000,

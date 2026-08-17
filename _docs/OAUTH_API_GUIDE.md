@@ -354,11 +354,13 @@ curl -X POST http://localhost:3000/api/v1/auth/naver/token \
 
 ---
 
-## 카카오 OAuth 로그인
+## 카카오 SDK Access Token 로그인
 
-### 1. 카카오 로그인 (WebView 방식 - Authorization Code)
+운영 정본은 `POST /api/v1/auth/kakao/token`입니다. 서버는 Kakao token info의 `app_id`가 환경별 `KAKAO_APP_ID`와 같은지 확인하고 token info와 `user/me`의 회원번호를 교차 검증한 뒤에만 DB transaction을 시작합니다.
 
-카카오 OAuth 인증 페이지에서 받은 authorization code를 사용하여 로그인합니다.
+### 1. Deprecated 카카오 Web 로그인 (Authorization Code)
+
+이 경로는 1차 배포의 Stage/Production 7일 무사용 관찰 동안만 유지합니다. 신규 클라이언트는 사용하지 않으며 관찰 통과 후 별도 배포에서 제거합니다.
 
 #### Request
 
@@ -413,7 +415,7 @@ Content-Type: application/json
 
 ---
 
-### 2. 카카오 로그인 (SDK 방식 - Access Token 직접 전송)
+### 2. 운영 카카오 로그인 (SDK Access Token)
 
 카카오 SDK에서 받은 access_token을 직접 전송하여 로그인합니다.
 
@@ -458,8 +460,17 @@ Content-Type: application/json
       "kakao_id": "카카오_고유_ID",
       "timezone": "Asia/Seoul",
       "created_at": "2026-01-11T12:00:00.000Z"
+    },
+    "access_token": "ShiftMate JWT",
+    "refresh_token": "ShiftMate Refresh Token",
+    "expires_at": 1704974400000,
+    "is_new_user": false
+  },
+  "request_id": "request-id"
 }
 ```
+
+공개 오류 코드는 `KAKAO_INVALID_TOKEN`, `KAKAO_TOKEN_APP_MISMATCH`, `KAKAO_TOKEN_SUBJECT_MISMATCH`, `KAKAO_EMAIL_UNAVAILABLE`, `KAKAO_ACCOUNT_CONFLICT`, `KAKAO_INVALID_UPSTREAM_RESPONSE`, `KAKAO_UPSTREAM_UNAVAILABLE`입니다. 상세 HTTP status와 schema는 `/api-docs/openapi.json`을 정본으로 사용합니다.
 
 ---
 
@@ -513,7 +524,7 @@ Content-Type: application/json
 개발 환경에서 테스트할 수 있는 HTML 페이지가 제공됩니다:
 
 - **네이버 로그인**: `http://localhost:3000/test/naver-login.html`
-- **카카오 로그인**: `http://localhost:3000/test/kakao-login.html`
+- **카카오 Web 로그인(deprecated 관찰용)**: `http://localhost:3000/test/kakao-login.html`
 - **공통 Callback**: `http://localhost:3000/test/callback.html`
 
 ### 테스트 페이지 사용 방법
@@ -539,6 +550,8 @@ NAVER_CLIENT_SECRET=your-naver-client-secret
 # 카카오 OAuth
 KAKAO_CLIENT_ID=your-kakao-client-id
 KAKAO_CLIENT_SECRET=your-kakao-client-secret
+KAKAO_APP_ID=123456
+KAKAO_ADMIN_KEY_FILE=/run/secrets/kakao_admin_key
 ```
 
 ---
@@ -552,10 +565,12 @@ KAKAO_CLIENT_SECRET=your-kakao-client-secret
 3. **State 파라미터**: CSRF 공격 방지를 위해 `state` 파라미터 사용을 권장합니다.
 4. **Client Secret**: 서버에서만 사용하고 클라이언트에 노출하지 마세요.
 
-### 카카오 OAuth
+### 카카오 SDK 로그인
 
-1. **Redirect URI 일치**: 카카오 개발자 콘솔에 등록된 Redirect URI와 요청 시 전송하는 `redirect_uri`가 정확히 일치해야 합니다.
-2. **Scope 설정**: 필요한 사용자 정보에 대한 scope를 요청해야 합니다 (예: `profile_nickname`, `account_email`).
+1. **환경별 앱 분리**: 현재 앱은 Production, 신규 앱은 Stage 정본으로 사용하며 두 환경의 `KAKAO_APP_ID`가 달라야 합니다.
+2. **Native 플랫폼 설정**: Stage/Production Native App Key별 Android package/key hash와 iOS Bundle ID를 등록합니다.
+3. **Scope 설정**: `profile_nickname`, `account_email` 등 필요한 사용자 정보 동의를 설정합니다.
+4. **Redirect URI**: 운영 SDK 경로에는 Stage/Production API URL을 Kakao Web Redirect URI로 등록하지 않습니다. 기존 Redirect URI는 deprecated Web 경로 제거 시 함께 삭제합니다.
 
 ### 공통
 

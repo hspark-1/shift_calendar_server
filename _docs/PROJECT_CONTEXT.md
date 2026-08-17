@@ -8,14 +8,10 @@
 
 ### 주요 기능
 
-- 카카오 OAuth 로그인
+- 카카오 Flutter SDK Access Token 서버 검증 로그인
 - 네이버 OAuth 로그인
-  <<<<<<< HEAD
-- Google ID Token 서버 검증 로그인(항상 활성)
-- # Apple 서버 검증형 로그인(항상 활성, 계정 삭제/revoke 연동 포함)
 - Apple 서버 검증형 로그인
 - Google ID Token 서버 검증 로그인
-  > > > > > > > origin/develop
 - 근무 템플릿 관리 (3교대 등)
 - 근무표 생성/수정/삭제
 - 개인 일정(Event) 관리
@@ -116,6 +112,22 @@ Flutter google_sign_in
 - Google 로그인은 feature flag 없이 항상 활성화되며 서버 시작 전에 Web OAuth Client ID를 검증합니다.
 - API key·Web client secret·Google access token은 필요하지 않습니다. 상세 설정과 rollout은 `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`를 따릅니다.
 
+### Kakao 로그인 구조
+
+```text
+Flutter Kakao SDK Access Token
+  → POST /api/v1/auth/kakao/token
+  → access_token_info의 app_id·회원번호 검증
+  → user/me 회원번호 교차 검증
+  → User + 기본 템플릿 + ShiftMate refresh token 단일 transaction
+```
+
+- `KAKAO_APP_ID`는 API 시작 전에 양의 숫자 문자열로 검증하며 Stage와 Production은 서로 다른 Kakao 앱을 사용합니다.
+- token info와 user info는 각각 5초 timeout을 적용하고, 앱·회원번호 검증 전에는 DB에 접근하지 않습니다.
+- 기존 이메일 계정의 `kakao_id`가 비어 있으면 자동 연결하지만 다른 Kakao ID가 있으면 `KAKAO_ACCOUNT_CONFLICT`로 거부합니다.
+- `/auth/kakao` Web authorization-code 경로는 1차 배포의 7일 무사용 관찰 동안만 유지하는 deprecated endpoint입니다.
+- Kakao Admin Key는 `KAKAO_ADMIN_KEY_FILE=/run/secrets/kakao_admin_key`로 탈퇴 worker에만 mount합니다.
+
 ### 회원 탈퇴 구조
 
 ```text
@@ -133,7 +145,7 @@ Flutter google_sign_in
 - Google/Naver는 현재 서버가 revoke 가능한 OAuth token을 보관하지 않으므로 클라이언트 연동 해제와 내부 데이터 삭제를 분리합니다.
 - `DELETE /api/v1/auth/account`는 `confirmation=true`와 JWT `auth_time` 10분 조건을 확인한 뒤 `202`로 접수합니다. 접수 즉시 사용자를 `DELETION_PENDING`으로 바꾸고 Refresh Token·푸시 기기를 무효화합니다.
 - `src/workers/accountDeletionWorker.ts`는 provider 해제 → DB purge → Redis tombstone/purge 순서를 lease·backoff로 재시도합니다. Stage/Center에서는 `deploy/config/feature-flags.{stage,production}.env`가 API와 worker 플래그의 정본이며 기본값은 모두 `false`입니다.
-- 배포 검증은 `ACCOUNT_DELETION_ENABLED=true`와 `ACCOUNT_DELETION_WORKER_ENABLED=false` 조합을 거절합니다. 활성화 전에 탈퇴 migration, `KAKAO_ADMIN_KEY`, Apple secret과 Redis/DB 연결을 준비하고 Stage E2E를 먼저 통과해야 합니다.
+- 배포 검증은 `ACCOUNT_DELETION_ENABLED=true`와 `ACCOUNT_DELETION_WORKER_ENABLED=false` 조합을 거절합니다. 활성화 전에 탈퇴 migration, worker 전용 `kakao_admin_key` Docker secret, Apple secret과 Redis/DB 연결을 준비하고 Stage E2E를 먼저 통과해야 합니다.
 - 구현·운영 정본은 `_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`이며, Stage 실제 Apple/Kakao·Redis 장애 E2E 전에는 Production에서 활성화하지 않습니다.
 
 #### 캐시 적용 요청과 key 공유 계약
@@ -572,7 +584,7 @@ export async function handler(req: AuthenticatedRequest, res: Response) {
 
 #### OAuth 인증
 
-- **카카오 OAuth**: `src/services/kakaoService.ts`
+- **카카오 SDK 토큰 검증·로그인 transaction**: `src/services/kakaoService.ts`
   - WebView 방식: `POST /api/v1/auth/kakao` (authorization code)
   - SDK 방식: `POST /api/v1/auth/kakao/token` (access_token 직접 전송)
 - **네이버 OAuth**: `src/services/naverService.ts`
@@ -733,8 +745,8 @@ const work_shifts = await WorkShift.findAll({
 
 **인증** (`/api/v1/auth`):
 
-- `POST /kakao` - 카카오 OAuth 로그인 (WebView)
-- `POST /kakao/token` - 카카오 OAuth 로그인 (SDK)
+- `POST /kakao` - deprecated 카카오 Web 로그인(7일 무사용 관찰 후 제거)
+- `POST /kakao/token` - 카카오 SDK Access Token 검증 로그인
 - `POST /naver` - 네이버 OAuth 로그인 (WebView)
 - `POST /naver/token` - 네이버 OAuth 로그인 (SDK)
 - `POST /google/token` - Google ID Token 서버 검증 로그인
@@ -807,7 +819,7 @@ const work_shifts = await WorkShift.findAll({
 
 #### Swagger/OpenAPI
 
-- **그룹·기기·Apple·Google 인증 API 구현됨**: `API_DOCS_ENABLED=true`일 때 `/api-docs`와 `/api-docs/openapi.json` 노출
+- **그룹·기기·Apple·Google·Kakao 인증 API 구현됨**: `API_DOCS_ENABLED=true`일 때 `/api-docs`와 `/api-docs/openapi.json` 노출
 - **범위 제한**: 현재 OpenAPI 3.0.3 문서는 그룹 P0/P1, `PUT /devices/current`, Apple 로그인 3개 endpoint, Google token 로그인 endpoint와 관련 schema를 포함하며 기존 API 전체 문서는 아직 미포함
 
 ### 3.7 로깅/모니터링
@@ -849,6 +861,7 @@ catch (error) {
 - **비즈니스 로그**: Service에서 `console.log()` 사용 (예: "카카오 로그인 성공")
 - **Apple 인증 로그**: `logAppleAuthEvent()`는 provider/platform/user/action/result/error_code/duration만 기록하고 code/token/raw state·nonce/email은 기록하지 않음
 - **Google 인증 로그**: `logGoogleAuthEvent()`는 request_id/action/result/error_code/duration, 성공 시 내부 user_id/is_new_user만 기록하고 ID Token/email/sub/claim은 기록하지 않음
+- **Kakao 인증 로그**: `logKakaoAuthEvent()`는 request_id/action/result/error_code/duration과 내부 user_id/is_new_user만 기록하며 Access Token/email/Kakao ID/App ID/외부 응답 원문은 받지 않음
 
 ### 3.8 환경변수 표
 
@@ -865,9 +878,11 @@ catch (error) {
 | `DB_PASSWORD`         | 데이터베이스 비밀번호      | `password`                                 | 모든 환경 |
 | `JWT_SECRET`          | JWT Access Token 서명 키   | `your-secret-key`                          | 모든 환경 |
 | `JWT_REFRESH_SECRET`  | JWT Refresh Token 서명 키  | `your-refresh-secret`                      | 모든 환경 |
-| `KAKAO_CLIENT_ID`     | 카카오 OAuth Client ID     | `your-kakao-client-id`                     | 모든 환경 |
-| `KAKAO_CLIENT_SECRET` | 카카오 OAuth Client Secret | `your-kakao-client-secret`                 | 모든 환경 |
-| `KAKAO_REDIRECT_URI`  | 카카오 OAuth Redirect URI  | `http://localhost:3000/test/callback.html` | 모든 환경 |
+| `KAKAO_CLIENT_ID`     | deprecated Web 경로 Client ID | `your-kakao-client-id`                  | 1차 관찰 기간 |
+| `KAKAO_CLIENT_SECRET` | deprecated Web 경로 Client Secret | `your-kakao-client-secret`          | 1차 관찰 기간 |
+| `KAKAO_REDIRECT_URI`  | deprecated Web 경로 Redirect URI | `http://localhost:3000/test/callback.html` | 1차 관찰 기간 |
+| `KAKAO_APP_ID`        | 허용할 카카오 앱의 숫자형 App ID | `123456`                              | API, 환경별 상이 |
+| `KAKAO_ADMIN_KEY_FILE` | Kakao Admin Key Docker secret 경로 | `/run/secrets/kakao_admin_key`       | 탈퇴 worker 활성 시 |
 | `NAVER_CLIENT_ID`     | 네이버 OAuth Client ID     | `your-naver-client-id`                     | 모든 환경 |
 | `NAVER_CLIENT_SECRET` | 네이버 OAuth Client Secret | `your-naver-client-secret`                 | 모든 환경 |
 
@@ -1250,6 +1265,8 @@ JWT_REFRESH_SECRET=your-refresh-secret
 KAKAO_CLIENT_ID=your-kakao-client-id
 KAKAO_CLIENT_SECRET=your-kakao-client-secret
 KAKAO_REDIRECT_URI=http://localhost:3000/test/callback.html
+KAKAO_APP_ID=123456
+KAKAO_ADMIN_KEY_FILE=/run/secrets/kakao_admin_key
 GOOGLE_SERVER_CLIENT_ID=replace-with-web-oauth-client-id.apps.googleusercontent.com
 NODE_ENV=development
 TRUST_PROXY_HOPS=0
@@ -1375,7 +1392,7 @@ curl --fail http://127.0.0.1:3000/health
 
 ### Swagger/Postman
 
-- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹·기기·Apple·Google 인증 API `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
+- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹·기기·Apple·Google·Kakao 인증 API `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
 - **Apple 로그인 서버 가이드**: `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`
 - **Google 로그인 서버 가이드**: `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`
   - **파일 역할**: Google Cloud OAuth client 발급, 서버 환경변수, DB migration, 단계 활성화, E2E·롤백 절차를 운영자와 Flutter 개발자에게 제공
@@ -1572,7 +1589,7 @@ P0/P1 그룹 요청
   - 사용 예: 그룹 화면의 더미 datasource를 실제 API로 교체하고 DTO/domain state/widget 테스트를 작성할 때 기준 문서로 사용
 - 서버 상세 endpoint·migration·역할은 `_docs/GROUP_API_GUIDE.md`, Flutter 연동은 `_docs/GROUP_FRONTEND_API_GUIDE.md`, 실제 동작 판정은 `_docs/GROUP_RUNTIME_VERIFICATION_CHECKLIST.md`, 설계 근거는 ADR-0021을 정본으로 사용합니다.
 
-### 12. Apple·Google 인증 모듈
+### 12. Apple·Google·Kakao 인증 모듈
 
 - **`src/services/appleService.ts`**
   - 역할: Apple challenge, code 교환, JWKS/claim 검증, 외부 refresh token 암복호화
@@ -1582,6 +1599,10 @@ P0/P1 그룹 요청
   - 역할: Google ID Token 검증과 공개 claim 정규화
   - 의존성: `google-auth-library`, 고정 server audience
   - 사용 예: `POST /api/v1/auth/google/token` 처리
+- **`src/services/kakaoService.ts`**
+  - 역할: Kakao Access Token의 App ID·회원번호 교차 검증과 사용자/템플릿/JWT 원자적 provisioning
+  - 의존성: `KAKAO_APP_ID`, Kakao token info·user info API, PostgreSQL
+  - 사용 예: `POST /api/v1/auth/kakao/token` 처리
 - **`src/models/OAuthLoginChallenge.ts`, `src/models/OAuthAuthorization.ts`**
   - 역할: Apple 일회성 challenge hash와 암호화된 외부 authorization 저장
   - 의존성: `users`, Apple add-only migration
@@ -1590,9 +1611,17 @@ P0/P1 그룹 요청
   - 역할: 공개 가능한 범용 preflight/apply/postflight/제한적 rollback SQL
   - 의존성: PostgreSQL 16과 기존 `users`
   - 사용 예: 백업과 대상 확인 후 개발자가 수동 실행
-- **`src/openapi/appleAuthOpenApi.json`, `src/openapi/googleAuthOpenApi.json`**
-  - 역할: 인증 endpoint와 공통 오류 응답 계약
+- **`src/openapi/appleAuthOpenApi.json`, `src/openapi/googleAuthOpenApi.json`, `src/openapi/kakaoAuthOpenApi.json`**
+  - 역할: 인증 endpoint와 공통 오류 응답 계약. Kakao 조각은 1차 배포 동안 deprecated Web 경로도 표시
   - 의존성: `src/openapi.ts`
+- **`test/kakaoAuth.test.cjs`**
+  - 역할: App ID·회원번호·upstream 오류·로그 비노출·OpenAPI·unlink secret 계약 단위/정적 회귀 검증
+  - 의존성: TypeScript build 결과와 주입 가능한 Kakao HTTP/provider adapter
+  - 사용 예: `npm test`
+- **`test/kakaoAuthIntegration.test.cjs`, `test/fixtures/kakaoAuthIntegrationSchema.sql`**
+  - 역할: Kakao 사용자 연결·동시 로그인·기본 템플릿·Refresh Token transaction과 rollback을 격리 PostgreSQL 16에서 검증
+  - 의존성: `127.0.0.1:55432`의 고정 격리 DB와 명시적 schema reset 승인
+  - 사용 예: `npm run debug:group-db:up && npm run test:kakao-integration`
   - 사용 예: `API_DOCS_ENABLED=true`인 개발 환경에서 확인
 - **`test/appleAuth*.test.cjs`, `test/googleAuth*.test.cjs`**
   - 역할: crypto/claim/HTTP/transaction/migration 회귀 검증

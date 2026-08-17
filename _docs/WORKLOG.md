@@ -2,7 +2,27 @@
 
 # 작업 일지
 
+## 2026-08-17
+
+### [TODO] Kakao 변경의 develop 공통 코드와 main 배포 보안 자산 분리
+
+- **목적**: Kakao SDK 토큰 로그인 공통 구현은 develop을 통해 main에 병합하고, 운영 topology와 secret preflight 등 배포 보안 자산은 main에만 유지한다.
+- **변경 예정**: 공통 소스·OpenAPI·테스트·개발 문서를 develop에 커밋한 뒤 main에 병합하고, Compose·배포 workflow/script·Stage 전환 SQL·운영 문서를 main 전용 커밋으로 분리한다.
+- **영향범위**: `develop`, `main` 로컬 브랜치의 커밋 이력과 Kakao 인증/배포 문서. 실제 Stage/Production 배포와 외부 Kakao 앱 설정은 수행하지 않는다.
+- **롤백**: develop 공통 커밋과 main merge/main 전용 커밋을 각각 revert하며, 실제 운영 secret이나 DB는 이번 Git 작업에서 변경하지 않는다.
+- **테스트 예정**: 브랜치별 파일 존재 경계, develop `npm test`, main 전체 테스트·배포 정적 계약·문법·diff 검증.
+
 ## 2026-08-16
+
+### [DONE] 카카오 SDK Access Token 로그인 공통 코드
+
+- **목적**: Flutter 카카오 SDK 토큰 로그인에서 토큰 발급 앱과 회원번호를 서버가 검증하고, 사용자 provisioning·JWT 발급과 탈퇴 Admin Key를 안전한 단일 운영 경계로 정리한다.
+- **변경**: `access_token_info`의 App ID·회원번호와 `user/me` 회원번호를 DB 진입 전에 검증하고, 5초 timeout·무재시도·공개 오류 매핑을 적용했다. 사용자 연결/생성, 기본 템플릿, Refresh Token을 advisory lock·row lock이 포함된 단일 transaction으로 묶고 성공 응답에 `request_id`·`is_new_user`를 추가했다. Admin Key는 탈퇴 worker가 파일에서만 읽도록 바꾸고 Kakao OpenAPI·통합 fixture·레거시 7일 관찰 로그를 추가했다.
+- **영향범위**: 카카오 공개 인증 API, 인증 DB transaction, 환경 검증, 회원 탈퇴 provider, OpenAPI와 개발 문서. DB 스키마와 친구/캘린더 공개 규칙은 변경하지 않는다.
+- **롤백**: 공통 구현 커밋을 revert하되 App ID 검증 장애는 검증을 해제하지 않고 환경별 앱 설정을 수정한다.
+- **파일**: `src/{config/environment,controllers/authController,routes/authRoutes,services/kakaoService,services/accountDeletionProviderService,utils/logger,openapi}.ts`, `src/openapi/kakaoAuthOpenApi.json`, `test/{kakaoAuth,kakaoAuthIntegration,environmentValidation}.test.cjs`, `test/fixtures/kakaoAuthIntegrationSchema.sql`, `.env.example`, `_docs/{PROJECT_CONTEXT,DECISIONS,OAUTH_API_GUIDE,WORKLOG}.md`.
+- **테스트**: TypeScript build, `test/{kakaoAuth,environmentValidation}.test.cjs` 14 pass/0 fail, Kakao 검증 순서·공개 오류·로그 비노출·unlink와 OpenAPI 계약, `git diff --check` 성공. develop 전체 `npm test`는 이 변경과 무관하게 main 전용 Apple Stage migration·Compose/workflow가 없는 기존 브랜치에서 해당 파일을 읽는 테스트가 실패하므로 main 병합 후 전체 검증한다. 격리 PostgreSQL 통합 테스트는 Docker DB가 있을 때 `npm run test:kakao-integration`으로 실행한다.
+- **다음**: develop 공통 커밋을 main에 병합한 후 main 전용 Compose·배포 workflow/script·Stage 전환 SQL과 운영 문서를 별도 커밋한다.
 
 ### [DONE] 프로세스별 worker secret 환경 검증 분리
 

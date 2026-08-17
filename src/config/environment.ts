@@ -152,6 +152,33 @@ export function validateGoogleAuthEnvironment(): void {
   }
 }
 
+export function validateKakaoAuthEnvironment(): void {
+  const app_id = getRequiredEnvironmentVariable("KAKAO_APP_ID");
+  if (!/^[1-9][0-9]*$/.test(app_id)) {
+    throw new Error("KAKAO_APP_ID는 양의 숫자 문자열이어야 합니다.");
+  }
+}
+
+export function getKakaoAdminKey(): string {
+  const secret_path = getRequiredEnvironmentVariable("KAKAO_ADMIN_KEY_FILE");
+  let secret_value: string;
+  try {
+    secret_value = fs.readFileSync(secret_path, "utf8").trim();
+  } catch {
+    throw new EnvironmentValidationError(
+      "KAKAO_ADMIN_KEY_FILE",
+      "KAKAO_ADMIN_KEY_FILE 파일을 읽을 수 없습니다.",
+    );
+  }
+  if (!secret_value || /\s/.test(secret_value)) {
+    throw new EnvironmentValidationError(
+      "KAKAO_ADMIN_KEY_FILE",
+      "KAKAO_ADMIN_KEY_FILE의 secret 형식이 올바르지 않습니다.",
+    );
+  }
+  return secret_value;
+}
+
 export function validatePushWorkerEnvironment(): void {
   if (!getBooleanEnvironmentVariable("PUSH_WORKER_ENABLED", false)) return;
   getRequiredEnvironmentVariable("FIREBASE_PROJECT_ID");
@@ -167,7 +194,7 @@ export function validateAccountDeletionWorkerEnvironment(): void {
   ) {
     return;
   }
-  getRequiredEnvironmentVariable("KAKAO_ADMIN_KEY");
+  getKakaoAdminKey();
 }
 
 export function validateEnvironment(): void {

@@ -1,0 +1,172 @@
+{
+  "tags": [
+    {
+      "name": "Kakao Auth",
+      "description": "Kakao Flutter SDK Access Token을 앱 ID와 회원번호로 검증하는 로그인입니다."
+    }
+  ],
+  "paths": {
+    "/auth/kakao/token": {
+      "post": {
+        "tags": ["Kakao Auth"],
+        "summary": "Kakao SDK Access Token 검증 및 ShiftMate 로그인",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/KakaoLoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "신규 가입 또는 기존 사용자 로그인 성공",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/KakaoLoginResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/KakaoBadRequest" },
+          "401": { "$ref": "#/components/responses/KakaoUnauthorized" },
+          "409": { "$ref": "#/components/responses/KakaoConflict" },
+          "429": { "$ref": "#/components/responses/KakaoRateLimited" },
+          "500": { "$ref": "#/components/responses/KakaoInternalError" },
+          "502": { "$ref": "#/components/responses/KakaoBadGateway" },
+          "503": { "$ref": "#/components/responses/KakaoUnavailable" }
+        }
+      }
+    },
+    "/auth/kakao": {
+      "post": {
+        "tags": ["Kakao Auth"],
+        "summary": "레거시 Kakao Web authorization-code 로그인",
+        "description": "1차 배포의 7일 무사용 관찰 동안만 유지하며 이후 제거합니다.",
+        "deprecated": true,
+        "security": [],
+        "responses": {
+          "200": { "description": "레거시 로그인 성공" },
+          "400": { "$ref": "#/components/responses/KakaoBadRequest" },
+          "429": { "$ref": "#/components/responses/KakaoRateLimited" },
+          "503": { "$ref": "#/components/responses/KakaoUnavailable" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "KakaoLoginRequest": {
+        "type": "object",
+        "required": ["access_token"],
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^\\S+$",
+            "writeOnly": true,
+            "description": "Kakao Flutter SDK가 발급한 Access Token"
+          }
+        }
+      },
+      "KakaoUser": {
+        "type": "object",
+        "required": ["user_id", "email", "name", "kakao_id"],
+        "properties": {
+          "user_id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "name": { "type": "string" },
+          "profile_image_url": { "type": "string", "format": "uri", "nullable": true },
+          "timezone": { "type": "string", "nullable": true },
+          "kakao_id": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "KakaoLoginResponse": {
+        "type": "object",
+        "required": ["success", "message", "data", "request_id"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "message": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["user", "access_token", "refresh_token", "expires_at", "is_new_user"],
+            "properties": {
+              "user": { "$ref": "#/components/schemas/KakaoUser" },
+              "access_token": { "type": "string", "writeOnly": true },
+              "refresh_token": { "type": "string", "writeOnly": true },
+              "expires_at": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Unix epoch milliseconds"
+              },
+              "is_new_user": { "type": "boolean" }
+            }
+          },
+          "request_id": { "type": "string" }
+        }
+      },
+      "KakaoErrorResponse": {
+        "type": "object",
+        "required": ["success", "error", "request_id"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [false] },
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "KAKAO_INVALID_TOKEN",
+                  "KAKAO_TOKEN_APP_MISMATCH",
+                  "KAKAO_TOKEN_SUBJECT_MISMATCH",
+                  "KAKAO_EMAIL_UNAVAILABLE",
+                  "KAKAO_ACCOUNT_CONFLICT",
+                  "KAKAO_INVALID_UPSTREAM_RESPONSE",
+                  "AUTH_RATE_LIMIT_EXCEEDED",
+                  "KAKAO_UPSTREAM_UNAVAILABLE",
+                  "INTERNAL_SERVER_ERROR"
+                ]
+              },
+              "message": { "type": "string" }
+            }
+          },
+          "request_id": { "type": "string" }
+        }
+      }
+    },
+    "responses": {
+      "KakaoBadRequest": {
+        "description": "입력 validation 또는 이메일 제공 조건 오류",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
+      },
+      "KakaoUnauthorized": {
+        "description": "토큰, 앱 ID 또는 회원번호 검증 실패",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
+      },
+      "KakaoConflict": {
+        "description": "이메일에 다른 카카오 계정이 연결됨",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
+      },
+      "KakaoRateLimited": {
+        "description": "ShiftMate 인증 rate limit 초과",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
+      },
+      "KakaoInternalError": {
+        "description": "분류되지 않은 서버 오류",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
+      },
+      "KakaoBadGateway": {
+        "description": "Kakao 성공 응답 구조 오류",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
+      },
+      "KakaoUnavailable": {
+        "description": "Kakao timeout, rate limit 또는 일시 장애",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
+      }
+    }
+  }
+}
