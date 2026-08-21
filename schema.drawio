@@ -1,9 +1,9 @@
-<mxfile host="app.diagrams.net" modified="2026-08-14T00:00:00.000Z" agent="Codex" version="24.7.17">
+<mxfile host="app.diagrams.net" modified="2026-08-20T00:00:00.000Z" agent="Codex" version="24.7.17">
   <diagram id="schema" name="Current Schema">
     <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1500" math="0" shadow="0">
       <root>
         <mxCell id="0"/><mxCell id="1" parent="0"/>
-        <mxCell id="users" value="users&#10;PK user_id (uuid)&#10;email / kakao_id / apple_id / google_id / naver_id&#10;phone / timezone&#10;account_status / deletion_requested_at" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="370" height="170" as="geometry"/></mxCell>
+        <mxCell id="users" value="users&#10;PK user_id (uuid)&#10;email / kakao_id / apple_id / google_id / naver_id&#10;phone / timezone / job_type / workplace&#10;profile_completed_at&#10;account_status / deletion_requested_at" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="370" height="190" as="geometry"/></mxCell>
         <mxCell id="friend_requests" value="friend_requests&#10;PK request_id&#10;requester_user_id → users&#10;addressee_user_id → users&#10;status" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="40" y="230" width="300" height="150" as="geometry"/></mxCell>
         <mxCell id="friendships" value="friendships&#10;PK (user_id_a, user_id_b)&#10;both → users&#10;user_id_a &lt; user_id_b" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="390" y="230" width="300" height="140" as="geometry"/></mxCell>
         <mxCell id="friend_settings" value="friend_level_settings&#10;PK (owner_user_id, friend_user_id)&#10;both → users&#10;can_view / friend_level" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="740" y="230" width="340" height="150" as="geometry"/></mxCell>

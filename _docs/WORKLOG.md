@@ -2,6 +2,62 @@
 
 # 작업 일지
 
+## 2026-08-21
+
+### [DONE] 기존 Migration allowlist·테스트 fixture Git 추적 복원
+
+- **목적**: 이번에 추가한 `migrations/`, `test/fixtures/` 전체 제외를 취소하되, 기존 migration allowlist 정책은 그대로 유지해 원래 커밋 대상이던 SQL과 테스트 fixture만 다시 Git 변경에 포함한다.
+- **변경**: `.gitignore`를 기존 `migrations/*` + 명시적 허용 파일 목록으로 복원하고 `test/fixtures/` 전체 제외 규칙을 제거했다. staged deletion 상태였던 기존 migration과 fixture는 파일 내용 변경 없이 Git 추적 상태로 복원했다. 현재 SQL에서 실제 운영 credential·private key는 발견되지 않았고, 격리 DB의 `group_debug_local_only`만 테스트 전용 고정값으로 확인했다.
+- **영향범위**: `.gitignore`, Git index의 기존 migration·fixture 추적 상태, 작업 기록. 기존 allowlist에 없는 migration은 계속 ignore된다.
+- **롤백**: 이번 `.gitignore`와 문서 변경을 revert한다.
+- **테스트**: credential/private-key 패턴 점검, `git check-ignore`와 `git status`로 기존 허용 파일·fixture는 추적되고 allowlist 외 migration은 계속 제외되는지 확인한다.
+- **보안 기준**: migration에 실제 비밀번호, API·Access Key, private key, 운영 token 또는 실제 개인정보가 필요해지는 경우 해당 값을 SQL에 기록하지 않고 placeholder·환경별 비밀 저장소로 분리한다. 이미 커밋·푸시된 비밀은 `.gitignore`만 추가하지 말고 즉시 자격증명을 폐기·교체하고 Git 이력 정리 필요성을 별도로 검토한다.
+- **다음**: 새 migration을 원격에 올려야 할 때만 `.gitignore` allowlist에 해당 파일을 명시적으로 추가하고, 추가 전 민감정보 점검을 수행한다.
+
+### [DONE] 단일 S3 버킷의 Stage·Center prefix 격리
+
+- **목적**: 운영자 결정에 따라 프로필 이미지 버킷은 Stage와 Center가 공유하되, 버킷 태그가 제공하지 못하는 객체 쓰기·삭제 권한 경계를 환경별 prefix와 IAM Resource로 강제한다.
+- **변경**: 저장 key를 `<storage_prefix>/profiles/{user_id}/{uuid}.{ext}`로 변경하고 `PROFILE_IMAGE_STORAGE_PREFIX`를 `local|test|stage|center`로 제한했다. Stage는 `stage/profiles/*`, Center는 `center/profiles/*`만 접근하도록 IAM 예시를 수정하고, 단일 버킷 공유·별도 IAM credential·버킷 태그의 운영 분류 전용 원칙을 ADR-0034와 가이드에 기록했다.
+- **영향범위**: 프로필 이미지 S3 key, IAM 정책 예시, 환경변수, 테스트와 설계 문서. 실제 AWS 정책·태그·홈서버 환경은 자동 변경하지 않는다.
+- **롤백**: 코드·문서 변경을 revert하고 아직 이미지가 저장되지 않은 경우에만 기존 `profiles/*` 정책으로 되돌린다. 객체 저장 이후 prefix 제거는 별도 데이터 이관 계획 없이 수행하지 않는다.
+- **파일**: `src/{services/profileImageStorageService.ts,config/environment.ts}`, `.env.example`, `test/profileCompletion*.test.cjs`, `_docs/{PROFILE_COMPLETION_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`.
+- **테스트**: `npm run build` 성공, 프로필 단위·정적 테스트 6 pass/0 fail, `test` prefix가 포함된 Put/Delete 동일 key와 허용되지 않은 prefix 거절을 확인했고 `git diff --check`를 통과했다. 실제 AWS 정책과 홈서버 환경은 변경하지 않았다.
+- **다음**: 생성된 Stage IAM 정책 Resource를 `<bucket>/stage/profiles/*`로 교체하고 홈서버 Stage에 `PROFILE_IMAGE_STORAGE_PREFIX=stage`를 설정한다. Center는 별도 IAM 사용자·정책으로 `<bucket>/center/profiles/*`만 허용하고 `PROFILE_IMAGE_STORAGE_PREFIX=center`를 사용한다.
+
+### [DONE] Stage 프로필 이미지 전용 IAM 사용자·정책 생성 확인
+
+- **목적**: 홈서버 Stage API가 비공개 S3의 `profiles/*` 객체에만 접근하도록 장기 자격증명의 권한 경계를 확정한다.
+- **확인된 외부 변경**: 운영자가 콘솔 로그인이 없는 `shiftmate-stage-profile-images-api` IAM 사용자를 생성하고 고객 관리형 `ShiftMateProfileImagesAccess` 정책을 연결했다. 정책은 Stage 프로필 이미지 버킷의 `profiles/*`에 `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`만 허용한다. Access Key 사용 사례는 홈서버 배포에 맞게 `AWS 외부에서 실행되는 애플리케이션`으로 선택했다.
+- **보안 확인**: 실제 버킷 이름·전체 ARN·Access Key ID·Secret Access Key는 문서에 기록하지 않는다. 정책 JSON의 객체 ARN은 공백·말줄임표·이스케이프 없이 `arn:aws:s3:::<STAGE_BUCKET>/profiles/*` 형식이어야 한다.
+- **영향범위**: AWS Stage IAM 사용자·고객 관리형 정책과 향후 홈서버 API credential. 저장소 코드·DB·실제 홈서버 환경은 이번 확인에서 변경하지 않는다.
+- **롤백**: 발급 전에는 IAM 사용자 또는 연결 정책을 제거한다. 발급 후에는 Access Key를 먼저 비활성화하고 사용 여부를 확인한 다음 삭제하며, 버킷과 객체는 별도 승인 없이 삭제하지 않는다.
+- **테스트**: 제공된 IAM 검토 화면에서 콘솔 암호 없음, 정책 1개 연결, 외부 애플리케이션 Access Key 용도 선택을 확인했다. 실제 정책 원문과 S3 API smoke test는 credential을 공유받지 않았으므로 수행하지 않았다.
+- **다음**: Access Key 발급 뒤 원문을 노출하지 않고 `/opt/shiftmate-stage/.env`에 설치한다. 비공개 조회 API 구현 후 Put/Get/Delete 최소 권한 smoke test를 수행한다.
+
+### [DONE] Stage 프로필 이미지 S3 비공개 버킷 생성 기록과 IAM 연결 안내
+
+- **목적**: 운영자가 생성한 Stage 프로필 이미지 S3 버킷의 확정 보안 설정을 기록하고, API 서버가 객체에 최소 권한으로 접근할 IAM 연결 위치를 명확히 한다.
+- **확인된 외부 변경**: 운영자가 Stage 프로필 이미지 전용 S3 버킷을 생성했다. 버전 관리·Object Lock·S3 버킷 키는 비활성화하고, 퍼블릭 액세스 네 항목은 모두 차단했으며, Object Ownership은 Bucket owner enforced, 기본 암호화는 SSE-S3로 구성했다. `Service=shiftmate`, `Environment=stage`, `Purpose=profile-images`, `DataClassification=user-content` 태그를 적용했다.
+- **변경**: 홈서버 Docker 배포에서는 S3 ARN을 애플리케이션 환경변수에 넣지 않고 `arn:aws:s3:::<STAGE_BUCKET>/profiles/*`를 Stage 전용 IAM 정책의 객체 `Resource`에 사용하도록 정리했다. `GetObject`/`PutObject`/`DeleteObject` 최소 권한, 전용 IAM 사용자와 외부 실행용 Access Key, `/opt/shiftmate-stage/.env`의 버킷 이름·리전·credential 위치를 가이드에 추가했다. 현재 코드는 공개 URL 생성만 지원하고 인증된 비공개 조회 스트리밍은 미구현이라는 배포 차단 조건도 명시했다.
+- **영향범위**: AWS IAM 정책 연결 위치, 서버 환경변수와 프로필 완료 운영 문서. 이 작업에서는 AWS 콘솔·IAM·실제 서버 환경을 직접 변경하지 않는다.
+- **미확인 값**: 실제 버킷 이름·버킷 ARN·API 서버 실행 IAM 주체는 제공되지 않아 문서나 코드에 추정값을 기록하지 않는다.
+- **롤백**: 문서 변경을 revert한다. AWS 버킷 삭제나 정책 변경은 별도 승인과 객체 존재 확인 없이는 수행하지 않는다.
+- **파일**: `_docs/PROFILE_COMPLETION_GUIDE.md`, `_docs/WORKLOG.md`.
+- **테스트**: 홈서버 Stage 배포 경로와 현재 storage 환경 검증·SDK 동작을 코드/문서에서 대조했고 `git diff --check`를 통과했다. 실제 S3/IAM smoke test는 버킷 이름·ARN·credential이 제공되지 않아 수행하지 않았다.
+- **다음**: 운영자가 실제 Stage 버킷 이름으로 IAM 정책을 생성·전용 사용자에 연결하고 Access Key를 홈서버에 설치한다. 비공개 이미지 조회 API와 DB object key 전환을 구현한 뒤에만 Stage 이미지 업로드·조회·교체·삭제 E2E를 수행한다.
+
+## 2026-08-20
+
+### [DONE] 가입 프로필 완료 API와 Stage/Center DB migration
+
+- **목적**: OAuth 신규 사용자가 앱 재시작 뒤에도 가입 프로필 필요 상태를 복구하고, 이름·전화번호·타임존과 선택 근무 정보를 원자적으로 완료하며 검증된 프로필 이미지를 object storage에 저장한다.
+- **변경**: `users.job_type`, `workplace`, `profile_completed_at` expand/backfill/down migration과 Stage/Center pgAdmin 승인형 단일 실행 쿼리를 추가했다. 가입 완료·일반 편집을 service transaction/row lock으로 이동하고 `requires_profile_setup`, phone unique 409, JSON·multipart, JPEG/PNG/WebP 내용 검증, 5MB/1파일 제한, S3 호환 UUID key 저장과 DB 실패 object 삭제를 구현했다. 네 OAuth·본인 프로필 응답, 친구 목록 phone 비노출, OpenAPI·환경 검증·정본 schema/draw.io·운영 가이드를 동기화했다.
+- **영향범위**: 인증·본인 프로필 API, `users` 모델/스키마, 환경변수와 배포 선행조건, 친구 목록 개인정보 응답, 문서와 테스트. 실제 Stage/Center DB 적용과 서버 배포는 수행하지 않는다.
+- **파일**: `src/{models/User.ts,services/profileService.ts,services/profileImageStorageService.ts,middlewares/profileImageUpload.ts,controllers/authController.ts,routes/authRoutes.ts,openapi.ts,openapi/profileAuthOpenApi.json}`, OAuth OpenAPI·환경·친구/fixture 연계 파일, `migrations/*profile_completion*`, `migrations/final_schema.sql`, `test/profileCompletion*.test.cjs`, `schema.drawio`, `.env.example`, `_docs/{PROFILE_COMPLETION_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`, package manifest/lockfile.
+- **롤백**: Flutter 배포 전에는 신규 route를 호환 유지한 채 이전 서버 이미지로 복귀하고 add-only 컬럼은 보존한다. 신규 컬럼 제거는 사전 데이터 감사와 별도 승인형 rollback SQL로만 수행한다.
+- **테스트**: TypeScript build 성공. 관련 회귀 53 pass/8 명시적 integration skip/0 fail, profile 단위·정적 6 pass, 격리 PostgreSQL 16 profile 통합 8 pass(범용 up/backfill/down, Stage·Center pgAdmin 전체 commit, 완료 멱등·rollback, multipart 400/413/200, object cleanup·503), OpenAPI JSON·draw.io XML parse와 `git diff --check` 성공. `npm audit --omit=dev --audit-level=high`은 high/critical 0, 기존 Firebase Admin 간접 `uuid` moderate 8을 보고했다. 전체 `npm test`는 이번 변경과 무관하게 현재 checkout에 없는 Apple Stage SQL·배포 Compose/workflow를 읽는 기존 테스트와 Apple Portal 문구 기준선에서 실패하므로 결과를 분리했다. 테스트용 Docker PostgreSQL 컨테이너·volume은 종료·삭제했다.
+- **다음**: 운영자는 가이드 순서대로 Stage 백업 복원 시험 → Stage SQL의 backup placeholder 교체·전체 실행 → 환경별 bucket/CDN Put/Delete/HTTPS GET smoke → 서버·네 OAuth·Flutter 가입 재개 E2E를 완료한 뒤 Center와 Flutter Production을 순차 배포한다. 이번 작업에서 실제 Stage/Center DB와 object storage는 변경하지 않았다.
+
 ## 2026-08-17
 
 ### [DONE] Kakao Admin Key plain-text secret 예시 추가

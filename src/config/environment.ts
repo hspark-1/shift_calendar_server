@@ -197,6 +197,55 @@ export function validateAccountDeletionWorkerEnvironment(): void {
   getKakaoAdminKey();
 }
 
+export function validateProfileImageStorageEnvironment(): void {
+  getRequiredEnvironmentVariable("PROFILE_IMAGE_STORAGE_BUCKET");
+  getRequiredEnvironmentVariable("PROFILE_IMAGE_STORAGE_REGION");
+  const storage_prefix = getRequiredEnvironmentVariable(
+    "PROFILE_IMAGE_STORAGE_PREFIX",
+  );
+  if (!["local", "test", "stage", "center"].includes(storage_prefix)) {
+    throw new Error(
+      "PROFILE_IMAGE_STORAGE_PREFIX는 local, test, stage, center 중 하나여야 합니다.",
+    );
+  }
+  const public_base_url = getRequiredEnvironmentVariable(
+    "PROFILE_IMAGE_PUBLIC_BASE_URL",
+  );
+  let parsed_public_base_url: URL;
+  try {
+    parsed_public_base_url = new URL(public_base_url);
+  } catch {
+    throw new Error("PROFILE_IMAGE_PUBLIC_BASE_URL은 유효한 HTTPS URL이어야 합니다.");
+  }
+  if (
+    parsed_public_base_url.protocol !== "https:" ||
+    parsed_public_base_url.search !== "" ||
+    parsed_public_base_url.hash !== ""
+  ) {
+    throw new Error("PROFILE_IMAGE_PUBLIC_BASE_URL은 query/hash 없는 HTTPS URL이어야 합니다.");
+  }
+
+  const endpoint = process.env.PROFILE_IMAGE_STORAGE_ENDPOINT?.trim();
+  if (endpoint) {
+    try {
+      const parsed_endpoint = new URL(endpoint);
+      if (!["http:", "https:"].includes(parsed_endpoint.protocol)) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error("PROFILE_IMAGE_STORAGE_ENDPOINT는 유효한 HTTP(S) URL이어야 합니다.");
+    }
+  }
+  const access_key_id = process.env.AWS_ACCESS_KEY_ID?.trim();
+  const secret_access_key = process.env.AWS_SECRET_ACCESS_KEY?.trim();
+  if (Boolean(access_key_id) !== Boolean(secret_access_key)) {
+    throw new Error(
+      "AWS_ACCESS_KEY_ID와 AWS_SECRET_ACCESS_KEY는 함께 설정하거나 둘 다 생략해야 합니다.",
+    );
+  }
+  getBooleanEnvironmentVariable("PROFILE_IMAGE_STORAGE_FORCE_PATH_STYLE", false);
+}
+
 export function validateEnvironment(): void {
   for (const variable_name of required_environment_variables) {
     getRequiredEnvironmentVariable(variable_name);

@@ -91,7 +91,7 @@
           "message": { "type": "string" },
           "data": {
             "type": "object",
-            "required": ["user", "access_token", "refresh_token", "expires_at", "is_new_user"],
+            "required": ["user", "access_token", "refresh_token", "expires_at", "is_new_user", "requires_profile_setup"],
             "properties": {
               "user": { "$ref": "#/components/schemas/KakaoUser" },
               "access_token": { "type": "string", "writeOnly": true },
@@ -101,7 +101,8 @@
                 "format": "int64",
                 "description": "Unix epoch milliseconds"
               },
-              "is_new_user": { "type": "boolean" }
+              "is_new_user": { "type": "boolean" },
+              "requires_profile_setup": { "type": "boolean" }
             }
           },
           "request_id": { "type": "string" }

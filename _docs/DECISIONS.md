@@ -1859,3 +1859,104 @@ Flutter는 Kakao Native SDK의 Access Token만 서버에 전달하지만 서버�
 ### 추후 과제(언제 다시 평가)
 
 - 7일 무사용 증거 확보 후 ADR 상태를 완료로 갱신하고 레거시 Web 경로·환경변수·테스트 페이지를 제거
+
+---
+
+## ADR-0033: 가입 완료 정본과 S3 호환 프로필 이미지 저장
+
+> 저장소의 Stage·Center 분리 방식은 후속 ADR-0034가 대체합니다.
+
+### 배경(문제)
+
+OAuth의 `is_new_user`는 해당 로그인 요청에서 계정을 생성했는지만 나타내므로 앱을 종료한 미완료 사용자의 가입 화면을 복구할 수 없습니다. 서버에는 multipart parser와 영속 이미지 저장소도 없어 Flutter가 보낸 파일을 처리할 수 없습니다.
+
+### 선택지(대안)
+
+1. `is_new_user`를 계속 화면 분기 정본으로 사용하고 이미지는 URL 문자열만 받음
+2. 필수 필드 존재 여부를 로그인마다 계산하고 API 컨테이너 로컬 디스크에 이미지 저장
+3. `profile_completed_at`을 영속 정본으로 두고 S3 호환 object storage에 검증된 이미지를 UUID key로 저장
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다.**
+
+- `profile_completed_at IS NULL`만 `requires_profile_setup` 계산 정본으로 사용
+- 최초 완료는 `/auth/profile/complete`의 row lock·단일 DB transaction만 담당하며 재전송은 기존 완료 시각 유지
+- 일반 `/auth/profile` 편집은 완료 시각을 생성하지 않음
+- JPEG/PNG/WebP 1개, 5MB, MIME·magic/컨테이너 구조 일치를 메모리 parser에서 검증
+- 환경별 S3 호환 bucket과 CDN HTTPS base URL을 사용하고 원본 파일명은 저장 key에 사용하지 않음
+- object 업로드 뒤 DB 실패 시 새 object를 삭제하고 전화번호 unique 경쟁은 409로 반환
+- `phone`, `workplace`는 본인 인증/프로필 응답 외 친구·그룹 응답에 공개하지 않음
+
+### 근거(왜)
+
+- 가입 재개 상태를 로그인 공급자와 앱 프로세스 수명에서 분리
+- API 컨테이너 교체·Blue/Green 배포와 무관한 영속 URL 보장
+- 파일 내용·크기와 PII 노출 경계를 서버에서 일관되게 강제
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- API 시작 전에 환경별 bucket/region/public base URL과 storage 접근 권한이 필요
+- object 저장과 DB가 분산 transaction이므로 DB 실패 삭제가 실패하면 운영 정리 대상 orphan이 남을 수 있어 구조화 오류 로그를 감시해야 함
+- 기존 `is_new_user`는 호환 필드로 남지만 화면 분기 정본이 아님
+
+### 구현 위치
+
+- `src/services/{profileService,profileImageStorageService}.ts`
+- `src/middlewares/profileImageUpload.ts`, `src/openapi/profileAuthOpenApi.json`
+- `migrations/*profile_completion*`, `test/profileCompletion*.test.cjs`
+
+### 추후 과제(언제 다시 평가)
+
+- orphan 발생이 관측되면 object tag 또는 outbox 기반 정리 worker를 추가
+- CDN signed URL이나 이미지 변환 요구가 생기면 현재 public immutable URL 정책을 재평가
+
+---
+
+## ADR-0034: 단일 프로필 이미지 버킷과 환경별 prefix 권한 격리
+
+### 배경(문제)
+
+최초 설계는 Stage와 Center가 별도 S3 버킷을 사용하는 방식이었으나 운영자는 하나의 버킷을 공유하기로 결정했습니다. 버킷 태그는 버킷 전체에 적용되므로 한 버킷 안의 Stage 객체와 Center 객체를 서로 다른 권한 경계로 나누지 못하며, 객체의 기존 태그 조건은 S3 `DeleteObject` 권한 제한에 사용할 수 없습니다.
+
+### 선택지(대안)
+
+1. Stage와 Center가 별도 버킷 사용
+2. 단일 버킷에서 버킷 태그만으로 환경 구분
+3. 단일 버킷에서 환경별 key prefix와 별도 IAM 사용자·정책 사용, 버킷 태그는 운영 분류에만 사용
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다.**
+
+- 객체 key는 `<storage_prefix>/profiles/{user_id}/{uuid}.{ext}`
+- Stage prefix는 `stage`, Center prefix는 `center`
+- Stage IAM Resource는 `arn:aws:s3:::<bucket>/stage/profiles/*`
+- Center IAM Resource는 `arn:aws:s3:::<bucket>/center/profiles/*`
+- 버킷 이름·리전만 공유하고 IAM 사용자·정책·Access Key는 분리
+- 버킷 태그는 `Environment=shared` 등 비용·운영 식별에만 사용하고 접근 제어 정본으로 사용하지 않음
+- `PROFILE_IMAGE_STORAGE_PREFIX`는 `local|test|stage|center`만 허용
+
+### 근거(왜)
+
+- 운영자가 원하는 단일 버킷을 유지하면서 Stage credential의 Center 객체 읽기·쓰기·삭제를 IAM Resource 수준에서 차단
+- 객체 태그에 의존한 삭제 권한 경계의 S3 제약을 회피
+- key 자체로 환경을 식별해 장애 분석과 수동 복구 시 오조작 범위를 축소
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- 기존 Stage 정책의 `/profiles/*` Resource를 `/stage/profiles/*`로 교체해야 함
+- Center 배포 전에 별도 IAM 사용자·정책·Access Key가 필요
+- prefix 적용 전 저장된 객체가 생겼다면 자동 이동되지 않으므로 별도 이관이 필요
+- 버킷 단위 암호화·퍼블릭 차단·수명주기·장애 영향은 두 환경이 공유
+
+### 구현 위치
+
+- `src/services/profileImageStorageService.ts`, `src/config/environment.ts`
+- `.env.example`, `test/profileCompletion*.test.cjs`
+- `_docs/PROFILE_COMPLETION_GUIDE.md`
+
+### 추후 과제(언제 다시 평가)
+
+- Stage 작업이 Center 객체나 버킷 공통 설정에 영향을 준 사고가 발생하면 별도 버킷으로 분리
+- 비공개 조회 API 구현 시에도 요청 사용자의 환경과 저장 key prefix가 일치하는지 서버에서 강제

@@ -44,7 +44,6 @@ export interface FriendListItem {
   user_id: string;
   name: string;
   email: string;
-  phone: string | null;
   profile_image_url: string | null;
   friend_level: number;
   can_view: boolean;
@@ -168,7 +167,6 @@ export async function getFriends(
       u.user_id,
       u.name,
       u.email,
-      u.phone,
       u.profile_image_url,
       fls.friend_level,
       fls.can_view,

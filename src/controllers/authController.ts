@@ -14,7 +14,6 @@ import {
 } from "../services/kakaoService";
 import { processNaverLogin, getNaverUserInfo } from "../services/naverService";
 import { ensureDefaultTemplate } from "../services/shiftTemplateService";
-import { normalizePhoneNumber } from "../utils/phone";
 import {
   logAppleAuthEvent,
   logError,
@@ -35,6 +34,15 @@ import {
   getAccountDeletionStatus,
   requestAccountDeletion,
 } from "../services/accountDeletionService";
+import {
+  completeProfile as completeProfileService,
+  ProfileError,
+  updateProfileFields,
+} from "../services/profileService";
+import {
+  deleteProfileImage,
+  uploadProfileImage,
+} from "../services/profileImageStorageService";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -138,6 +146,31 @@ function sendKakaoAuthError(
   });
 }
 
+function sendProfileError(
+  req: Request,
+  res: Response,
+  error: unknown,
+  context: string,
+): void {
+  if (error instanceof ProfileError) {
+    res.status(error.status_code).json({
+      success: false,
+      error: { code: error.code, message: error.message },
+      request_id: req.request_id,
+    });
+    return;
+  }
+  logError(context, error, req.request_id);
+  res.status(500).json({
+    success: false,
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "서버 오류가 발생했습니다.",
+    },
+    request_id: req.request_id,
+  });
+}
+
 export async function googleLoginWithToken(
   req: Request,
   res: Response,
@@ -164,6 +197,7 @@ export async function googleLoginWithToken(
         user: result.user.toJSON(),
         ...result.tokens,
         is_new_user: result.is_new_user,
+        requires_profile_setup: result.user.profile_completed_at == null,
       },
     });
   } catch (error) {
@@ -277,6 +311,7 @@ export async function appleLogin(req: Request, res: Response): Promise<void> {
         user: result.user.toJSON(),
         ...result.tokens,
         is_new_user: result.is_new_user,
+        requires_profile_setup: result.user.profile_completed_at == null,
       },
     });
   } catch (error) {
@@ -334,6 +369,7 @@ export async function register(req: Request, res: Response): Promise<void> {
       data: {
         user: user.toJSON(),
         ...tokens,
+        requires_profile_setup: user.profile_completed_at == null,
       },
     });
   } catch (error) {
@@ -385,6 +421,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       data: {
         user: user.toJSON(),
         ...tokens,
+        requires_profile_setup: user.profile_completed_at == null,
       },
     });
   } catch (error) {
@@ -499,6 +536,7 @@ export async function getProfile(
     res.json({
       success: true,
       data: req.user?.toJSON(),
+      request_id: req.request_id,
     });
   } catch (error) {
     logError("auth_profile_get_failed", error, req.request_id);
@@ -514,82 +552,76 @@ export async function updateProfile(
   res: Response
 ): Promise<void> {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "입력값 검증에 실패했습니다.",
-        },
-        errors: errors.array(),
-      });
-      return;
-    }
-
     if (!req.user) {
-      res.status(401).json({ success: false, message: "인증이 필요합니다." });
+      res.status(401).json({
+        success: false,
+        error: { code: "UNAUTHORIZED", message: "인증이 필요합니다." },
+        request_id: req.request_id,
+      });
       return;
     }
-
-    const { name, timezone, profile_image_url, phone } = req.body;
-
-    // 수정할 필드만 업데이트
-    if (name !== undefined) {
-      req.user.name = name;
-    }
-    if (timezone !== undefined) {
-      req.user.timezone = timezone;
-    }
-    if (profile_image_url !== undefined) {
-      req.user.profile_image_url = profile_image_url;
-    }
-    if (phone !== undefined) {
-      const normalized_phone = normalizePhoneNumber(phone);
-      if (!normalized_phone) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: "INVALID_PHONE",
-            message:
-              "전화번호는 000-000-0000 또는 000-0000-0000 형식이어야 합니다.",
-          },
-        });
-        return;
-      }
-
-      const existing_phone_user = await User.findOne({
-        where: { phone: normalized_phone },
-      });
-      if (
-        existing_phone_user &&
-        existing_phone_user.user_id !== req.user.user_id
-      ) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: "PHONE_ALREADY_EXISTS",
-            message: "이미 사용 중인 전화번호입니다.",
-          },
-        });
-        return;
-      }
-
-      req.user.phone = normalized_phone;
-    }
-
-    await req.user.save();
+    const user = await updateProfileFields(req.user.user_id, req.body);
 
     res.json({
       success: true,
       message: "프로필이 수정되었습니다.",
-      data: req.user.toJSON(),
+      data: user.toJSON(),
+      request_id: req.request_id,
     });
   } catch (error) {
-    logError("auth_profile_update_failed", error, req.request_id);
-    res
-      .status(500)
-      .json({ success: false, message: "서버 오류가 발생했습니다." });
+    sendProfileError(req, res, error, "auth_profile_update_failed");
+  }
+}
+
+export async function completeProfile(
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) {
+    res.status(401).json({
+      success: false,
+      error: { code: "UNAUTHORIZED", message: "인증이 필요합니다." },
+      request_id: req.request_id,
+    });
+    return;
+  }
+
+  let stored_image: { key: string; public_url: string } | null = null;
+  try {
+    if (req.validated_profile_image) {
+      try {
+        stored_image = await uploadProfileImage(
+          req.user.user_id,
+          req.validated_profile_image,
+        );
+      } catch (error) {
+        logError("profile_image_upload_failed", error, req.request_id);
+        throw new ProfileError(
+          503,
+          "PROFILE_IMAGE_STORAGE_UNAVAILABLE",
+          "프로필 이미지를 저장할 수 없습니다. 잠시 후 다시 시도해주세요.",
+        );
+      }
+    }
+
+    const user = await completeProfileService(req.user.user_id, {
+      ...req.body,
+      ...(stored_image ? { profile_image_url: stored_image.public_url } : {}),
+    });
+    res.status(200).json({
+      success: true,
+      data: user.toJSON(),
+      request_id: req.request_id,
+    });
+  } catch (error) {
+    if (stored_image) {
+      try {
+        await deleteProfileImage(stored_image.key);
+      } catch (cleanup_error) {
+        logError("profile_image_cleanup_failed", cleanup_error, req.request_id);
+      }
+    }
+    sendProfileError(req, res, error, "auth_profile_complete_failed");
   }
 }
 
@@ -710,6 +742,7 @@ export async function kakaoLogin(req: Request, res: Response): Promise<void> {
         user: result.user.toJSON(),
         ...result.tokens,
         is_new_user: result.is_new_user,
+        requires_profile_setup: result.user.profile_completed_at == null,
       },
       request_id: req.request_id,
     });
@@ -748,6 +781,7 @@ export async function kakaoLoginWithToken(
         user: result.user.toJSON(),
         ...result.tokens,
         is_new_user: result.is_new_user,
+        requires_profile_setup: result.user.profile_completed_at == null,
       },
       request_id: req.request_id,
     });
@@ -829,6 +863,7 @@ export async function naverLogin(req: Request, res: Response): Promise<void> {
       data: {
         user: user.toJSON(),
         ...tokens,
+        requires_profile_setup: user.profile_completed_at == null,
       },
     });
   } catch (error) {
@@ -915,6 +950,7 @@ export async function naverLoginWithToken(
       data: {
         user: user.toJSON(),
         ...tokens,
+        requires_profile_setup: user.profile_completed_at == null,
       },
     });
   } catch (error) {

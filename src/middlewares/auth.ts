@@ -15,7 +15,7 @@ interface AuthenticatedRequest extends Request {
   user?: User;
 }
 
-function sendUnauthorizedResponse(res: Response): void {
+function sendUnauthorizedResponse(req: Request, res: Response): void {
   res.status(401).json({
     success: false,
     message: "로그인이 필요합니다.",
@@ -23,6 +23,7 @@ function sendUnauthorizedResponse(res: Response): void {
       code: "UNAUTHORIZED",
       message: "로그인이 필요합니다.",
     },
+    request_id: req.request_id,
   });
 }
 
@@ -35,7 +36,7 @@ export async function authMiddleware(
     const auth_header = req.headers.authorization;
 
     if (!auth_header || !auth_header.startsWith("Bearer ")) {
-      sendUnauthorizedResponse(res);
+      sendUnauthorizedResponse(req, res);
       return;
     }
 
@@ -47,7 +48,7 @@ export async function authMiddleware(
     const user = await User.findByPk(decoded.user_id);
 
     if (!user) {
-      sendUnauthorizedResponse(res);
+      sendUnauthorizedResponse(req, res);
       return;
     }
 
@@ -72,10 +73,10 @@ export async function authMiddleware(
     next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
-      sendUnauthorizedResponse(res);
+      sendUnauthorizedResponse(req, res);
       return;
     }
-    sendUnauthorizedResponse(res);
+    sendUnauthorizedResponse(req, res);
   }
 }
 
@@ -87,7 +88,7 @@ export async function accountDeletionStatusAuthMiddleware(
   try {
     const auth_header = req.headers.authorization;
     if (!auth_header || !auth_header.startsWith("Bearer ")) {
-      sendUnauthorizedResponse(res);
+      sendUnauthorizedResponse(req, res);
       return;
     }
     const decoded = jwt.verify(
@@ -96,7 +97,7 @@ export async function accountDeletionStatusAuthMiddleware(
     ) as JwtPayload;
     const user = await User.findByPk(decoded.user_id);
     if (!user || user.account_status !== "DELETION_PENDING") {
-      sendUnauthorizedResponse(res);
+      sendUnauthorizedResponse(req, res);
       return;
     }
     req.user = user;
@@ -107,6 +108,6 @@ export async function accountDeletionStatusAuthMiddleware(
     };
     next();
   } catch {
-    sendUnauthorizedResponse(res);
+    sendUnauthorizedResponse(req, res);
   }
 }

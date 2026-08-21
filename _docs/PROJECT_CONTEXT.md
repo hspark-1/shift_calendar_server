@@ -266,6 +266,15 @@ test/
 - **의존성**: Express Request/Response, Node.js `crypto`, 공통 환경변수 파서
 - **사용 예**: 인증 컨트롤러에서 `logError("auth_login_failed", error, req.request_id)` 호출
 
+#### 가입 프로필 완료 모듈
+
+- **`src/services/profileService.ts` 역할**: 이름·IANA timezone·전화번호·직종·소속을 정규화하고 가입 완료 또는 일반 편집을 row lock과 단일 transaction으로 처리하며 전화번호 unique 경쟁을 409로 매핑
+- **`src/middlewares/profileImageUpload.ts` 역할**: multipart 메모리 parser에서 파일 1개·5MB를 제한하고 JPEG/PNG/WebP MIME과 magic/컨테이너 구조 일치를 검증
+- **`src/services/profileImageStorageService.ts` 역할**: 원본 파일명 대신 `<storage_prefix>/profiles/{user_id}/{uuid}.{ext}` key로 단일 S3 호환 object storage에 저장하고 CDN HTTPS URL을 생성하며 DB 실패 시 같은 key 삭제 지원
+- **`src/openapi/profileAuthOpenApi.json` 역할**: `/auth/profile/complete`, 기존 `/auth/profile` 조회·편집과 JSON/multipart/오류 계약 정의
+- **의존성**: profile completion DB expand migration, `multer`, `@aws-sdk/client-s3`, 공유 bucket/region, 환경별 `stage|center` prefix·IAM credential, CDN URL과 필요 시 AWS credential chain
+- **사용 예**: DB와 storage를 먼저 준비한 뒤 `POST /api/v1/auth/profile/complete`에 JSON 또는 `profile_image` 파일 하나가 포함된 multipart 요청을 전송
+
 #### 월별 근무표 캐시 모듈
 
 - **`src/services/workShiftMonthCacheService.ts` 역할**: 월 분할, snapshot/lock/revision key, cache-aside, revision fence, ETag 생성
@@ -758,6 +767,7 @@ const work_shifts = await WorkShift.findAll({
 - `POST /logout-all` - 모든 기기 로그아웃 (인증 필요)
 - `GET /profile` - 내 정보 조회 (인증 필요)
 - `POST /profile` - 내 정보 수정 (인증 필요)
+- `POST /profile/complete` - 가입 프로필 최초 완료, JSON 또는 이미지 multipart (인증·rate limit 적용)
 
 **캘린더/근무표** (`/api/v1`):
 
@@ -885,6 +895,10 @@ catch (error) {
 | `KAKAO_ADMIN_KEY_FILE` | Kakao Admin Key Docker secret 경로 | `/run/secrets/kakao_admin_key`       | 탈퇴 worker 활성 시 |
 | `NAVER_CLIENT_ID`     | 네이버 OAuth Client ID     | `your-naver-client-id`                     | 모든 환경 |
 | `NAVER_CLIENT_SECRET` | 네이버 OAuth Client Secret | `your-naver-client-secret`                 | 모든 환경 |
+| `PROFILE_IMAGE_STORAGE_BUCKET` | Stage·Center 공유 프로필 이미지 S3 호환 bucket | `shiftmate-profile-images` | API, 운영 환경 공통 |
+| `PROFILE_IMAGE_STORAGE_REGION` | 공유 object storage region | `ap-northeast-2` | API, 운영 환경 공통 |
+| `PROFILE_IMAGE_STORAGE_PREFIX` | 공유 bucket의 객체 환경 prefix | Stage `stage`, Center `center` | API, 환경별 필수 |
+| `PROFILE_IMAGE_PUBLIC_BASE_URL` | 저장 object 공개 CDN HTTPS base URL | `https://cdn.example.com` | API, 환경별 상이 |
 
 #### 선택 환경변수
 
@@ -904,6 +918,9 @@ catch (error) {
 | `REQUEST_BODY_LIMIT`                  | JSON/form 요청 본문 최대 크기            | `100kb`                        |
 | `AUTH_RATE_LIMIT_WINDOW_MS`           | 인증 요청 제한 구간                      | `60000`                        |
 | `AUTH_RATE_LIMIT_MAX`                 | 구간당 인스턴스별 인증 요청 최대 횟수    | `10`                           |
+| `PROFILE_IMAGE_STORAGE_ENDPOINT`      | S3 호환 endpoint, AWS S3는 생략          | 없음                           |
+| `PROFILE_IMAGE_STORAGE_FORCE_PATH_STYLE` | S3 path-style 강제 여부                | `false`                        |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | static credential이 필요한 storage 자격 증명 | workload role 사용 시 생략 |
 | `WORK_SHIFT_CACHE_ENABLED`            | 월별 근무표 Redis 캐시/worker 활성화     | `false`                        |
 | `REDIS_URL`                           | 비밀번호 포함 환경별 Redis 내부 URL      | 캐시 활성 시 필수              |
 | `CACHE_KEY_PREFIX`                    | Stage/Center 분리 Redis key prefix       | 캐시 활성 시 필수              |
@@ -1013,6 +1030,8 @@ AUTH_RATE_LIMIT_MAX=10
 - `test/fixtures/appleAuthMigrationBaseSchema.sql`: Apple preflight/apply/postflight/rollback 실DB 검증용 최소 schema이며 운영 DB에서 실행 금지
 - `npm run test:google-integration`: 고정 격리 PostgreSQL 16에서 Google migration, 신규 사용자 transaction, 기존 사용자 profile 불변, 이메일 자동 연결 금지, subject 동시 요청 단일 사용자 생성, rollback을 검증
 - `test/fixtures/googleAuthMigrationBaseSchema.sql`: Google migration·로그인 통합 테스트용 최소 schema이며 실행 시 대상 `public` schema를 재생성하므로 운영/공유 개발 DB에서 실행 금지
+- `npm run test:profile-integration`: 고정 격리 PostgreSQL 16에서 profile migration/backfill/down, 완료 멱등성·transaction rollback, JSON/multipart, MIME 불일치·5MB 제한, object 저장 실패·DB 실패 정리를 검증
+- `test/fixtures/profileCompletionMigrationBaseSchema.sql`: 가입 프로필 migration 전 users 기반 schema와 backfill 대상/비대상 fixture이며 운영/공유 개발 DB에서 실행 금지
 
 ---
 
@@ -1025,6 +1044,9 @@ AUTH_RATE_LIMIT_MAX=10
 - `user_id` (UUID, PK)
 - `email`, `name`, `profile_image_url`
 - `phone`: nullable unique, `000-000-0000` 또는 `000-0000-0000` 형식만 저장
+- `job_type`: nullable `NURSE | DOCTOR | EMT | OTHER`
+- `workplace`: nullable, trim 기준 1~100자
+- `profile_completed_at`: 가입 프로필 최초 완료 시각. `null`이면 `requires_profile_setup=true`
 - `kakao_id`, `apple_id`, `google_id`, `naver_id` (OAuth)
 - `timezone`
 - `account_status`: `ACTIVE | DELETION_PENDING`
@@ -1210,6 +1232,12 @@ docker exec -i shift-calendar-postgres \
 psql -U postgres -d shift_calendar -f migrations/enforce_users_phone_format.sql
 ```
 
+기존 DB에 가입 프로필 완료 상태와 선택 근무 정보를 추가할 때는 `_docs/PROFILE_COMPLETION_GUIDE.md`를 따릅니다.
+
+- **범용 파일 역할**: `profile_completion_preflight.sql` → `add_profile_completion_support.sql` → `profile_completion_postflight.sql` 순서로 PostgreSQL 16 기반 schema와 조건부 backfill을 검증
+- **환경별 파일 역할**: `stage_profile_completion_apply_pgadmin.sql`, `center_profile_completion_apply_pgadmin.sql`이 대상 DB명·복원 시험 백업·승인문구·권한·동시 실행 잠금·사후 건수를 한 transaction에서 검증
+- **롤백**: `rollback_profile_completion_support.sql`은 별도 승인을 받아 신규 제약 2개와 컬럼 3개만 제거하며 기존 phone 데이터·제약은 유지
+
 기존 DB에 근무 타입 색상 기준값과 농도를 추가할 때는 두 단계 SQL을 순서대로 수동 적용합니다.
 
 기존 DB에 월별 근무표 캐시 지원 테이블을 추가할 때는 DB 백업 후 다음 expand SQL을 서버 배포 전에 수동 적용합니다.
@@ -1392,7 +1420,8 @@ curl --fail http://127.0.0.1:3000/health
 
 ### Swagger/Postman
 
-- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹·기기·Apple·Google·Kakao 인증 API `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
+- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹·기기·Apple·Google·Kakao·가입 프로필 API `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
+- **가입 프로필 서버 가이드**: `_docs/PROFILE_COMPLETION_GUIDE.md`
 - **Apple 로그인 서버 가이드**: `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`
 - **Google 로그인 서버 가이드**: `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`
   - **파일 역할**: Google Cloud OAuth client 발급, 서버 환경변수, DB migration, 단계 활성화, E2E·롤백 절차를 운영자와 Flutter 개발자에게 제공

@@ -51,6 +51,9 @@ CREATE TABLE users (
   google_id text,
   naver_id text,
   phone text,
+  job_type varchar(20),
+  workplace varchar(100),
+  profile_completed_at timestamptz,
   password text,
   account_status text NOT NULL DEFAULT 'ACTIVE',
   deletion_requested_at timestamptz,
@@ -59,6 +62,12 @@ CREATE TABLE users (
   CONSTRAINT uq_users_email UNIQUE (email),
   CONSTRAINT ck_users_phone_format CHECK (
     phone IS NULL OR phone ~ '^[0-9]{3}-[0-9]{3,4}-[0-9]{4}$'
+  ),
+  CONSTRAINT ck_users_job_type CHECK (
+    job_type IS NULL OR job_type IN ('NURSE', 'DOCTOR', 'EMT', 'OTHER')
+  ),
+  CONSTRAINT ck_users_workplace CHECK (
+    workplace IS NULL OR char_length(btrim(workplace)) BETWEEN 1 AND 100
   ),
   CONSTRAINT ck_users_account_status CHECK (
     account_status IN ('ACTIVE', 'DELETION_PENDING')
@@ -85,6 +94,9 @@ COMMENT ON COLUMN users.apple_id IS '애플 OAuth 사용자 sub';
 COMMENT ON COLUMN users.google_id IS 'Google OIDC subject(sub). 검증된 ID Token에서만 저장';
 COMMENT ON COLUMN users.naver_id IS '네이버 OAuth 사용자 ID';
 COMMENT ON COLUMN users.phone IS '전화번호. 000-000-0000 또는 000-0000-0000 형식으로 저장(친구 검색용)';
+COMMENT ON COLUMN users.job_type IS '선택 직종. NURSE, DOCTOR, EMT, OTHER 중 하나';
+COMMENT ON COLUMN users.workplace IS '선택 소속 병원·부서. trim 기준 1~100자';
+COMMENT ON COLUMN users.profile_completed_at IS '가입 프로필 최초 완료 시각. null이면 가입 프로필 설정이 필요함';
 COMMENT ON COLUMN users.password IS '패스워드 인증용 bcrypt 해시 (OAuth 사용자는 null)';
 COMMENT ON COLUMN users.account_status IS 'ACTIVE 또는 DELETION_PENDING. 탈퇴 접수 즉시 일반 인증을 차단한다.';
 COMMENT ON COLUMN users.deletion_requested_at IS '회원 탈퇴가 접수된 시각. ACTIVE이면 null';
