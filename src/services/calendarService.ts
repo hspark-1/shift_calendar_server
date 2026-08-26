@@ -668,22 +668,25 @@ export async function deleteEvent(
   user_id: string,
   event_id: string
 ): Promise<void> {
-  const event = await Event.findOne({
-    where: {
-      event_id,
-      owner_user_id: user_id,
-      deleted_at: null,
+  const deleted_at = new Date();
+  const [affected_count] = await Event.update(
+    {
+      deleted_at,
+      deleted_by_user_id: user_id,
+      updated_at: deleted_at,
     },
-  });
+    {
+      where: {
+        event_id,
+        owner_user_id: user_id,
+        deleted_at: null,
+      },
+    },
+  );
 
-  if (!event) {
+  if (affected_count !== 1) {
     throw new Error("EVENT_NOT_FOUND");
   }
-
-  await event.update({
-    deleted_at: new Date(),
-    deleted_by_user_id: user_id,
-  });
 }
 
 /**

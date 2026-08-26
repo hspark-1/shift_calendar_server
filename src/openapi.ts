@@ -8,6 +8,7 @@ import google_auth_openapi from "./openapi/googleAuthOpenApi.json";
 import account_deletion_openapi from "./openapi/accountDeletionOpenApi.json";
 import kakao_auth_openapi from "./openapi/kakaoAuthOpenApi.json";
 import profile_auth_openapi from "./openapi/profileAuthOpenApi.json";
+import calendar_openapi from "./openapi/calendarOpenApi.json";
 
 const openapi = {
   ...group_openapi,
@@ -22,6 +23,7 @@ const openapi = {
     ...account_deletion_openapi.tags,
     ...kakao_auth_openapi.tags,
     ...profile_auth_openapi.tags,
+    ...calendar_openapi.tags,
   ],
   paths: {
     ...group_openapi.paths,
@@ -31,6 +33,7 @@ const openapi = {
     ...account_deletion_openapi.paths,
     ...kakao_auth_openapi.paths,
     ...profile_auth_openapi.paths,
+    ...calendar_openapi.paths,
   },
   components: {
     ...group_openapi.components,
@@ -42,6 +45,7 @@ const openapi = {
       ...account_deletion_openapi.components.schemas,
       ...kakao_auth_openapi.components.schemas,
       ...profile_auth_openapi.components.schemas,
+      ...calendar_openapi.components.schemas,
     },
     responses: {
       ...group_openapi.components.responses,

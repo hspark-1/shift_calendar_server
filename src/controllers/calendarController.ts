@@ -464,6 +464,18 @@ export async function deleteEvent(
   res: Response,
 ): Promise<void> {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_EVENT_ID",
+          message: "일정 ID가 올바르지 않습니다.",
+        },
+      });
+      return;
+    }
+
     const user_id = req.user!.user_id;
     const { event_id } = req.params;
 
@@ -474,19 +486,20 @@ export async function deleteEvent(
       data: {
         event_id,
       },
+      message: "일정이 삭제되었습니다.",
     });
   } catch (error: any) {
-    logError("calendar_delete_event_failed", error, req.request_id);
     if (error.message === "EVENT_NOT_FOUND") {
       res.status(404).json({
         success: false,
         error: {
-          code: "NOT_FOUND",
+          code: "EVENT_NOT_FOUND",
           message: "일정을 찾을 수 없습니다.",
         },
       });
       return;
     }
+    logError("calendar_delete_event_failed", error, req.request_id);
     res.status(500).json({
       success: false,
       error: {

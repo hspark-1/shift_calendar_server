@@ -1,0 +1,172 @@
+{
+  "tags": [
+    {
+      "name": "Calendar",
+      "description": "개인 캘린더 일정 API"
+    }
+  ],
+  "paths": {
+    "/events/{event_id}": {
+      "delete": {
+        "tags": ["Calendar"],
+        "summary": "개인 일정 삭제",
+        "description": "인증 사용자가 소유한 활성 개인 일정 1건을 soft delete합니다. 미존재, 타인 소유, 이미 삭제된 일정은 모두 EVENT_NOT_FOUND로 응답합니다.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "description": "삭제할 개인 일정 UUID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "일정 삭제 성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDeleteSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "event_id": "2f0d8f41-4589-4f70-8d1f-fbf3fc274f98"
+                  },
+                  "message": "일정이 삭제되었습니다."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "event_id UUID 형식 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDeleteError"
+                },
+                "example": {
+                  "success": false,
+                  "error": {
+                    "code": "INVALID_EVENT_ID",
+                    "message": "일정 ID가 올바르지 않습니다."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "인증 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDeleteError"
+                },
+                "example": {
+                  "success": false,
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "로그인이 필요합니다."
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "미존재, 타인 소유 또는 이미 삭제된 일정",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDeleteError"
+                },
+                "example": {
+                  "success": false,
+                  "error": {
+                    "code": "EVENT_NOT_FOUND",
+                    "message": "일정을 찾을 수 없습니다."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "예상하지 못한 서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDeleteError"
+                },
+                "example": {
+                  "success": false,
+                  "error": {
+                    "code": "INTERNAL_SERVER_ERROR",
+                    "message": "서버 오류가 발생했습니다."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "EventDeleteSuccess": {
+        "type": "object",
+        "required": ["success", "data", "message"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [true]
+          },
+          "data": {
+            "type": "object",
+            "required": ["event_id"],
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "EventDeleteError": {
+        "type": "object",
+        "required": ["success", "error"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [false]
+          },
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_EVENT_ID",
+                  "UNAUTHORIZED",
+                  "EVENT_NOT_FOUND",
+                  "INTERNAL_SERVER_ERROR"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { body, query } from "express-validator";
+import { body, param, query } from "express-validator";
 import {
   getShiftTypes,
   getWorkShifts,
@@ -137,7 +137,15 @@ router.post(
 );
 
 // 일정 삭제
-router.delete("/events/:event_id", deleteEvent);
+router.delete(
+  "/events/:event_id",
+  [
+    param("event_id")
+      .isUUID()
+      .withMessage("일정 ID가 올바르지 않습니다."),
+  ],
+  deleteEvent
+);
 
 // 기간별 캘린더 데이터 조회 (근무표 + 일정)
 router.get(

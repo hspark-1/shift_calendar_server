@@ -284,6 +284,15 @@ test/
 - **사용 예**: API는 `node dist/index.js`, worker는 `node dist/workers/workShiftCacheWorker.js`, worker health는 `--healthcheck`
 - 캐시 flag가 `false`인 worker 본체는 Outbox를 claim하지 않고 대기하지만 health 명령은 PostgreSQL과 Redis를 모두 검사합니다. 활성화 시 API와 worker 컨테이너를 같은 `true` 환경으로 재생성합니다.
 
+#### 개인 일정 삭제 설계 문서
+
+- **`_docs/EVENT_DELETION_API_DESIGN.md` 역할**: `DELETE /api/v1/events/:event_id`의 UUID validation, 소유자 범위 원자적 soft delete, HTTP 오류, 조회 비노출, OpenAPI·테스트 기준을 정의하는 설계 정본
+- **`src/openapi/calendarOpenApi.json` 역할**: 개인 일정 삭제의 Bearer 인증, UUID path, `200/400/401/404/500` 응답과 schema를 정의해 통합 Swagger에 병합
+- **`test/eventDeletion.test.cjs` 역할**: 소유자·활성 조건의 단일 update, 영향 row 기반 not-found, route/controller/OpenAPI 오류 계약을 검증
+- **`_docs/EVENT_DELETION_FRONTEND_API_GUIDE.md` 역할**: Flutter의 Dio 요청, AppError mapping, Riverpod 상태 갱신, 삭제 UX와 QA 체크리스트를 제공하는 프론트 전달 정본
+- **의존성**: `events`의 `owner_user_id`, `deleted_at`, `deleted_by_user_id`, 본인 이벤트 조회와 `v_visible_events_for_friend`, 기존 JWT 인증·공통 응답 계약
+- **사용 예**: Flutter가 삭제 성공 또는 `EVENT_NOT_FOUND`에서 로컬 일정을 제거하고, 서버 변경 시 route → controller → service → OpenAPI → 회귀 테스트 계약을 함께 대조
+
 #### Apple 로그인 모듈
 
 - **`src/services/appleService.ts` 역할**: 플랫폼별 challenge, Android callback allowlist, ES256 client secret, code 교환, JWKS 검증, 사용자/authorization transaction 처리
@@ -798,6 +807,8 @@ const work_shifts = await WorkShift.findAll({
 - `EventApiModel`: `event_id`, `title`, `memo`, `place`, `all_day`, `start_at`, `end_at`, `visibility_level`, `created_at`, `updated_at`
 - `POST /events`는 `title`을 trim한 뒤 빈 문자열이면 `INVALID_TITLE`로 거절하고, `start_at`/`end_at`은 UTC `Z` ISO 문자열이며 `start_at < end_at`이어야 함
 - `POST /events`의 `visibility_level`은 서버 정책상 0~5만 허용하고, `owner_user_id`와 `created_by_user_id`는 JWT 현재 사용자로 설정
+- `DELETE /events/:event_id`는 UUID를 선검증한 뒤 JWT 현재 사용자가 소유한 활성 일정 1건을 단일 원자적 update로 soft delete하며, 미존재·타인 소유·이미 삭제된 일정은 모두 `404 EVENT_NOT_FOUND`로 처리
+- 일정 삭제의 서버 설계는 `_docs/EVENT_DELETION_API_DESIGN.md`, Flutter 연동 계약은 `_docs/EVENT_DELETION_FRONTEND_API_GUIDE.md`를 정본으로 사용
 - 개인 캘린더 조회는 JWT 현재 사용자 기준 `owner_user_id = current_user.user_id` 조건으로만 조회
 - 친구 캘린더 조회는 `viewer_user_id`, `friend_user_id`, 친구 관계, `friend_level_settings` 공개 조건을 모두 확인한 뒤 동일한 근무표 필드 구조로 반환
 - 이벤트 기간 조회는 `start_at < end_date + 1 day` AND `end_at > start_date` 겹침 조건으로 처리
@@ -829,8 +840,8 @@ const work_shifts = await WorkShift.findAll({
 
 #### Swagger/OpenAPI
 
-- **그룹·기기·Apple·Google·Kakao 인증 API 구현됨**: `API_DOCS_ENABLED=true`일 때 `/api-docs`와 `/api-docs/openapi.json` 노출
-- **범위 제한**: 현재 OpenAPI 3.0.3 문서는 그룹 P0/P1, `PUT /devices/current`, Apple 로그인 3개 endpoint, Google token 로그인 endpoint와 관련 schema를 포함하며 기존 API 전체 문서는 아직 미포함
+- **그룹·기기·개인 일정 삭제·Apple·Google·Kakao 인증 API 구현됨**: `API_DOCS_ENABLED=true`일 때 `/api-docs`와 `/api-docs/openapi.json` 노출
+- **범위 제한**: 현재 OpenAPI 3.0.3 문서는 그룹 P0/P1, `PUT /devices/current`, `DELETE /events/{event_id}`, Apple 로그인 3개 endpoint, Google token 로그인 endpoint와 관련 schema를 포함하며 기존 API 전체 문서는 아직 미포함
 
 ### 3.7 로깅/모니터링
 
@@ -1032,6 +1043,7 @@ AUTH_RATE_LIMIT_MAX=10
 - `test/fixtures/googleAuthMigrationBaseSchema.sql`: Google migration·로그인 통합 테스트용 최소 schema이며 실행 시 대상 `public` schema를 재생성하므로 운영/공유 개발 DB에서 실행 금지
 - `npm run test:profile-integration`: 고정 격리 PostgreSQL 16에서 profile migration/backfill/down, 완료 멱등성·transaction rollback, JSON/multipart, MIME 불일치·5MB 제한, object 저장 실패·DB 실패 정리를 검증
 - `test/fixtures/profileCompletionMigrationBaseSchema.sql`: 가입 프로필 migration 전 users 기반 schema와 backfill 대상/비대상 fixture이며 운영/공유 개발 DB에서 실행 금지
+- `test/eventDeletion.test.cjs`: 개인 일정 삭제의 원자적 조건부 update, `EVENT_NOT_FOUND`, UUID route와 OpenAPI 계약을 DB 연결 없이 검증
 
 ---
 
@@ -1094,6 +1106,7 @@ AUTH_RATE_LIMIT_MAX=10
 - `all_day`
 - `start_at`, `end_at` (timestamptz)
 - `visibility_level` (DB 제약은 0 이상, 일정 생성 API 정책은 0~5)
+- 삭제는 `deleted_at`, `deleted_by_user_id`를 기록하는 soft delete이며 본인·친구·그룹 조회는 삭제 row를 반환하지 않음
 
 #### Friendship / FriendLevelSetting (친구 및 공개 설정)
 
@@ -1420,7 +1433,7 @@ curl --fail http://127.0.0.1:3000/health
 
 ### Swagger/Postman
 
-- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹·기기·Apple·Google·Kakao·가입 프로필 API `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
+- **Swagger**: `API_DOCS_ENABLED=true`일 때 그룹·기기·개인 일정 삭제·Apple·Google·Kakao·가입 프로필 API `/api-docs`, `/api-docs/openapi.json` 노출. 기존 API 전체 문서는 아직 미포함
 - **가입 프로필 서버 가이드**: `_docs/PROFILE_COMPLETION_GUIDE.md`
 - **Apple 로그인 서버 가이드**: `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`
 - **Google 로그인 서버 가이드**: `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`

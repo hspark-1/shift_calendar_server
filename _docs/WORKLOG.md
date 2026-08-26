@@ -2,6 +2,41 @@
 
 # 작업 일지
 
+## 2026-08-26
+
+### [DONE] 개인 일정 삭제 API 보완 구현 및 Flutter 연동 가이드 작성
+
+- **목적**: 승인된 개인 일정 삭제 설계를 실제 서버 계약으로 구현하고 Flutter에서 안전하게 연동할 수 있는 전달 문서를 제공
+- **변경**:
+  - `event_id` UUID path validation과 `400 INVALID_EVENT_ID` 응답 추가
+  - JWT 사용자와 `owner_user_id`, `deleted_at IS NULL`을 한 `Event.update()` 조건에 포함하고 영향 row가 0이면 `EVENT_NOT_FOUND`로 처리
+  - 성공 응답의 기존 `data.event_id`를 유지하면서 메시지를 추가하고 404 code를 일반 `NOT_FOUND`에서 `EVENT_NOT_FOUND`로 통일
+  - `Calendar / DELETE /events/{event_id}` OpenAPI와 통합 Swagger 병합 추가
+  - 서비스 원자적 update·not-found, route/controller/OpenAPI 계약 테스트 3건 추가
+  - Flutter용 Dio DTO/Repository, AppError mapping, Riverpod 상태 흐름, 화면 UX, QA 체크리스트 가이드 작성
+  - 설계 문서·ADR-0035·`PROJECT_CONTEXT.md`를 구현 상태로 동기화
+- **영향범위**: 개인 일정 삭제 route/controller/service, 통합 OpenAPI, 테스트와 프론트 전달 문서. DB schema, Redis, 환경변수는 변경하지 않음
+- **파일**: `src/{routes/calendarRoutes.ts,controllers/calendarController.ts,services/calendarService.ts,openapi.ts,openapi/calendarOpenApi.json}`, `test/eventDeletion.test.cjs`, `_docs/{EVENT_DELETION_API_DESIGN,EVENT_DELETION_FRONTEND_API_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`
+- **테스트**: `npm run build` 성공, `node --test test/eventDeletion.test.cjs` 3 pass/0 fail, OpenAPI JSON parse 성공, `git diff --check` 성공. 전체 `npm test`에서 신규 일정 삭제 테스트는 통과했으나 현재 checkout에 없는 기존 Apple Stage migration·배포 Compose/workflow·프로필 migration과 기존 Apple Portal 문구 기준선 때문에 기존 무관 테스트가 실패함
+- **롤백**: 이번 코드·OpenAPI·테스트·가이드·프로젝트 문서 변경을 되돌림. 이미 soft delete된 데이터는 코드 롤백으로 복구되지 않으므로 별도 운영 승인과 DB 복구 절차 필요
+- **다음**: Stage에서 실제 JWT로 정상·잘못된 UUID·타인·중복 삭제와 본인·친구·그룹 캘린더 비노출 E2E를 확인하고 Flutter에 `EVENT_NOT_FOUND` mapping과 가이드를 전달
+
+### [DONE] 개인 일정 삭제 API 현행 감사 및 보완 설계
+
+- **목적**: 기존 개인 일정 삭제 구현의 HTTP 계약, 소유권 검증, soft delete, 멱등성, 동시성, 조회 비노출, 테스트 범위를 확인하고 구현 가능한 보완 설계를 확정
+- **변경**:
+  - 저장소에 이미 `DELETE /api/v1/events/:event_id`가 있음을 확인하고 중복 endpoint가 아닌 현행 보완 설계로 범위를 확정
+  - UUID path 선검증, JWT 사용자와 `owner_user_id` 기준 권한, `event_id + owner_user_id + deleted_at IS NULL` 단일 원자적 update를 삭제 정본으로 결정
+  - 미존재·타인 소유·이미 삭제를 `404 EVENT_NOT_FOUND`로 통합하고 최초 삭제만 `200`, 반복 삭제는 `404`인 strict 계약을 정의
+  - 이벤트 비캐시와 본인·친구·그룹 조회의 `deleted_at IS NULL` 흐름을 확인해 DB migration·Redis 무효화·Outbox가 불필요함을 명시
+  - HTTP 계약, 계층별 구현, 보안·정합성, OpenAPI, 동시성·공개 회귀 테스트, 배포·롤백, 완료 기준을 설계 문서에 기록
+  - ADR-0035와 `PROJECT_CONTEXT.md`의 API·도메인·신규 문서 역할을 동기화
+- **영향범위**: 개인 일정 삭제 API의 후속 구현 기준과 프로젝트 문서만 변경. 애플리케이션 코드·DB·Redis·환경변수는 변경하지 않음
+- **파일**: `_docs/EVENT_DELETION_API_DESIGN.md`, `_docs/PROJECT_CONTEXT.md`, `_docs/DECISIONS.md`, `_docs/WORKLOG.md`
+- **테스트**: `schema.drawio`, `visibility_flow.drawio`, `Event` 모델, 최종 DDL/view, 본인·친구·그룹 조회 코드를 정적 대조. `git diff --check`와 `npm run build` 성공
+- **롤백**: 신규 설계 문서를 삭제하고 이번 `PROJECT_CONTEXT.md`, `DECISIONS.md`, `WORKLOG.md` 변경을 되돌림. soft delete 데이터나 실행 환경에는 영향 없음
+- **다음**: 설계 승인 후 별도 구현 작업에서 route/controller/service, `calendarOpenApi.json`, 단위·격리 PostgreSQL 통합 테스트와 Flutter `EVENT_NOT_FOUND` mapping 반영
+
 ## 2026-08-21
 
 ### [DONE] 기존 Migration allowlist·테스트 fixture Git 추적 복원

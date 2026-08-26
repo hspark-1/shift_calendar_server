@@ -1960,3 +1960,58 @@ OAuth의 `is_new_user`는 해당 로그인 요청에서 계정을 생성했는�
 
 - Stage 작업이 Center 객체나 버킷 공통 설정에 영향을 준 사고가 발생하면 별도 버킷으로 분리
 - 비공개 조회 API 구현 시에도 요청 사용자의 환경과 저장 key prefix가 일치하는지 서버에서 강제
+
+---
+
+## ADR-0035: 개인 일정 삭제의 소유자 범위 원자적 soft delete
+
+### 배경(문제)
+
+`DELETE /api/v1/events/:event_id`는 이미 존재하지만 path UUID validation이 없고, 활성 일정을 먼저 조회한 뒤 별도 update를 실행합니다. 이 구조는 잘못된 UUID를 DB 오류 경로로 보낼 수 있고 동시 삭제 요청 사이에 경쟁 구간을 만듭니다. 또한 서비스의 `EVENT_NOT_FOUND`가 HTTP 응답에서 일반 `NOT_FOUND`로 바뀌어 Flutter 오류 처리 계약이 명확하지 않습니다.
+
+### 선택지(대안)
+
+1. 현재 조회 후 instance update와 일반 `NOT_FOUND` 응답 유지
+2. transaction의 `SELECT ... FOR UPDATE`로 row를 잠근 뒤 soft delete
+3. `event_id + owner_user_id + deleted_at IS NULL` 조건의 단일 update로 soft delete하고 영향 row 수로 성공 여부 판단
+4. 이벤트 row를 물리 삭제
+
+### 결정(무엇을 선택)
+
+**3번을 선택합니다.**
+
+- 라우트에서 `event_id` UUID를 DB 접근 전에 검증
+- JWT 사용자의 `user_id`와 `events.owner_user_id` 일치를 삭제 권한 정본으로 사용
+- `deleted_at`, `deleted_by_user_id`, `updated_at`을 단일 조건부 update로 기록
+- 영향 row가 0이면 미존재·타인 소유·이미 삭제를 구분하지 않고 `404 EVENT_NOT_FOUND`
+- 반복 DELETE는 최초 1건만 `200`, 이후는 `404`인 strict delete 계약 유지
+- 이벤트는 비캐시 대상이므로 Redis 무효화와 Outbox를 추가하지 않음
+
+### 근거(왜)
+
+- 단일 SQL 문으로 삭제 경합을 제거하면서 별도 transaction과 row lock 비용을 피함
+- 소유자 조건을 update 자체에 포함해 권한 검사와 상태 변경 사이의 간격을 없앰
+- 동일한 `404`로 타인 일정 존재 여부를 노출하지 않음
+- 기존 ADR-0010의 soft delete, `events` 감사 컬럼, 모든 공개 조회의 `deleted_at IS NULL` 조건을 그대로 재사용
+- 현재 endpoint path와 성공 `data.event_id`를 유지해 기존 클라이언트 호환성을 보존
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- 잘못된 UUID는 `400 INVALID_EVENT_ID`로 고정됨
+- 동시 삭제에서는 정확히 한 요청만 성공하고 나머지는 `404`가 됨
+- HTTP not-found code가 `NOT_FOUND`에서 `EVENT_NOT_FOUND`로 구체화되므로 Flutter error mapping 선반영이 필요함
+- 삭제 복구 API는 제공하지 않으며 운영 복구는 별도 승인 절차가 필요함
+- schema, migration, Redis key, Outbox, 환경변수 변경은 없음
+
+### 구현 위치
+
+- 설계 정본: `_docs/EVENT_DELETION_API_DESIGN.md`
+- 라우트/컨트롤러/서비스: `src/routes/calendarRoutes.ts`, `src/controllers/calendarController.ts`, `src/services/calendarService.ts`
+- API 문서: `src/openapi/calendarOpenApi.json`, `src/openapi.ts`
+- 회귀 테스트: `test/eventDeletion.test.cjs`
+
+### 추후 과제(언제 다시 평가)
+
+- 휴지통·사용자 복구 요구가 생기면 복구 권한, 보존 기간, 감사 정책을 별도 ADR로 정의
+- 반복 일정 모델이 추가되면 단건·이후·전체 series 삭제 의미를 재설계
+- 모바일 retry를 성공으로 흡수해야 한다는 제품 요구가 확인되면 반복 DELETE의 `200` 멱등 응답 전환을 재검토
