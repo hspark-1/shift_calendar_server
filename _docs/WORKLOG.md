@@ -2,6 +2,36 @@
 
 # 작업 일지
 
+## 2026-10-18
+
+### [DONE] 개발 변경 커밋 준비 및 배포 브랜치 분리
+
+- **목적**: 개발 변경은 develop, 실제 배포 설정은 비공개 main에서 관리
+- **변경**: 공개 개발 산출물과 환경별 설정 분리. 경보 수신자와 개인정보 초안은 비공개 main에만 보관. main 자동 배포는 migration 선행 확인 조건 적용 예정
+- **테스트**: 개발 diff와 원격 추적 확인, TypeScript build·Python monitor 3개·diff 검사 통과. 기존 통합/회귀 검증 결과는 아래 기록 참조
+- **롤백**: 각 브랜치의 해당 커밋을 revert. DB·이미지 삭제는 Git으로 복구되지 않음
+- **다음**: 개발 커밋·푸시 후 비공개 main 병합·설정 커밋·푸시
+
+### [DONE] 개인정보 삭제·보관·가입 정책 BE-01~04 로컬 구현 및 전달 보고
+
+- **목적**: 관리 이미지 탈퇴 삭제 누락 보완 및 실패·7일 목표 초과 관측/재처리 제공
+- **변경**: 관리 이미지 namespace/버전 삭제 checkpoint·업로드 경합 잠금·실패/7일/30일 감시·root 재처리·30일 기기 정리·작업 retention 검증 구현. BE-03/04 정책 추가 승인 반영. FE 합의안·결과 보고·운영 절차·ADR-0036·OpenAPI·schema 동기화
+- **영향범위**: 프로필 업로드와 탈퇴 worker, 운영 명령, 문서. 실제 홈서버 접속 정보 미제공으로 운영 증거 별도 필요
+- **테스트**: strict build, PostgreSQL 16 + Moto HTTP 통합 13개, 기존 그룹 승계/탈퇴 통합 1개, 탈퇴/환경 회귀 10개, Python monitor 3개, migration 적용/빈 상태 rollback/재적용, diff 검사 통과. 전체 테스트 64 pass/18 fail/9 skip이며 baseline 1c6ce8d에도 같은 실패 18개 확인(배포/프로필 migration 누락 및 기존 문서 정적 기준). 실제 저장소·CDN·provider·메일 실수신·홈서버 적용 미검증
+- **롤백**: worker 정지 후 이전 코드 복구와 additive schema 유지. 삭제된 객체는 코드 롤백으로 복구되지 않음
+- **다음**: `_docs/PRIVACY_IMPLEMENTATION_REPORT.md` 전달 → 운영 담당자가 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`에 따라 Stage/Production 적용 증거와 SMTP 수신 검증. BE-05는 FE 합의 후 구현. PR·외부 전송 미수행
+
+
+### [DONE] 고객지원·개인정보 페이지 홈서버 전달 준비
+
+- **목적**: 제공받은 HTML을 API와 분리된 Nginx 공개 경로에 배치할 수 있도록 전달 자료 준비
+- **변경**: 고객지원 원본, 비공개 개인정보 초안, Nginx location 예시와 운영 절차 준비
+- **영향범위**: 정적 문서 전달 자료만. API·DB·실제 홈서버 변경 없음
+- **테스트**: 두 HTML byte 단위 원본 일치, 개인정보 초안의 drafts 분리와 공개용 privacy.html 부재 확인. 실제 Nginx·HTTP/TLS·실기기 검증 미수행
+- **롤백**: 이번 전달 자료와 문서 항목 제거. 서버 적용 후에는 가이드의 백업 복구 절차 사용
+- **다음**: 실제 Nginx 설정 확인 및 운영 정책 확정 후 서버 적용
+
+
 ## 2026-08-26
 
 ### [DONE] 개인 일정 삭제 API 보완 구현 및 Flutter 연동 가이드 작성

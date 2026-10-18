@@ -195,7 +195,7 @@ migration 전 `pg_constraint`와 `pg_attribute`를 조회해 `users`를 참조�
 
 ## 6. DB purge transaction
 
-worker는 provider task가 모두 완료된 뒤 아래 순서로 단일 transaction을 수행합니다.
+worker는 provider task와 관리 이미지 원본·버전 삭제가 모두 완료된 뒤 아래 순서로 단일 transaction을 수행합니다.
 
 1. 삭제 요청과 `users` row를 `FOR UPDATE`로 잠그고 `DELETION_PENDING`을 재확인합니다.
 2. 탈퇴자가 OWNER인 활성 그룹을 `group_id` 순서로 잠급니다.
@@ -205,7 +205,7 @@ worker는 provider task가 모두 완료된 뒤 아래 순서로 단일 transact
 6. 친구 요청·친구 관계·양방향 공개 설정을 삭제합니다.
 7. 사용자 소유 event와 work shift를 삭제합니다.
 8. 사용자의 월 cache state/outbox와 shift template 하위 `schedule → type/version → template`을 삭제합니다.
-9. 수신 알림·push job·기기·ShiftMate Refresh Token·OAuth authorization을 삭제합니다.
+9. 수신 알림·push job·ShiftMate Refresh Token·OAuth authorization을 삭제합니다. 기기는 접수 시 user_id/푸시 연결을 해제했으므로 unbound 행이 남고 별도 30일 cleanup으로 정리합니다.
 10. `users`를 물리 삭제하고 요청을 `CACHE_PURGE_PENDING`으로 바꿉니다.
 
 그룹 OWNER 승계는 기존 `transferGroupOwner`와 동일하게 group row를 먼저 잠그는 순서를 지켜 그룹 역할 변경·초대 수락과의 교착/경합을 방지합니다. 이름이 들어간 notification `body`까지 제거하기 위해 관련 notification 전체를 삭제하며 payload 일부만 수정하지 않습니다.
@@ -329,3 +329,15 @@ worker는 provider task가 모두 완료된 뒤 아래 순서로 단일 transact
 - 기존 Access/Refresh Token으로 일반 API에 접근할 수 없다.
 - secret/token/이메일/이름을 포함하지 않는 운영 로그와 실패 경보가 준비된다.
 - Stage 실제 계정 E2E 전에는 Production 기능을 활성화하지 않는다.
+
+
+## 13. 2026-10-18 개인정보 운영 제어 보완
+
+이 절의 신규 정책/구현이 과거 설계의 미구현 경보·기기 삭제 설명보다 우선합니다. 운영 배포 완료 여부는 별도 증거가 필요합니다.
+
+- 처리: provider → 관리 이미지 원본·이전 버전·delete marker → DB → Redis. 접수 시 image_scope, 삭제 후 images_purged_at을 저장하며 재시작 시 이어갑니다.
+- 이전 namespace/외부 URL/CDN/클라이언트 사본은 자동 삭제 범위가 아닙니다. 기존 1년 캐시 한계 및 운영 purge 검증을 전달합니다.
+- 동시성: 사용자 session lock을 신규 업로드·worker·수동 재처리에 공유하고 구 worker와 혼합 운영하지 않습니다.
+- root 운영 CLI, 독립 heartbeat 감시, 7일 목표·30일 내 운영자 최종 처리, 30일 기기/완료 작업 정리를 구현했습니다.
+- 배포/예외/테스트/신규 파일 역할은 `_docs/PRIVACY_IMPLEMENTATION_REPORT.md`와 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`를 따릅니다.
+- Google/Naver의 FE 경계와 신규 연령 확인 계약은 `_docs/PRIVACY_FE_CONTRACT_PROPOSAL.md`에 기록했습니다.

@@ -1,4 +1,5 @@
 import { DataTypes, Model, Optional } from "sequelize";
+import type { AccountImageScope } from "../services/accountDeletionImageService";
 import { sequelize } from "../config/database";
 
 export type AccountDeletionStatus =
@@ -14,6 +15,8 @@ interface AccountDeletionRequestAttributes {
   user_id: string | null;
   status: AccountDeletionStatus;
   cache_year_months: string[];
+  image_scope: AccountImageScope | null;
+  images_purged_at: Date | null;
   requested_at: Date;
   available_at: Date;
   claimed_at: Date | null;
@@ -30,6 +33,8 @@ type AccountDeletionRequestCreationAttributes = Optional<
   | "deletion_request_id"
   | "status"
   | "cache_year_months"
+  | "image_scope"
+  | "images_purged_at"
   | "requested_at"
   | "available_at"
   | "claimed_at"
@@ -52,6 +57,8 @@ class AccountDeletionRequest
   declare user_id: string | null;
   declare status: AccountDeletionStatus;
   declare cache_year_months: string[];
+  declare image_scope: AccountImageScope | null;
+  declare images_purged_at: Date | null;
   declare requested_at: Date;
   declare available_at: Date;
   declare claimed_at: Date | null;
@@ -72,6 +79,8 @@ AccountDeletionRequest.init(
     },
     user_id: { type: DataTypes.UUID, allowNull: true },
     status: { type: DataTypes.TEXT, allowNull: false, defaultValue: "PENDING" },
+    image_scope: { type: DataTypes.JSONB, allowNull: true },
+    images_purged_at: { type: DataTypes.DATE, allowNull: true },
     cache_year_months: {
       type: DataTypes.ARRAY(DataTypes.DATEONLY),
       allowNull: false,

@@ -8,7 +8,8 @@ import {
   User,
 } from "../models";
 import { getAccountDeletionReauthSeconds, isAccountDeletionEnabled } from "../config/accountDeletion";
-import { getPositiveIntegerEnvironmentVariable } from "../config/environment";
+import { getPrivacyRetentionDays } from "../config/privacy";
+import { getAccountImageScope } from "./accountDeletionImageService";
 import { unbindAllUserDevices } from "./deviceService";
 
 export type AccountDeletionErrorCode =
@@ -81,7 +82,7 @@ export async function requestAccountDeletion(
       }
 
       const request = await AccountDeletionRequest.create(
-        { user_id },
+        { user_id, image_scope: getAccountImageScope(user_id) },
         { transaction },
       );
       const has_apple_authorization =
@@ -179,6 +180,7 @@ export async function purgeAccountData(
       { transaction, lock: transaction.LOCK.UPDATE },
     );
     if (!locked_request || locked_request.db_purged_at) return;
+    if (!locked_request.images_purged_at) throw new Error("ACCOUNT_IMAGES_NOT_PURGED");
     const user = await User.findByPk(user_id, {
       transaction,
       lock: transaction.LOCK.UPDATE,
@@ -374,10 +376,7 @@ export async function cleanupCompletedAccountDeletionRequests(): Promise<void> {
     `,
     {
       replacements: {
-        retention_days: getPositiveIntegerEnvironmentVariable(
-          "ACCOUNT_DELETION_RETENTION_DAYS",
-          30,
-        ),
+        retention_days: getPrivacyRetentionDays("ACCOUNT_DELETION_RETENTION_DAYS"),
       },
     },
   );

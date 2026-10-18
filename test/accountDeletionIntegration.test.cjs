@@ -32,7 +32,14 @@ if (process.env.RUN_ACCOUNT_DELETION_INTEGRATION !== "true") {
   process.env.ACCOUNT_DELETION_ENABLED = "true";
   process.env.JWT_SECRET = "account-deletion-integration-access";
   process.env.JWT_REFRESH_SECRET = "account-deletion-integration-refresh";
-  delete process.env.REDIS_URL;
+  process.env.REDIS_URL = "";
+  process.env.PROFILE_IMAGE_STORAGE_BUCKET = "privacy-integration";
+  process.env.PROFILE_IMAGE_STORAGE_REGION = "us-east-1";
+  process.env.PROFILE_IMAGE_STORAGE_PREFIX = "test";
+  process.env.PROFILE_IMAGE_STORAGE_ENDPOINT = "http://127.0.0.1:55900";
+  process.env.PROFILE_IMAGE_STORAGE_FORCE_PATH_STYLE = "true";
+  process.env.AWS_ACCESS_KEY_ID = "privacy_test";
+  process.env.AWS_SECRET_ACCESS_KEY = "privacy_test_local_only";
 
   const { QueryTypes } = require("sequelize");
   const {
@@ -54,6 +61,11 @@ if (process.env.RUN_ACCOUNT_DELETION_INTEGRATION !== "true") {
 
   test.before(async () => {
     await connectDatabase();
+    const { S3Client, CreateBucketCommand } = require("@aws-sdk/client-s3");
+    const storage = new S3Client({ region: "us-east-1", endpoint: "http://127.0.0.1:55900", forcePathStyle: true });
+    try { await storage.send(new CreateBucketCommand({ Bucket: "privacy-integration" })); }
+    catch (error) { if (!["BucketAlreadyOwnedByYou", "BucketAlreadyExists"].includes(error.name)) throw error; }
+    finally { storage.destroy(); }
     const schema = readSqlForDatabaseDriver("migrations/final_schema.sql");
     try {
       await sequelize.query(schema);

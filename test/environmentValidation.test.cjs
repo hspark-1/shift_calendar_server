@@ -31,6 +31,11 @@ const managed_keys = [
   "KAKAO_ADMIN_KEY",
   "KAKAO_ADMIN_KEY_FILE",
   "KAKAO_APP_ID",
+  "PROFILE_IMAGE_STORAGE_BUCKET",
+  "PROFILE_IMAGE_STORAGE_REGION",
+  "PROFILE_IMAGE_STORAGE_PREFIX",
+  "PROFILE_IMAGE_PUBLIC_BASE_URL",
+  "DB_POOL_MAX",
 ];
 
 const original_environment = Object.fromEntries(
@@ -57,6 +62,7 @@ test.beforeEach(() => {
   delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
   delete process.env.KAKAO_ADMIN_KEY;
   delete process.env.KAKAO_ADMIN_KEY_FILE;
+  delete process.env.PROFILE_IMAGE_STORAGE_BUCKET;
 });
 
 test.after(() => {
@@ -82,7 +88,7 @@ test("push worker만 Firebase 필수값을 검증한다", () => {
   assert.doesNotThrow(() => validatePushWorkerEnvironment());
 });
 
-test("회원 탈퇴 worker만 Kakao Admin Key를 검증한다", () => {
+test("회원 탈퇴 worker는 Kakao Admin Key와 이미지 저장소·연결 pool을 검증한다", () => {
   assert.throws(
     () => validateAccountDeletionWorkerEnvironment(),
     (error) =>
@@ -96,7 +102,18 @@ test("회원 탈퇴 worker만 Kakao Admin Key를 검증한다", () => {
   fs.writeFileSync(secret_path, "stage-admin-key\n", { mode: 0o600 });
   try {
     process.env.KAKAO_ADMIN_KEY_FILE = secret_path;
+    assert.throws(() => validateAccountDeletionWorkerEnvironment(), /PROFILE_IMAGE_STORAGE_BUCKET/);
+    Object.assign(process.env, {
+      PROFILE_IMAGE_STORAGE_BUCKET: "environment-test",
+      PROFILE_IMAGE_STORAGE_REGION: "ap-northeast-2",
+      PROFILE_IMAGE_STORAGE_PREFIX: "test",
+      PROFILE_IMAGE_PUBLIC_BASE_URL: "https://images.example.test",
+      DB_POOL_MAX: "2",
+    });
     assert.doesNotThrow(() => validateAccountDeletionWorkerEnvironment());
+    process.env.DB_POOL_MAX = "1";
+    assert.throws(() => validateAccountDeletionWorkerEnvironment(), /TWO_CONNECTIONS/);
+    process.env.DB_POOL_MAX = "2";
   } finally {
     fs.unlinkSync(secret_path);
   }

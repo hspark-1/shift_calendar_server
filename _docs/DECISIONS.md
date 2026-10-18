@@ -2015,3 +2015,44 @@ OAuth의 `is_new_user`는 해당 로그인 요청에서 계정을 생성했는�
 - 휴지통·사용자 복구 요구가 생기면 복구 권한, 보존 기간, 감사 정책을 별도 ADR로 정의
 - 반복 일정 모델이 추가되면 단건·이후·전체 series 삭제 의미를 재설계
 - 모바일 retry를 성공으로 흡수해야 한다는 제품 요구가 확인되면 반복 DELETE의 `200` 멱등 응답 전환을 재검토
+
+## ADR-0036: 탈퇴 이미지 삭제 checkpoint·독립 감시·개인정보 보관 제어
+
+### 배경(문제)
+
+탈퇴 DB purge가 이미지 원본을 정리하지 않고, worker 실패/정체와 기기·작업 기록 보관의 운영 계약이 불완전했습니다. 2026-10-18 사용자는 BE-01/02 구현을 요청하고 연결 해제 기기 30일, 완료 탈퇴/종료 푸시 30일, 미완료 7일 경보·30일 내 운영자 최종 조치 기준을 승인했습니다.
+
+### 선택지(대안)
+
+- 프로필 URL을 파싱해 현재 이미지 하나만 삭제하거나, 신뢰한 사용자 저장 namespace 전체와 버전을 삭제
+- 네트워크 I/O를 DB transaction 안에서 실행하거나, session lock과 영속 checkpoint로 분리
+- worker 내부 경보만 사용하거나, 호스트 독립 timer와 집계 CLI를 사용
+- 오래된 실패 작업을 자동 파기하거나, 자격정보를 보존하며 운영자가 원인을 해결하고 완료 후 보관 기간 적용
+
+### 결정(무엇을 선택)
+
+- bucket/prefix/설정 fingerprint를 요청에 저장하고 provider → 이미지 객체/버전 → DB → Redis 순서로 처리합니다. 이미지 미완료는 전체 성공이 아닙니다.
+- 사용자 session advisory lock을 업로드·worker·운영 재시도에 공유합니다. pool 절반까지만 lock 연결을 허용합니다. 네트워크 작업은 DB transaction 밖에서 수행합니다.
+- 신규 migration은 nullable checkpoint, 고정 이름 heartbeat, CASCADE 운영 감사 테이블, 기기 cleanup index를 추가합니다. 공개 API 필드/상태 enum은 유지하고 OpenAPI 완료 의미를 보완합니다.
+- root CLI 재처리는 소유자·상태·시도 횟수·최근 lease를 검증하고 최초 요청 시각 및 완료된 단계를 보존합니다.
+- 호스트 timer가 5분마다 점검하고 운영 이메일로 실패·24시간 대기·7일/30일 초과·worker 5분 정체·푸시 장기 대기를 알립니다. 실제 SMTP·timer 적용은 운영 작업입니다.
+- 연결 해제 기기는 30일 경과 및 진행 중 push 참조 없음 조건으로 삭제합니다. 완료 탈퇴/종료 push retention은 30 외의 env를 거부합니다. 정상 cleanup 주기는 시작 시 및 이후 24시간입니다.
+- FE 계약 미합의 연령/동의 필드는 배포하지 않습니다. Google/Naver 서버 revoke는 추가하지 않습니다.
+
+### 근거(왜)
+
+현재/이전 업로드를 사용자 소유 경계 안에서 처리하고, 외부 URL 접근·다른 환경 파일 삭제를 막습니다. DB 삭제 후에도 재시작 가능하며 provider 실패 자격정보를 잃지 않습니다. worker가 멈춰도 별도 timer가 상태를 확인합니다. 만료된 기록과 복구 중 기록을 구분하여 복구 맥락을 유지합니다.
+
+### 결과/영향(좋은 점/트레이드오프)
+
+- **Behavior change**: 탈퇴 완료에 관리 이미지 원본/버전 삭제가 추가됩니다. 업로드/삭제 경합 시 업로드가 503으로 재시도될 수 있습니다. 두 worker는 새 migration을 요구하고, 탈퇴 worker는 S3 목록/버전 삭제 권한 및 pool 2 이상을 요구합니다.
+- 구 탈퇴 worker는 이미지 단계를 알지 못하므로 mixed-version 운영을 금지하고 drain/중지 후 교체합니다. 실제 운영 전 Stage 검증이 필요합니다.
+- 1년 캐시 헤더의 기존 사본·CDN·백업은 별도 운영 조치가 필요합니다. 레거시 prefix/과거 완료 건은 자동 추적할 수 없습니다.
+- 현재 구현은 자기 계정의 객체 namespace를 모두 삭제하므로 공유 객체를 이 경로에 저장하면 안 됩니다.
+- 완료 후 request의 사용자·이미지 scope를 지우며 운영자 재시도 audit는 부모 retention에 따라 삭제합니다. 실패 작업은 자동 삭제하지 않고 담당자가 30일 내 최종 조치해야 합니다.
+
+### 추후 과제(언제 다시 평가)
+
+실제 저장소·CDN 삭제 검증, 계정 해제 E2E·경보 실수신·운영 retention 증거를 확보하고 공개 정책을 최종화합니다. 호스트 전체 장애에는 외부 uptime 감시를 추가합니다. FE 연령/정책 확인 합의 후 별도 ADR/OpenAPI/migration을 작성합니다.
+
+구현/운영 정본: `_docs/PRIVACY_IMPLEMENTATION_REPORT.md`, `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`, `_docs/PRIVACY_FE_CONTRACT_PROPOSAL.md`.

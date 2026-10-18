@@ -199,3 +199,23 @@ export async function disableDeviceTarget(
     { where: { device_id } },
   );
 }
+
+// Approved 2026-10-18: retain detached installation records for 30 days.
+// PostgreSQL rechecks predicates after a concurrent updater commits its row lock.
+export async function cleanupUnboundDevices(): Promise<number> {
+  const rows = await sequelize.query<{ device_id: string }>(`
+    DELETE FROM user_devices d
+    WHERE d.user_id IS NULL AND d.provider_target IS NULL AND d.is_active = false
+      AND d.push_permission_enabled = false
+      AND d.disabled_at <= now() - interval '30 days'
+      AND d.updated_at <= now() - interval '30 days'
+      AND NOT EXISTS (
+        SELECT 1 FROM push_deliveries delivery
+        JOIN push_jobs job ON job.push_job_id = delivery.push_job_id
+        WHERE delivery.device_id = d.device_id
+          AND job.status IN ('PENDING', 'PROCESSING', 'RETRY')
+      )
+    RETURNING d.device_id
+  `, { type: QueryTypes.SELECT });
+  return rows.length;
+}

@@ -1,0 +1,18 @@
+# 정책 확정 후 shiftmate.co.kr의 기존 HTTPS server 블록에 병합합니다.
+# 독립 server 설정이 아니며 nginx.conf 최상위에 include하지 않습니다.
+location = /support {
+    alias /var/www/shiftmate/support.html;
+    default_type text/html;
+    charset utf-8;
+}
+location = /privacy {
+    alias /var/www/shiftmate/privacy.html;
+    default_type text/html;
+    charset utf-8;
+}
+location = /support/ {
+    return 301 /support;
+}
+location = /privacy/ {
+    return 301 /privacy;
+}

@@ -134,6 +134,7 @@ Flutter Kakao SDK Access Token
 인증 + 최근 재인증 + 명시적 확인
   → users=DELETION_PENDING + 내부 session 차단 + 삭제 요청 기록
   → 전용 worker가 Apple revoke / Kakao unlink를 멱등 처리
+  → 관리 이미지 namespace의 원본·버전 삭제 및 checkpoint 저장
   → 그룹 OWNER 자동 승계 또는 1인 그룹 삭제
   → 사용자·콘텐츠·관계·알림/push snapshot 물리 삭제
   → Redis tombstone + 사용자 월 cache 제거
@@ -144,7 +145,7 @@ Flutter Kakao SDK Access Token
 - 외부 HTTP와 Redis 작업을 DB transaction 안에서 실행하지 않고 PostgreSQL lease worker로 재시도합니다.
 - Google/Naver는 현재 서버가 revoke 가능한 OAuth token을 보관하지 않으므로 클라이언트 연동 해제와 내부 데이터 삭제를 분리합니다.
 - `DELETE /api/v1/auth/account`는 `confirmation=true`와 JWT `auth_time` 10분 조건을 확인한 뒤 `202`로 접수합니다. 접수 즉시 사용자를 `DELETION_PENDING`으로 바꾸고 Refresh Token·푸시 기기를 무효화합니다.
-- `src/workers/accountDeletionWorker.ts`는 provider 해제 → DB purge → Redis tombstone/purge 순서를 lease·backoff로 재시도합니다. Stage/Center에서는 `deploy/config/feature-flags.{stage,production}.env`가 API와 worker 플래그의 정본이며 기본값은 모두 `false`입니다.
+- `src/workers/accountDeletionWorker.ts`는 provider 해제 → 관리 이미지 원본/버전 purge → DB purge → Redis tombstone/purge 순서를 lease·backoff로 재시도합니다. Stage/Center에서는 `deploy/config/feature-flags.{stage,production}.env`가 API와 worker 플래그의 정본입니다. 환경변수 미설정 시 코드 기본값은 `false`이며 실제 활성 여부는 실행 컨테이너에서 확인합니다.
 - 배포 검증은 `ACCOUNT_DELETION_ENABLED=true`와 `ACCOUNT_DELETION_WORKER_ENABLED=false` 조합을 거절합니다. 활성화 전에 탈퇴 migration, worker 전용 `kakao_admin_key` Docker secret, Apple secret과 Redis/DB 연결을 준비하고 Stage E2E를 먼저 통과해야 합니다.
 - 구현·운영 정본은 `_docs/ACCOUNT_DELETION_SERVER_DESIGN.md`이며, Stage 실제 Apple/Kakao·Redis 장애 E2E 전에는 Production에서 활성화하지 않습니다.
 
@@ -1715,3 +1716,30 @@ P0/P1 그룹 요청
 - [ ] liveness/readiness 및 SIGTERM 종료 확인
 - [ ] 컨테이너별 고유 `INSTANCE_NAME` 확인
 - [ ] Request ID, 본문 제한, 인증 rate limit 확인
+
+### 고객지원·개인정보 HTML 전달 자료 (2026-10-18)
+
+- `_docs/app_store_web/support.html`: 외부 자산 의존성 없는 고객지원 원본. 사용 예: 확정본 배포 시 Nginx `/support` 응답.
+- `_docs/app_store_web/drafts/privacy.html`: 비공개 main에만 보관하는 운영 정책 미확정 개인정보 초안. 비공개 검토에만 사용하고 서버 공개 경로에 복사하지 않음.
+- `_docs/app_store_web/locations.conf.example`: 기존 www.shiftmate.co.kr HTTPS server 블록에 병합할 Nginx location 예시. API proxy·upstream 변경 없음.
+- `_docs/app_store_web/DEPLOY_GUIDE.md`: 파일·DNS/TLS·설정 확인, 확정본 배치, 응답/API 회귀 검증 및 백업 복구 절차. 의존성은 실제 홈서버 Nginx 설정과 최종 개인정보 운영 정책.
+- 로컬 전달 준비만 완료했으며 실제 서버 적용·공개 HTTP/TLS 검증은 미수행. Express·Docker 이미지·DB 및 기존 배포 정책은 변경하지 않음.
+
+### 개인정보 삭제·보관 운영 제어 (2026-10-18, 운영 적용 대기)
+
+- 설계 정본: ADR-0036. 결과·신규 파일 역할/의존성/사용 예는 `_docs/PRIVACY_IMPLEMENTATION_REPORT.md`, 배포·migration·감시·재처리는 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`, FE 미합의 계약은 `_docs/PRIVACY_FE_CONTRACT_PROPOSAL.md`를 따릅니다.
+- `account_deletion_requests.image_scope`는 서버 관리 bucket/prefix/fingerprint를, `images_purged_at`은 이미지 원본·버전 정리 완료를 저장합니다. 완료 시 scope를 제거합니다. 사용자 지정 URL은 삭제 경로로 사용하지 않습니다.
+- `privacy_worker_heartbeats`는 탈퇴/푸시 worker의 성공 loop 시각, `account_deletion_operator_actions`는 root CLI 재처리 감사 기록이며 부모 요청 삭제 시 CASCADE입니다.
+- `src/services/accountDeletionImageService.ts`는 S3 SDK 목록·버전 삭제, `src/utils/accountDataLock.ts`는 업로드·삭제·재처리 사용자 잠금을 담당합니다. DB_POOL_MAX는 2 이상이어야 합니다.
+- `src/services/accountDeletionOperationsService.ts`, `src/scripts/accountDeletionOps.ts`는 집계/상세/운영 재시도, `src/scripts/privacyEvidence.ts`는 비밀값 제외 실제 설정 출력, `src/config/privacy.ts`는 승인된 30일 retention 검증을 담당합니다.
+- `migrations/{privacy_deletion_preflight,add_privacy_deletion_controls,privacy_deletion_postflight,rollback_privacy_deletion_controls}.sql`은 기존 탈퇴 schema 위 additive 변경입니다. 구 worker 정지와 migration 후 API·두 worker를 교체합니다. 이미 삭제한 데이터는 코드 롤백으로 복원되지 않습니다.
+- 기기 정리는 해제/마지막 변경 후 30일 경과한 unbound 비활성 행만 대상으로 하고 진행 중 push 참조를 보호합니다. 완료 탈퇴/종료 push 기록은 30일 경과 후 정리하며 두 retention env의 다른 값을 거부합니다. cleanup은 worker 시작 및 이후 24시간 주기입니다.
+- 7일은 탈퇴 목표이며 30일 내 운영자 최종 조치 의무를 둡니다. `_docs/privacy_ops/`의 독립 호스트 timer·메일 예시는 실행 환경·SMTP 설정 후 운영자가 설치합니다. 실제 발송/홈서버 배포는 미수행입니다.
+- `test/privacyDeletionIntegration.test.cjs`는 고정 격리 PostgreSQL과 S3 HTTP 테스트 서비스에 의존합니다. `npm run test:privacy-integration`으로 schema reset·스토리지·worker·ops·기기 정리를 검사합니다. `test/privacyMonitor.test.py`는 호스트 경보 반복·복구·민감값 배제를 검증합니다.
+- `visibility_flow.drawio`는 현재 checkout에서 발견되지 않았습니다. 이번 변경은 공유 권한을 바꾸지 않으며 `schema.drawio`의 요청 checkpoint/감사/heartbeat 구조를 동기화했습니다.
+
+### 브랜치별 변경 관리 (2026-10-18)
+
+- 애플리케이션·테스트·범용 migration·공개 가능한 문서는 develop에 커밋합니다.
+- 실제 배포 환경 식별자·경보 수신 설정과 CI/CD 설정은 비공개 main에서만 관리하고 develop을 병합합니다. main을 develop으로 역병합하지 않습니다.
+- 비밀번호·개인키·토큰 원문은 어느 브랜치에도 커밋하지 않고 외부 secret 저장소를 사용합니다.

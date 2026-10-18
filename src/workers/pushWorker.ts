@@ -1,3 +1,4 @@
+import { getPrivacyRetentionDays } from "../config/privacy";
 import crypto from "crypto";
 import { Op, QueryTypes } from "sequelize";
 import {
@@ -531,10 +532,7 @@ export async function processPushBatch(provider: PushProvider): Promise<number> 
 }
 
 export async function cleanupTerminalPushRecords(): Promise<void> {
-  const retention_days = getPositiveIntegerEnvironmentVariable(
-    "PUSH_TERMINAL_RETENTION_DAYS",
-    30,
-  );
+  const retention_days = getPrivacyRetentionDays("PUSH_TERMINAL_RETENTION_DAYS");
   await sequelize.query(
     `
       DELETE FROM push_jobs
@@ -546,11 +544,13 @@ export async function cleanupTerminalPushRecords(): Promise<void> {
 }
 
 async function runHealthCheck(): Promise<void> {
+  getPrivacyRetentionDays("PUSH_TERMINAL_RETENTION_DAYS");
   validateEnvironment();
   validatePushWorkerEnvironment();
   try {
     await connectDatabase();
     await checkDatabaseConnection();
+    await sequelize.query("SELECT worker_name, last_seen_at FROM privacy_worker_heartbeats LIMIT 0");
     if (isPushWorkerEnabled()) {
       await createFirebasePushProvider().checkReady();
     }
@@ -567,6 +567,7 @@ async function shutdown(signal: string): Promise<void> {
 }
 
 async function runWorker(): Promise<void> {
+  getPrivacyRetentionDays("PUSH_TERMINAL_RETENTION_DAYS");
   validateEnvironment();
   validatePushWorkerEnvironment();
   await connectDatabase();
@@ -586,8 +587,11 @@ async function runWorker(): Promise<void> {
       const processed_count = await processPushBatch(provider);
       if (Date.now() - last_cleanup_at >= 24 * 60 * 60 * 1000) {
         await cleanupTerminalPushRecords();
+        console.log(JSON.stringify({ context: "privacy_push_cleanup_completed", retention_days: 30 }));
         last_cleanup_at = Date.now();
       }
+      await sequelize.query(`INSERT INTO privacy_worker_heartbeats (worker_name, last_seen_at)
+        VALUES ('push', now()) ON CONFLICT (worker_name) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`);
       if (processed_count === 0) {
         await new Promise((resolve) => setTimeout(resolve, poll_ms));
       }

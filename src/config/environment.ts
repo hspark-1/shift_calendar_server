@@ -195,6 +195,10 @@ export function validateAccountDeletionWorkerEnvironment(): void {
     return;
   }
   getKakaoAdminKey();
+  validateProfileImageStorageEnvironment();
+  if (getPositiveIntegerEnvironmentVariable("DB_POOL_MAX", 10) < 2) {
+    throw new Error("ACCOUNT_DELETION_DB_POOL_REQUIRES_TWO_CONNECTIONS");
+  }
 }
 
 export function validateProfileImageStorageEnvironment(): void {

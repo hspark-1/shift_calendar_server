@@ -1,4 +1,8 @@
+import { getPrivacyRetentionDays } from "../config/privacy";
 import crypto from "crypto";
+import { cleanupUnboundDevices } from "../services/deviceService";
+import { withAccountDataLock } from "../utils/accountDataLock";
+import { getAccountImageScope, purgeAccountImages } from "../services/accountDeletionImageService";
 import { QueryTypes } from "sequelize";
 import {
   checkDatabaseConnection,
@@ -51,7 +55,7 @@ export function calculateAccountDeletionRetryDelayMs(
   );
 }
 
-async function claimRequests(): Promise<ClaimedDeletionRequest[]> {
+export async function claimRequests(): Promise<ClaimedDeletionRequest[]> {
   const claim_token = crypto.randomUUID();
   const batch_size = getPositiveIntegerEnvironmentVariable(
     "ACCOUNT_DELETION_BATCH_SIZE",
@@ -75,6 +79,7 @@ async function claimRequests(): Promise<ClaimedDeletionRequest[]> {
             last_error_code = 'ACCOUNT_DELETION_MAX_ATTEMPTS_EXCEEDED'
         WHERE status IN ('PENDING', 'RETRY', 'PROCESSING', 'CACHE_PURGE_PENDING')
           AND attempt_count >= :max_attempts
+          AND pg_try_advisory_xact_lock(hashtextextended('account-data:' || user_id::text, 0))
           AND (
             claimed_at IS NULL
             OR claimed_at < now() - make_interval(secs => :lease_seconds)
@@ -96,6 +101,7 @@ async function claimRequests(): Promise<ClaimedDeletionRequest[]> {
           WHERE status IN ('PENDING', 'RETRY', 'PROCESSING', 'CACHE_PURGE_PENDING')
             AND available_at <= now()
             AND attempt_count < :max_attempts
+            AND pg_try_advisory_xact_lock(hashtextextended('account-data:' || user_id::text, 0))
             AND (
               claimed_at IS NULL
               OR claimed_at < now() - make_interval(secs => :lease_seconds)
@@ -193,8 +199,22 @@ async function markFailed(
 export async function processAccountDeletionRequest(
   deletion_request_id: string,
 ): Promise<void> {
+  const request = await AccountDeletionRequest.findByPk(deletion_request_id);
+  if (!request || request.status === "COMPLETED" || request.status === "FAILED") return;
+  if (!request.user_id) throw new Error("ACCOUNT_DELETION_OWNER_MISSING");
+  await withAccountDataLock(request.user_id, () => processLockedAccountDeletionRequest(deletion_request_id));
+}
+
+async function processLockedAccountDeletionRequest(
+  deletion_request_id: string,
+): Promise<void> {
   let request = await AccountDeletionRequest.findByPk(deletion_request_id);
-  if (!request || request.status === "COMPLETED") return;
+  if (!request || request.status === "COMPLETED" || request.status === "FAILED") return;
+  if (!request.user_id) throw new Error("ACCOUNT_DELETION_OWNER_MISSING");
+  if (!request.image_scope) {
+    request.image_scope = getAccountImageScope(request.user_id);
+    await request.save();
+  }
 
   if (!request.db_purged_at) {
     const provider_result = await processProviderTasks(request);
@@ -206,6 +226,23 @@ export async function processAccountDeletionRequest(
       await markFailed(request, "PROVIDER_TASK_FAILED");
       return;
     }
+  }
+
+  if (!request.images_purged_at) {
+    try {
+      await purgeAccountImages(request.user_id!, request.image_scope!);
+      request.images_purged_at = new Date();
+      await request.save();
+    } catch (error) {
+      const safe_codes = ["ACCOUNT_IMAGE_STORAGE_CHANGED", "ACCOUNT_IMAGE_KEY_OUT_OF_SCOPE", "ACCOUNT_IMAGE_DELETE_FAILED", "ACCOUNT_IMAGE_MORE_PAGES", "ACCOUNT_IMAGE_LIST_INVALID"];
+      const error_code = error instanceof Error && safe_codes.includes(error.message)
+        ? error.message : "ACCOUNT_IMAGE_PURGE_FAILED";
+      await releaseForRetry(request, error_code);
+      return;
+    }
+  }
+
+  if (!request.db_purged_at) {
     try {
       await purgeAccountData(request);
     } catch (error) {
@@ -239,6 +276,7 @@ export async function processAccountDeletionRequest(
   request.cache_purged_at = new Date();
   request.completed_at = new Date();
   request.user_id = null;
+  request.image_scope = null;
   request.cache_year_months = [];
   request.claimed_at = null;
   request.claim_token = null;
@@ -259,12 +297,14 @@ export async function processAccountDeletionBatch(): Promise<number> {
 }
 
 async function runHealthCheck(): Promise<void> {
+  getPrivacyRetentionDays("ACCOUNT_DELETION_RETENTION_DAYS");
   validateEnvironment();
   validateAccountDeletionWorkerEnvironment();
   validateAppleAuthEnvironment();
   try {
     await connectDatabase();
     await checkDatabaseConnection();
+    await sequelize.query("SELECT worker_name, last_seen_at FROM privacy_worker_heartbeats LIMIT 0");
     if (isAccountDeletionWorkerEnabled()) {
       await Promise.all([
         sequelize.query(
@@ -272,6 +312,7 @@ async function runHealthCheck(): Promise<void> {
           { type: QueryTypes.SELECT },
         ),
         AccountDeletionRequest.count(),
+        sequelize.query("SELECT image_scope, images_purged_at FROM account_deletion_requests LIMIT 0"),
         AccountDeletionProviderTask.count(),
       ]);
     }
@@ -294,6 +335,7 @@ async function shutdown(signal: string): Promise<void> {
 }
 
 async function runWorker(): Promise<void> {
+  getPrivacyRetentionDays("ACCOUNT_DELETION_RETENTION_DAYS");
   validateEnvironment();
   validateAccountDeletionWorkerEnvironment();
   validateAppleAuthEnvironment();
@@ -313,8 +355,17 @@ async function runWorker(): Promise<void> {
       const processed_count = await processAccountDeletionBatch();
       if (Date.now() - last_cleanup_at >= 24 * 60 * 60 * 1000) {
         await cleanupCompletedAccountDeletionRequests();
+        const deleted_device_count = await cleanupUnboundDevices();
+        console.log(JSON.stringify({ context: "privacy_cleanup_completed", deleted_device_count,
+          device_retention_days: 30,
+          deletion_retention_days: getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_RETENTION_DAYS", 30) }));
         last_cleanup_at = Date.now();
       }
+      await sequelize.query(`
+        INSERT INTO privacy_worker_heartbeats (worker_name, last_seen_at)
+        VALUES ('account-deletion', now())
+        ON CONFLICT (worker_name) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+      `);
       if (processed_count === 0) {
         await new Promise((resolve) => setTimeout(resolve, poll_ms));
       }

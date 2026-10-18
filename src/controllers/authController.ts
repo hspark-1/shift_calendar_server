@@ -1,3 +1,4 @@
+import { withAccountDataLock } from "../utils/accountDataLock";
 import { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import { User } from "../models";
@@ -590,11 +591,17 @@ export async function completeProfile(
   try {
     if (req.validated_profile_image) {
       try {
-        stored_image = await uploadProfileImage(
-          req.user.user_id,
-          req.validated_profile_image,
-        );
+        const user_id = req.user.user_id;
+        const image = req.validated_profile_image;
+        stored_image = await withAccountDataLock(user_id, async () => {
+          const current_user = await User.findByPk(user_id);
+          if (!current_user || current_user.account_status !== "ACTIVE") {
+            throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
+          }
+          return uploadProfileImage(user_id, image);
+        });
       } catch (error) {
+        if (error instanceof ProfileError) throw error;
         logError("profile_image_upload_failed", error, req.request_id);
         throw new ProfileError(
           503,

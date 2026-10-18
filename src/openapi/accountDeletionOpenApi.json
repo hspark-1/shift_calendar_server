@@ -71,6 +71,7 @@
         "properties": {
           "deletion_request_id": { "type": "string", "format": "uuid" },
           "status": {
+            "description": "COMPLETED는 관리 이미지 원본/버전, DB, 서버 캐시 정리 완료를 의미합니다. 이미 수신한 사본과 별도 백업의 만료는 별도 정책을 따릅니다. RETRY/FAILED는 이미지 저장소 오류를 포함합니다. 7일은 운영 목표이며 완료 보장 시간이 아닙니다.",
             "type": "string",
             "enum": ["PENDING", "PROCESSING", "RETRY", "CACHE_PURGE_PENDING", "FAILED", "COMPLETED"]
           },

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check ShiftMate privacy deletion every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=shiftmate-privacy-monitor.service
+
+[Install]
+WantedBy=timers.target

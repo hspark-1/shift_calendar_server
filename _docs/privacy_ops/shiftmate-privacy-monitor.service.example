@@ -1,0 +1,18 @@
+[Unit]
+Description=ShiftMate privacy deletion external monitor
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/shiftmate/privacy-monitor.env
+ExecStart=/usr/bin/python3 /usr/local/libexec/shiftmate-privacy-monitor.py
+TimeoutStartSec=90
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/shiftmate-privacy-monitor
+StateDirectory=shiftmate-privacy-monitor
