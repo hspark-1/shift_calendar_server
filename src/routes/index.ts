@@ -6,6 +6,7 @@ import friendRoutes from "./friendRoutes";
 import groupRoutes from "./groupRoutes";
 import deviceRoutes from "./deviceRoutes";
 import profileImageRoutes from "./profileImageRoutes";
+import appVersionPolicyRoutes from "./appVersionPolicyRoutes";
 import { checkDatabaseConnection } from "../config/database";
 import { checkRedisConnection } from "../config/redis";
 
@@ -48,6 +49,7 @@ v1_router.get("/health/ready", async (_req, res) => {
 });
 
 v1_router.use("/auth", authRoutes);
+v1_router.use("/", appVersionPolicyRoutes);
 v1_router.use("/", profileImageRoutes);
 v1_router.use("/schedules", scheduleRoutes);
 v1_router.use("/", calendarRoutes);

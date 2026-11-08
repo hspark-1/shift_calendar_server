@@ -1,0 +1,39 @@
+{
+  "tags": [{ "name": "App Update", "description": "스토어 버전과 독립적인 앱 API 호환 정책" }],
+  "paths": {
+    "/app/version-policy": {
+      "get": {
+        "tags": ["App Update"],
+        "summary": "플랫폼별 최소 API 호환 번호 조회",
+        "description": "로그인 불필요. 앱 내부 api_compatibility_version이 minimum_compatibility_version보다 낮으면 업데이트 필요. 같은 값은 허용. 0이면 차단 비활성. 스토어 버전/빌드 번호와 무관.",
+        "security": [],
+        "parameters": [{ "in": "query", "name": "platform", "required": true, "schema": { "type": "string", "enum": ["IOS", "ANDROID"] } }],
+        "responses": {
+          "200": {
+            "description": "캐시하지 않는 현재 정책",
+            "content": { "application/json": { "schema": {
+              "type": "object", "required": ["success", "data"],
+              "properties": {
+                "success": { "type": "boolean", "enum": [true] },
+                "data": { "$ref": "#/components/schemas/AppVersionPolicy" }
+              }
+            } } }
+          },
+          "400": { "description": "플랫폼 검증 실패" },
+          "503": { "description": "정책 설정 오류. 환경변수 값은 응답에 포함하지 않음" }
+        }
+      }
+    }
+  },
+  "components": { "schemas": { "AppVersionPolicy": {
+    "type": "object",
+    "required": ["schema_version", "platform", "minimum_compatibility_version", "update_url", "message"],
+    "properties": {
+      "schema_version": { "type": "integer", "enum": [1] },
+      "platform": { "type": "string", "enum": ["IOS", "ANDROID"] },
+      "minimum_compatibility_version": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+      "update_url": { "type": "string", "format": "uri", "nullable": true },
+      "message": { "type": "string", "maxLength": 300 }
+    }
+  } } }
+}

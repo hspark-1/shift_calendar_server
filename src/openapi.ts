@@ -9,6 +9,7 @@ import account_deletion_openapi from "./openapi/accountDeletionOpenApi.json";
 import kakao_auth_openapi from "./openapi/kakaoAuthOpenApi.json";
 import profile_auth_openapi from "./openapi/profileAuthOpenApi.json";
 import calendar_openapi from "./openapi/calendarOpenApi.json";
+import app_version_policy_openapi from "./openapi/appVersionPolicyOpenApi.json";
 
 const openapi = {
   ...group_openapi,
@@ -17,6 +18,7 @@ const openapi = {
     title: "ShiftMate API",
   },
   tags: [
+    ...app_version_policy_openapi.tags,
     ...group_openapi.tags,
     ...apple_auth_openapi.tags,
     ...google_auth_openapi.tags,
@@ -26,6 +28,7 @@ const openapi = {
     ...calendar_openapi.tags,
   ],
   paths: {
+    ...app_version_policy_openapi.paths,
     ...group_openapi.paths,
     ...device_openapi.paths,
     ...apple_auth_openapi.paths,
@@ -38,6 +41,7 @@ const openapi = {
   components: {
     ...group_openapi.components,
     schemas: {
+      ...app_version_policy_openapi.components.schemas,
       ...group_openapi.components.schemas,
       ...device_openapi.components.schemas,
       ...apple_auth_openapi.components.schemas,
