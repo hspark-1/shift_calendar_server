@@ -2056,3 +2056,32 @@ OAuth의 `is_new_user`는 해당 로그인 요청에서 계정을 생성했는�
 실제 저장소·CDN 삭제 검증, 계정 해제 E2E·경보 실수신·운영 retention 증거를 확보하고 공개 정책을 최종화합니다. 호스트 전체 장애에는 외부 uptime 감시를 추가합니다. FE 연령/정책 확인 합의 후 별도 ADR/OpenAPI/migration을 작성합니다.
 
 구현/운영 정본: `_docs/PRIVACY_IMPLEMENTATION_REPORT.md`, `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`, `_docs/PRIVACY_FE_CONTRACT_PROPOSAL.md`.
+
+
+## ADR-0037: 탈퇴한 그룹 감사자는 NULL로 익명화하고 삭제 시각 보존
+
+### 배경(문제)
+
+2026-11-08 Stage에서 사용자 삭제 FK가 `groups.deleted_by_user_id`를 NULL로 만들 때 `ck_groups_deleted_pair`와 충돌해 DB purge가 롤백됐다. `group_members.removed_by_user_id`도 같은 양방향 CHECK를 가진다. 미완료 사용자는 DELETION_PENDING으로 남아 재로그인이 차단된다.
+
+### 선택지(대안)
+
+1. 삭제/제거 시각이 있으면 감사자 NULL을 허용한다.
+2. 감사자가 탈퇴하면 삭제/제거 시각을 함께 지운다.
+3. 감사자가 참조된 다른 사용자 그룹/이력을 물리 삭제한다.
+
+### 결정(무엇을 선택)
+
+1번. 기존 ON DELETE SET NULL 정책에 맞춰 두 CHECK를 `시각 IS NOT NULL OR 감사자 IS NULL`로 바꾼다. 최초 탈퇴 migration·초기 schema와 기존 DB용 별도 migration을 일치시킨다. worker의 provider → 이미지 → DB → Redis 순서와 transaction/retry는 유지한다.
+
+### 근거(왜)
+
+타인의 그룹과 멤버십 이력을 보존하고 삭제된 그룹/제거된 멤버가 다시 활성화되지 않게 한다. 탈퇴자의 식별자를 유지할 필요 없이 기존 감사자 FK 계약을 만족한다.
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**Behavior change**: 종료 시각이 있는 이력의 감사자는 NULL일 수 있다. 시각 없는 감사자만 지정한 잘못된 상태는 계속 차단한다. DB 수준에서 NULL이 탈퇴로 발생했는지까지는 구분하지 않는다. 서비스의 일반 삭제/제거는 기존대로 시각과 실행자를 함께 기록한다. 기존 DB에는 별도 migration이 필요하며 worker 코드 교체만으로 복구되지 않는다.
+
+### 추후 과제(언제 다시 평가)
+
+Stage에서 migration 후 실제 탈퇴 요청 완료와 카카오 재가입 E2E를 확인한다. Kakao의 탈퇴 중 일반 예외 500 매핑은 별도 API 계약 보완 과제로 남긴다. 엄격 CHECK 롤백은 익명화된 이력이 있으면 중단하며 감사자를 추정 복원하지 않는다.

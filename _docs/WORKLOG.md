@@ -2,6 +2,38 @@
 
 # 작업 일지
 
+## 2026-11-08
+
+### [DONE] Stage 프로필 이미지 AccessDenied 원인 조사
+
+- **목적**: 업로드 후 앱 이미지 조회 거부 원인을 확인한다.
+- **변경**: 저장·URL 생성·프로필 응답·라우트와 기존 저장소 정책 문서를 대조한다. 운영 설정·코드 변경 없음.
+- **영향범위**: 조사 기록만.
+- **테스트**: `profileImageStorageService.ts` 전체 및 auth route를 확인했다. PutObject 후 `PROFILE_IMAGE_PUBLIC_BASE_URL/key`를 서명 없이 저장·반환하며 GetObject API/presign 구현은 없다. 기존 가이드는 퍼블릭 차단 유지 및 인증 조회 API 미구현을 명시한다. 사용자가 제공한 DB URL이 서명 없는 S3 직접 URL임을 확인했다. 앱의 해당 URL 직접 사용 시 비공개 읽기가 거부되는 구조이며 인증된 서버 조회 경로가 미구현임을 확인했다.
+- **롤백**: 이 조사 항목 제거.
+- **다음**: 사용자 승인에 따라 인증된 서버 이미지 스트리밍과 DB 객체 key 정본 전환을 구현한다. 공개 버킷 전환·S3 리다이렉트는 사용하지 않는다.
+
+### [DONE] 탈퇴 DB purge의 그룹 감사 FK·CHECK 충돌 수정
+
+- **목적**: 삭제/제거 이력의 실행자 계정 탈퇴 시 SET NULL과 CHECK 충돌로 DB purge가 롤백되는 문제 해결.
+- **변경**: worker 삭제 흐름과 final schema의 SET NULL FK·CHECK를 확인했다. 그룹 삭제·멤버 제거 시각을 보존하고 감사자 NULL을 허용하도록 기존 DB용 `fix_account_deletion_audit_constraints.sql`, 최초 탈퇴 migration, 초기 schema를 일치시켰다. 실제 worker 회귀 테스트, 전용 npm 명령, ADR-0037·프로젝트 컨텍스트·운영 복구 절차를 추가했다. 원인은 CHECK와 기존 FK의 충돌이므로 worker의 삭제 순서와 retry 로직은 유지했다.
+- **영향범위**: 그룹 삭제/멤버 제거 감사 이력과 탈퇴 DB purge. 실제 Stage 변경 없음.
+- **테스트**: TypeScript build 성공. 격리 PostgreSQL 16 회귀 1개 통과(그룹/멤버 각각 구 CHECK의 23514·RETRY·로그인 차단 재현 → migration 2회 적용 → 실제 worker 완료·멱등 재실행 → 감사 시각·타인 계정 보존·감사자 NULL → 같은 이메일 신규 사용자 및 토큰 발급). 기존 탈퇴/Kakao/환경 테스트 20개 통과, `git diff --check` 통과. 실제 카카오 provider·이미지/Redis 외부 연동은 이번 회귀에서 수행하지 않았다.
+- **롤백**: worker를 중지하고 코드 복구. 익명화된 감사자를 임의 복원하거나 삭제 시각을 제거하지 않음.
+- **파일**: `.gitignore`, `package.json`, `migrations/{fix_account_deletion_audit_constraints,add_account_deletion_support,final_schema}.sql`, `test/accountDeletionAuditIntegration.test.cjs`, `_docs/{PROJECT_CONTEXT,DECISIONS,PRIVACY_OPERATIONS_RUNBOOK,WORKLOG}.md`.
+- **다음**: Stage worker 중지·백업·대상 DB 확인 후 신규 fix migration만 실행하고 worker 재개. FAILED는 기존 운영 CLI의 현재 상태/횟수 검증 재처리를 사용하며 실제 Kakao 재가입을 확인한다. Stage 접속 대상이 없어 운영 적용은 미수행.
+
+### [DONE] Stage 카카오 회원가입 실패 로그 조사
+
+- **목적**: 실제 실패 요청의 로그와 서버 처리 흐름을 대조해 원인을 확인한다.
+- **변경**: 프로젝트·배포 문서와 Kakao 인증 및 프로필 완료 오류 로그 경로 확인. 코드·운영 설정 변경 없음.
+- **영향범위**: 조사 기록만. Stage SSH 접속 대상과 실제 실패 로그는 아직 확보되지 않았다.
+- **테스트**: 로그 context와 오류 코드 기록 구현, 문서의 Stage Compose 로그 조회 명령을 확인했다. 실제 실패 원인은 미확정.
+- **롤백**: 이 작업 일지 항목을 제거한다.
+- **다음**: Stage 접속 정보 또는 실패 시각·로그를 확보해 request_id 기준으로 인증과 프로필 완료 실패를 추적한다.
+- **추가 확인**: 제공된 07:54:01 UTC Kakao 500과 07:54:04 UTC 탈퇴 worker `SequelizeDatabaseError`는 서로 다른 실행 로그로 동일 사용자 연관성은 미확인. 코드상 탈퇴 접수는 사용자를 `DELETION_PENDING`으로 바꾸고 `generateTokens()`는 이 상태에서 일반 Error(`ACCOUNT_DELETION_IN_PROGRESS`)를 throw하며 Kakao controller는 이를 500으로 반환한다. 실제 사용자 상태와 탈퇴 요청의 `last_error_code` 조회가 필요하다. 탈퇴 완료 후 동일 정보 재가입을 영구 차단하는 조건은 Kakao 로그인 흐름에 없다.
+- **최종 결과**: 운영자가 제공한 DB 조회에서 해당 사용자의 `DELETION_PENDING`, 탈퇴 요청 `RETRY`, `ACCOUNT_DB_PURGE_FAILED`, 이미지 단계 완료·DB 단계 미완료를 확인했다. PostgreSQL 로그는 `DELETE FROM users`의 FK 참조 처리로 `groups.deleted_by_user_id=NULL`이 설정될 때, 이미 `deleted_at`이 존재하는 그룹에서 `ck_groups_deleted_pair`가 위반됨을 명시했다. DB purge transaction 실패 → 사용자 잔존 → 토큰 발급 차단 → Kakao 공통 500 경로가 확인됐다. 실제 DB/운영 코드 수정·재처리는 수행하지 않았다. 후속 작업은 탈퇴 후 삭제자 NULL을 허용하는 감사 정책·관련 제약 정합성 수정과 안전한 재처리, 로그인 오류 매핑 보완이다.
+
 ## 2026-10-18
 
 ### [DONE] 개발 변경 커밋 준비 및 배포 브랜치 분리

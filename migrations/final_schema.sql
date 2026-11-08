@@ -714,8 +714,7 @@ CREATE TABLE groups (
     CHECK (char_length(btrim(name)) BETWEEN 1 AND 50),
   CONSTRAINT ck_groups_deleted_pair
     CHECK (
-      (deleted_at IS NULL AND deleted_by_user_id IS NULL)
-      OR (deleted_at IS NOT NULL AND deleted_by_user_id IS NOT NULL)
+      deleted_at IS NOT NULL OR deleted_by_user_id IS NULL
     )
 );
 
@@ -730,7 +729,7 @@ COMMENT ON COLUMN groups.timezone IS '그룹 캘린더 날짜 범위 해석에 �
 COMMENT ON COLUMN groups.created_by_user_id IS '그룹 생성자. 현재 OWNER와 다를 수 있는 감사 값';
 COMMENT ON COLUMN groups.updated_at IS '그룹 정보·멤버십·역할·소유권이 마지막으로 변경된 시각';
 COMMENT ON COLUMN groups.deleted_at IS '그룹 soft delete 시각';
-COMMENT ON COLUMN groups.deleted_by_user_id IS '그룹 soft delete 실행자';
+COMMENT ON COLUMN groups.deleted_by_user_id IS '그룹 soft delete 실행자. 계정 탈퇴 시 NULL이며 deleted_at은 보존';
 
 CREATE TABLE group_members (
   group_member_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -755,8 +754,7 @@ CREATE TABLE group_members (
     CHECK (role IN ('OWNER', 'ADMIN', 'MEMBER')),
   CONSTRAINT ck_group_members_removed_pair
     CHECK (
-      (removed_at IS NULL AND removed_by_user_id IS NULL)
-      OR (removed_at IS NOT NULL AND removed_by_user_id IS NOT NULL)
+      removed_at IS NOT NULL OR removed_by_user_id IS NULL
     )
 );
 
@@ -781,7 +779,7 @@ COMMENT ON COLUMN group_members.group_member_id IS '멤버십 이력 PK(UUID)';
 COMMENT ON COLUMN group_members.role IS '활성 역할: OWNER, ADMIN, MEMBER';
 COMMENT ON COLUMN group_members.added_by_user_id IS '생성자는 본인, 초대 수락은 원래 초대자';
 COMMENT ON COLUMN group_members.removed_at IS '멤버십 종료 시각. 재가입은 새 row로 기록';
-COMMENT ON COLUMN group_members.removed_by_user_id IS '멤버십 종료 실행자';
+COMMENT ON COLUMN group_members.removed_by_user_id IS '멤버십 종료 실행자. 계정 탈퇴 시 NULL이며 removed_at은 보존';
 
 CREATE TABLE group_invitations (
   invitation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

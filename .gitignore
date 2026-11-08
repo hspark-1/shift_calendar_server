@@ -97,3 +97,5 @@ shiftmate-api-*.tar.gz
 
 # Host monitor Python bytecode
 __pycache__/
+
+!migrations/fix_account_deletion_audit_constraints.sql

@@ -130,6 +130,15 @@ Flutter Kakao SDK Access Token
 
 ### 회원 탈퇴 구조
 
+#### 그룹 감사자 탈퇴 정합성 (2026-11-08)
+
+- **Behavior change**: `groups.deleted_at`, `group_members.removed_at`이 있으면 해당 감사자는 계정 탈퇴로 NULL이 될 수 있다. 시각 없이 감사자만 지정하는 입력은 계속 거절한다. 활성 판정은 기존처럼 시각 컬럼 기준이다.
+- worker의 `purgeAccountData()`는 소유 그룹 승계/정리 후 사용자를 삭제한다. 다른 사용자의 삭제 그룹·제거 멤버 이력은 유지하며 감사자 FK만 `ON DELETE SET NULL`로 익명화한다. 삭제 시각을 지우거나 잔존 그룹을 삭제해 우회하지 않는다.
+- **`migrations/fix_account_deletion_audit_constraints.sql` 역할**: 기존 탈퇴 FK와 충돌하는 두 CHECK만 단일 transaction으로 교체한다. 의존성은 탈퇴 FK migration이 적용된 PostgreSQL `groups`, `group_members`. 사용 예: 대상 DB/백업 확인·worker 중지 후 pgAdmin에서 파일 전체 실행. 재적용 가능하며 사용자 데이터·작업 상태를 변경하지 않는다.
+- **`test/accountDeletionAuditIntegration.test.cjs` 역할**: 격리 PostgreSQL 16에서 구 CHECK 오류(23514)를 재현하고 migration 후 실제 worker 재개·감사 시각 보존·동일 이메일 신규 사용자/토큰 발급을 확인한다. 외부 provider/이미지 단계는 완료 checkpoint로 준비한다. 사용 예: `npm run test:account-deletion-audit-integration` (고정 격리 DB schema 초기화, 외부 S3 불필요).
+- 운영 적용·재처리·롤백은 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`의 2026-11-08 절차를 따른다. `final_schema.sql`은 초기화 전용이며 운영 복구용이 아니다.
+
+
 ```text
 인증 + 최근 재인증 + 명시적 확인
   → users=DELETION_PENDING + 내부 session 차단 + 삭제 요청 기록

@@ -155,3 +155,41 @@ python3 test/privacyMonitor.test.py
 ```
 
 Moto는 S3 프로토콜 에뮬레이터입니다. 실제 IAM 서명/권한·Object Lock·운영 CDN 검증을 대신하지 않습니다. 기존 `test:account-deletion-integration`도 신규 worker 경로 때문에 같은 S3 테스트 endpoint가 필요합니다. CI에도 격리 S3 서비스를 먼저 준비해야 합니다.
+
+
+## 2026-11-08 그룹 감사 FK/CHECK 충돌 복구
+
+증상: PostgreSQL 23514, `ck_groups_deleted_pair` 또는 `ck_group_members_removed_pair`, user DELETE의 SET NULL 실패. DB transaction은 롤백되고 작업은 `ACCOUNT_DB_PURGE_FAILED`로 재시도된다. 이미지/provider 완료 checkpoint는 유지한다.
+
+1. 대상 Stage/Production DB 이름을 직접 확인하고 백업한다. 환경별 탈퇴 worker를 중지한다. 적용 중인 작업 상태·시도 횟수를 기록한다.
+2. **기존 DB에서는** `migrations/fix_account_deletion_audit_constraints.sql` 전체를 pgAdmin에서 실행한다. psql은 `-X -v ON_ERROR_STOP=1 -f` 옵션으로 실행한다. 5초 lock timeout, 단일 transaction으로 두 CHECK를 함께 교체한다. 실패하면 worker 재개 전 원인을 확인한다. `add_account_deletion_support.sql` 재실행이나 `final_schema.sql` 실행은 금지한다.
+3. 아래 결과가 두 건 모두 `convalidated=true`이고, 시각 존재 시 감사자 NULL을 허용하는지 확인한다.
+
+```sql
+SELECT conrelid::regclass AS table_name, conname, convalidated,
+       pg_get_constraintdef(oid) AS definition
+FROM pg_constraint
+WHERE (conrelid = 'public.groups'::regclass AND conname = 'ck_groups_deleted_pair')
+   OR (conrelid = 'public.group_members'::regclass AND conname = 'ck_group_members_removed_pair');
+```
+
+4. worker를 재개한다. RETRY가 시도 상한 미만이면 자동 재시도한다. FAILED/상한 도달이면 앞 절의 `inspect`로 현재 상태를 확인하고, 기존 root CLI `retry REQUEST_UUID EXPECTED_USER_UUID EXPECTED_STATUS EXPECTED_ATTEMPT_COUNT WORKER_RECOVERED`로 감사 기록을 남겨 재개한다. 최근 lease 5분 제한을 준수한다. `WORKER_RECOVERED`는 이 DB 의존성 복구 후 worker 재개에도 사용한다. 최초 요청 시각·provider 성공·이미지 checkpoint를 직접 변경하지 않는다.
+5. COMPLETED, db_purged_at/cache_purged_at/completed_at 기록, user_id 제거, 기존 사용자 부재를 확인한다. 그룹 삭제/멤버 제거 시각이 보존되고 감사자만 NULL인지 확인한다. 실제 카카오 재가입까지 Stage에서 검증한다.
+
+롤백: 탈퇴 worker를 중지한다. 익명화된 종료 이력이 있으면 아래 strict CHECK 복구가 실패하고 transaction 전체가 롤백된다. 이 경우 완화된 CHECK를 유지하고 수정본을 재배포한다. 삭제 시각을 지우거나 실행자를 추정 입력하여 롤백하지 않는다. 적용한 migration은 기존 유효 데이터를 수정하지 않으며 이미 수행한 물리 삭제는 DB 제약 롤백으로 복구되지 않는다.
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+ALTER TABLE public.groups DROP CONSTRAINT ck_groups_deleted_pair,
+  ADD CONSTRAINT ck_groups_deleted_pair CHECK (
+    (deleted_at IS NULL AND deleted_by_user_id IS NULL)
+    OR (deleted_at IS NOT NULL AND deleted_by_user_id IS NOT NULL));
+ALTER TABLE public.group_members DROP CONSTRAINT ck_group_members_removed_pair,
+  ADD CONSTRAINT ck_group_members_removed_pair CHECK (
+    (removed_at IS NULL AND removed_by_user_id IS NULL)
+    OR (removed_at IS NOT NULL AND removed_by_user_id IS NOT NULL));
+COMMIT;
+```
+
+로컬 회귀: `docker compose -f test/fixtures/groupDebug.compose.yml up -d --wait` 후 `npm run test:account-deletion-audit-integration`. 실제 worker를 사용하되 외부 provider/이미지 완료 checkpoint를 준비하므로 S3가 필요 없다. 이 테스트는 고정된 로컬 격리 DB만 초기화한다.

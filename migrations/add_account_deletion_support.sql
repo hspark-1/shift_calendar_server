@@ -208,6 +208,22 @@ ALTER TABLE push_deliveries
   ADD CONSTRAINT fk_push_deliveries_device
     FOREIGN KEY (device_id) REFERENCES user_devices(device_id) ON DELETE CASCADE;
 
+-- 감사자의 탈퇴 후에도 삭제/제거 시각을 유지한다.
+ALTER TABLE groups
+  DROP CONSTRAINT ck_groups_deleted_pair,
+  ADD CONSTRAINT ck_groups_deleted_pair
+    CHECK (deleted_at IS NOT NULL OR deleted_by_user_id IS NULL);
+
+ALTER TABLE group_members
+  DROP CONSTRAINT ck_group_members_removed_pair,
+  ADD CONSTRAINT ck_group_members_removed_pair
+    CHECK (removed_at IS NOT NULL OR removed_by_user_id IS NULL);
+
+COMMENT ON COLUMN groups.deleted_by_user_id IS
+  '그룹 soft delete 실행자. 계정 탈퇴 시 NULL이며 deleted_at은 보존';
+COMMENT ON COLUMN group_members.removed_by_user_id IS
+  '멤버십 종료 실행자. 계정 탈퇴 시 NULL이며 removed_at은 보존';
+
 COMMENT ON COLUMN users.account_status IS 'ACTIVE 또는 DELETION_PENDING. 탈퇴 접수 즉시 일반 인증을 차단한다.';
 COMMENT ON COLUMN users.deletion_requested_at IS '회원 탈퇴가 접수된 시각. ACTIVE이면 null';
 COMMENT ON TABLE account_deletion_requests IS '외부 revoke, DB purge, Redis purge를 재시도하는 회원 탈퇴 원본 작업';
