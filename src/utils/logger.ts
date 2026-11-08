@@ -4,6 +4,7 @@ interface ErrorLike {
   status?: unknown;
   status_code?: unknown;
   environment_variable?: unknown;
+  configuration_field?: unknown;
   response?: {
     status?: unknown;
   };
@@ -38,6 +39,10 @@ export function logError(
     typeof error_like?.environment_variable === "string"
       ? error_like.environment_variable
       : undefined;
+  const configuration_field =
+    typeof error_like?.configuration_field === "string"
+      ? error_like.configuration_field
+      : undefined;
 
   console.error(
     JSON.stringify({
@@ -47,6 +52,7 @@ export function logError(
       error_name,
       error_code: error_code ?? null,
       environment_variable: environment_variable ?? null,
+      ...(configuration_field === undefined ? {} : { configuration_field }),
       http_status: http_status ?? null,
     })
   );

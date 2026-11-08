@@ -12,7 +12,7 @@
           "App Update"
         ],
         "summary": "플랫폼별 최소 API 호환 번호 조회",
-        "description": "로그인 불필요. 앱 내부 api_compatibility_version이 minimum_compatibility_version보다 낮으면 업데이트 필요. 같은 값은 허용. 0이면 차단 비활성. 스토어 버전/빌드 번호와 무관.",
+        "description": "로그인 불필요. 앱 내부 api_compatibility_version이 minimum_compatibility_version보다 낮으면 업데이트 필요. 같은 값은 허용. 0이면 차단 비활성. 스토어 버전/빌드 번호와 무관. 정책은 src/config/appVersionPolicy.ts에서 관리하며 변경 후 서버를 재빌드·배포합니다. 환경변수로 덮어쓰지 않습니다.",
         "security": [],
         "parameters": [
           {
@@ -103,7 +103,7 @@
             }
           },
           "503": {
-            "description": "정책 설정 오류. 환경변수 값은 응답에 포함하지 않음",
+            "description": "소스 정책 설정 오류. 설정 원문은 응답에 포함하지 않음",
             "headers": {
               "Cache-Control": {
                 "description": "응답을 저장하지 않도록 no-store 지시자를 포함합니다.",

@@ -4,6 +4,16 @@
 
 ## 2026-11-08
 
+### [DONE] 앱 호환 정책을 소스 코드 정본으로 전환
+
+- 목적: 사용자 요청에 따라 환경변수 대신 Git으로 플랫폼별 정책을 관리한다.
+- 변경: typed source config에 최소값·스토어 URL·문구를 모으고 service/startup 검증·OpenAPI·회귀를 전환한다. 현재 로컬 요청값인 양 플랫폼 1을 유지한다.
+- 영향범위: 정책 조회와 설정 오류 로그. DB/기존 인증 계약 변경 없음. 실제 재배포는 수행하지 않는다.
+- 테스트: strict TypeScript build 및 정책 10개+기존 환경/Google/푸시 18개, 선택 회귀 28개 전부 통과. source 정본 불변성·DTO 분리, 과거 env override 무시, 0/null과 정수/URL/문구 경계, source 오류 503·configuration_field 안전 로그, 실제 시작 전 오류 거절, 생성 OpenAPI·무인증 HTTP·DB 비의존·2→0 복원 검증. git diff --check 통과. 전체 private main 회귀는 통합 작업 트리에서 별도로 확인한다.
+- 롤백: 소스 최소값을 0으로 낮춰 재빌드·재배포하고 endpoint를 유지한다.
+- 파일: src/config/appVersionPolicy.ts(플랫폼 타입·불변 정본, 외부 의존성 없음; 최소값 수정 후 build/정책 테스트), src/services/appVersionPolicyService.ts, src/index.ts, src/utils/logger.ts, src/openapi/appVersionPolicyOpenApi.json, test/appVersionPolicy.test.cjs, .env.example, _docs/{APP_VERSION_POLICY,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md.
+- 결과/다음: 기존 로컬 env의 임시 정책 키를 제거하고 기존 미커밋 작업을 보존하여 작업 트리에 반영한다. 재배포는 하지 않으며 기존 실행 서비스 0과 다음 코드 배포 시 1의 차이를 ADR-0041에 기록했다.
+
 ### [DONE] 전달된 앱 호환 정책 검토 및 develop 반영
 
 - 목적: 준비된 커밋 `90ece07`을 검토하고 중복 적용 없이 develop에 반영한다.

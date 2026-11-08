@@ -23,7 +23,7 @@ import { registerApiDocs } from "./openapi";
 import { appleService } from "./services/appleService";
 import { googleService } from "./services/googleService";
 import { profileImageJsonReplacer } from "./utils/profileImageLocation";
-import { validateAppVersionPolicyEnvironment } from "./services/appVersionPolicyService";
+import { validateAppVersionPolicyConfiguration } from "./services/appVersionPolicyService";
 
 const app = express();
 app.set("json replacer", profileImageJsonReplacer);
@@ -158,7 +158,7 @@ app.use(errorHandler);
 async function startServer(): Promise<void> {
   try {
     validateEnvironment();
-    validateAppVersionPolicyEnvironment();
+    validateAppVersionPolicyConfiguration();
     validateKakaoAuthEnvironment();
     validateProfileImageStorageEnvironment();
     validateProfileImageApiEnvironment();
