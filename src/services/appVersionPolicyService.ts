@@ -25,6 +25,7 @@ function isValidStoreUrl(value: string, platform: AppPlatform): boolean {
         /^\/(?:[a-z]{2}\/)?app\/(?:[^/]+\/)?id6831957246\/?$/.test(url.pathname);
     }
     return url.hostname === "play.google.com" && url.pathname === "/store/apps/details" &&
+      url.searchParams.getAll("id").length === 1 &&
       url.searchParams.get("id") === "com.hspark.shiftmate";
   } catch {
     return false;

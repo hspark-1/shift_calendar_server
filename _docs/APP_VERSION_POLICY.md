@@ -42,7 +42,7 @@ CupertinoApp.builder → AppUpdateGate (Navigator 전체를 감쌈)
   "data": {
     "schema_version": 1,
     "platform": "IOS",
-    "minimum_compatibility_version": 1,
+    "minimum_compatibility_version": 0,
     "update_url": "https://apps.apple.com/kr/app/id6831957246",
     "message": "안정적인 서비스 이용을 위해 최신 앱으로 업데이트해 주세요."
   }
@@ -50,7 +50,7 @@ CupertinoApp.builder → AppUpdateGate (Navigator 전체를 감쌈)
 ```
 
 - `schema_version=1`, 일치하는 플랫폼, 0~2147483647 정수와 최대 300자 메시지를 검증한다. 최소값이 양수면 스토어 주소가 필수다.
-- 스토어 주소는 HTTPS, credential/fragment/비표준 port 금지. iOS는 `apps.apple.com`의 확인된 ID `6831957246`, Android는 `play.google.com/store/apps/details?id=com.hspark.shiftmate`만 허용한다. App ID를 바꿀 때는 양쪽 검증 코드도 함께 변경한다.
+- 스토어 주소는 HTTPS, credential/fragment/비표준 port 금지. iOS는 `apps.apple.com`의 확인된 ID `6831957246`, Android는 `play.google.com/store/apps/details?id=com.hspark.shiftmate`만 허용하며 `id`가 중복되면 거절한다. App ID를 바꿀 때는 양쪽 검증 코드도 함께 변경한다.
 - 잘못된 query는 400 `VALIDATION_ERROR`, 잘못된 운영 설정은 안전한 503 `APP_VERSION_POLICY_UNAVAILABLE`이다. 서버는 no-store 응답·request ID·설정 이름만 담은 구조화 오류 로그를 사용하며 DB를 읽거나 쓰지 않는다.
 - 서버 구현은 기존 main 작업 보존을 위해 `develop` 기반 `codex/app-compatibility-policy` 분리 작업 트리에 준비했다. 실제 배포/운영 env 변경/DB 변경은 수행하지 않았다.
 
@@ -104,3 +104,15 @@ CupertinoApp.builder → AppUpdateGate (Navigator 전체를 감쌈)
 | `test/appVersionPolicy.test.cjs` | Node test와 실제 로컬 Express HTTP로 공개 접근·query·설정/URL 경계·오류 비노출 검사. 예: 빌드 후 `node --test test/appVersionPolicy.test.cjs`. |
 
 서버 요청은 Router → query validateRequestMiddleware → Controller → env Service 순서다. query 오류는 400 VALIDATION_ERROR, 서비스 설정 오류는 503 APP_VERSION_POLICY_UNAVAILABLE이며 기존 logError가 변수 이름·코드·request ID만 기록한다. API 시작 시 설정을 검증한다. strict TypeScript build와 신규 5개+기존 선택 회귀를 합친 23개 테스트 통과. 전체 npm test 및 실제 운영 배포·스토어 E2E는 수행하지 않았다.
+
+## 서버 전달 검토와 반영 검증 (2026-11-08)
+
+- 준비된 커밋 `90ece07`을 기준으로 검토한다. develop에 해당 커밋이 포함되는 fast-forward 방식으로 반영하여 패치를 중복 적용하지 않는다.
+- Android의 중복 package `id`를 거절하고, OpenAPI에 400/503 JSON 오류 DTO와 `Cache-Control`/`X-Request-ID` 헤더를 명시했다. 유효한 기존 URL과 성공 DTO는 유지한다.
+- 실제 `src/index.ts` 앱 HTTP 테스트는 인증 토큰 없이 양 플랫폼 기본값 0, JSON/no-store/request ID, 최소값 2→0 복원 및 배열·객체 query 거절을 확인한다. DB query 호출은 테스트에서 실패하도록 대체하여 DB 비의존을 확인한다.
+- 별도 API 자식 프로세스 테스트는 잘못된 정책을 DB 연결·listen 전에 종료하고 오류 로그에 설정값을 노출하지 않는지 검증한다. 생성된 Swagger JSON의 공개 접근·오류 schema·헤더 계약도 확인한다.
+- 검증 결과: strict TypeScript build 및 정책 9개+기존 선택 회귀 18개, 총 27개 통과. 전체 테스트와 배포 E2E는 별도다.
+- 검증 명령: `npm run build` 후 `node --test test/appVersionPolicy.test.cjs test/environmentValidation.test.cjs test/googleAuth.test.cjs test/pushNotification.test.cjs`.
+- 초기 배포값은 iOS/Android 모두 0이다. 실제 환경값과 공개 API 수용 결과는 비공개 배포 문서에서 별도 기록한다. 전체 `npm test`, 실기기 로그인·캘린더·친구·그룹 회귀 및 Store 이동/복귀 검증을 이 선택 테스트의 결과로 간주하지 않는다.
+- 배포 수용 기준: 무인증 IOS/ANDROID 200 + schema_version=1 + 최소값 0, 잘못된 platform 400 VALIDATION_ERROR, JSON/no-store/request ID. Stage에서만 최소값 2로 앱 호환 번호 1의 차단·Store 이동·복귀·재확인을 확인하고 0 복원 뒤 해제한다. 운영에서 차단 테스트를 하지 않는다.
+- 긴급 해제는 최소값 0을 적용한 새 API 프로세스/컨테이너의 200 응답을 확인한 뒤 앱 재확인/복귀로 해제한다. **endpoint 제거만으로 롤백하지 않는다.** 차단 캐시는 404/503에도 유지될 수 있다.

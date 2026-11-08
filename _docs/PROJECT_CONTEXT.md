@@ -2,7 +2,7 @@
 
 ## 앱 API 호환 정책 (2026-11-08)
 
-`GET /api/v1/app/version-policy?platform=IOS|ANDROID`를 로그인 없이 제공한다. 앱 내부 호환 번호와 서버 `APP_UPDATE_{IOS|ANDROID}_MIN_COMPATIBILITY_VERSION` 정수를 비교하며 스토어 버전/빌드 번호와 독립적이다. 기본 0은 차단 비활성, 같은 최소값은 허용한다. Router(query validation) → Controller(no-store/안전 오류) → Service(env 검증) 흐름이며 DB 변경은 없다. 신규 파일 역할·의존성·사용 예·환경표·배포/롤백은 [APP_VERSION_POLICY.md](APP_VERSION_POLICY.md)를 참조한다. 앱 공개 뒤 최소값을 인상하고, 롤백은 endpoint 제거보다 먼저 최소값 0 응답을 제공한다. 실제 운영 배포는 미수행이다.
+`GET /api/v1/app/version-policy?platform=IOS|ANDROID`를 로그인 없이 제공한다. 앱 내부 호환 번호와 서버 `APP_UPDATE_{IOS|ANDROID}_MIN_COMPATIBILITY_VERSION` 정수를 비교하며 스토어 버전/빌드 번호와 독립적이다. 기본 0은 차단 비활성, 같은 최소값은 허용한다. Router(query validation) → Controller(no-store/안전 오류) → Service(env 검증) 흐름이며 DB 변경은 없다. 신규 파일 역할·의존성·사용 예·환경표·배포/롤백은 [APP_VERSION_POLICY.md](APP_VERSION_POLICY.md)를 참조한다. 앱 공개 뒤 최소값을 인상하고, 롤백은 endpoint 제거보다 먼저 최소값 0 응답을 제공한다. 실제 앱 v1 HTTP·DB 비의존·시작 전 오류 거절·생성 OpenAPI를 포함한 선택 회귀 27개와 strict build를 확인했다. Android URL의 package id 중복은 거절한다. 실제 운영 배포는 미수행이다.
 
 ## 1. 프로젝트 목적 & 사용자 시나리오
 

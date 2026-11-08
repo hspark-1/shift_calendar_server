@@ -4,13 +4,23 @@
 
 ## 2026-11-08
 
+### [DONE] 전달된 앱 호환 정책 검토 및 develop 반영
+
+- 목적: 준비된 커밋 `90ece07`을 검토하고 중복 적용 없이 develop에 반영한다.
+- 변경: 준비 커밋을 중복 적용 없이 develop에 fast-forward 반영한다. Android 중복 package id 거절, OpenAPI 400/503 오류 DTO·헤더, 실제 앱 라우팅/시작 전 검증을 보완했다.
+- 영향범위: API 호환 정책과 관련 문서. 기존 main 미커밋 작업 보존, DB 변경 없음.
+- 테스트: npm ci --ignore-scripts 및 strict TypeScript build 통과. 전달된 선택 회귀 4파일의 27개 테스트 전부 통과(신규 정책 9개+기존 18개). 실제 앱 HTTP 무인증/양 플랫폼/JSON/no-store/request ID, DB 비의존, 2→0 응답 복원, query 배열·객체 거절, 시작 전 설정 오류 종료·안전 로그, 생성 OpenAPI 검증. 로컬 HTTP는 sandbox listen EPERM을 확인한 뒤 포트 허용 실행으로 통과. git diff --check 통과. 전체 npm test·실기기·실제 배포 검증은 미수행.
+- 롤백: 최소값 0 정책의 정상 응답을 먼저 확보하고 endpoint를 유지한다.
+- 파일: src/services/appVersionPolicyService.ts, src/openapi/appVersionPolicyOpenApi.json, test/appVersionPolicy.test.cjs, _docs/{APP_VERSION_POLICY,DECISIONS,PROJECT_CONTEXT,WORKLOG}.md.
+- 결과/다음: 기본 iOS/Android 최소값 0 유지. 공개 develop 반영 후 배포용 private main 기반 별도 작업 트리에 전달한다. 실제 배포 env/DB 변경 및 Store 이동·복귀·차단 해제 E2E는 완료로 기록하지 않는다.
+
 ### [DONE] 앱 API 호환 버전 정책 조회 추가
 
 - 목적: 스토어 버전과 독립적인 앱 내부 호환 번호의 최소 지원값을 운영한다.
 - 변경: develop 기반 codex/app-compatibility-policy 작업 트리에 공개 정책 API·환경 설정·OpenAPI·테스트를 추가한다.
 - 영향범위: 신규 조회 API와 선택 환경변수. DB 변경·기존 API 인가 변경·실제 배포 없음.
 - 테스트: strict TypeScript build 통과. 신규 설정/실제 HTTP 5개와 기존 환경·Google·푸시 선택 회귀를 합쳐 23개 통과. query 배열/누락/잘못된 플랫폼, no-store·무인증 조회, 범위/URL 검증·오류 원문 비노출 확인. git diff --check 통과. 전체 npm test·운영 배포·실제 스토어 E2E 미수행.
-- 롤백: 플랫폼 최소 호환 번호를 0으로 낮추고 API 프로세스를 재생성하거나 이번 추가 코드를 제거한다.
+- 롤백: 플랫폼 최소 호환 번호를 0으로 낮추고 API 프로세스를 재생성해 정상 200 응답으로 기존 차단을 해제한다. endpoint는 유지하며 코드 제거부터 진행하지 않는다.
 - 결과: 플랫폼별 최소 정수·스토어 URL·메시지 환경 설정, 공개 API·시작 검증·OpenAPI·문서/ADR-0040 추가. 초기 기본값 0으로 차단 비활성. 기존 main의 미커밋 작업은 보존했다.
 - 다음: develop 기반 작업을 검토/병합하여 API 배포 후 앱 스토어 공개를 확인한다. 대응 앱 공개 전 최소값을 인상하지 않으며 코드 롤백 전에는 0 정책을 먼저 응답시킨다.
 
