@@ -8,6 +8,7 @@ CREATE TABLE users (
   email text NOT NULL UNIQUE,
   name text NOT NULL,
   profile_image_url text,
+  profile_image_key text,
   timezone text,
   kakao_id text,
   apple_id text,

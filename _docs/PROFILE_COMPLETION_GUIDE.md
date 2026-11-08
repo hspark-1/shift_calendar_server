@@ -102,7 +102,7 @@ AWS_SECRET_ACCESS_KEY=<STAGE_PROFILE_IMAGE_IAM_SECRET_ACCESS_KEY>
 
 Access Key 원문은 WORKLOG, shell history, Git, 이슈, 로그에 남기지 않습니다. 키가 노출되면 값을 재사용하지 않고 IAM에서 비활성화·삭제한 뒤 새 키로 교체합니다.
 
-> 현재 코드 주의: `src/services/profileImageStorageService.ts`는 아직 `PutObject`/`DeleteObject`와 `PROFILE_IMAGE_PUBLIC_BASE_URL` 기반 공개 URL 생성만 구현되어 있습니다. 비공개 S3 `GetObject`를 스트리밍하는 인증 API와 DB object key 정본 전환은 아직 구현되지 않았습니다. 따라서 임의의 공개 URL을 넣어 우회하지 말고, 비공개 조회 구현을 배포하기 전까지 Stage 이미지 E2E를 완료된 것으로 판단하지 않습니다.
+> 2026-11-08 구현: 관리 이미지는 서버 인증 후 GetObject로 스트리밍합니다. DB key migration·API origin 설정·기존 URL 전환과 Flutter Authorization 헤더 적용이 배포 선행조건입니다. 실제 Stage 적용은 아래 절차로 검증합니다.
 
 ### 현재 구현 환경변수
 
@@ -114,7 +114,9 @@ PROFILE_IMAGE_STORAGE_REGION=<REGION_OR_AUTO>
 PROFILE_IMAGE_STORAGE_PREFIX=<local|test|stage|center>
 PROFILE_IMAGE_STORAGE_ENDPOINT=<S3_COMPATIBLE_ENDPOINT_OR_EMPTY>
 PROFILE_IMAGE_STORAGE_FORCE_PATH_STYLE=false
-PROFILE_IMAGE_PUBLIC_BASE_URL=https://<ENV_CDN_DOMAIN>
+PROFILE_IMAGE_API_BASE_URL=https://<ENV_API_DOMAIN>
+# 기존 S3/CDN URL 인식용 이전 origin. 앱 반환 주소가 아님.
+PROFILE_IMAGE_PUBLIC_BASE_URL=https://<LEGACY_STORAGE_OR_CDN_DOMAIN>
 ```
 
 AWS workload role을 사용할 수 없고 S3 호환 공급자가 static credential을 요구할 때만 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 secret으로 주입합니다. bucket은 API에 `PutObject`, 실패 정리에 `DeleteObject` 권한이 필요합니다. CORS 공개 쓰기는 허용하지 않고 CDN/origin은 HTTPS GET만 제공합니다.
@@ -155,3 +157,57 @@ npm run test:profile-integration
 - `src/openapi/profileAuthOpenApi.json`: 공개 API/오류 정본
 - `migrations/*profile_completion*`: 범용·Stage·Center apply와 제한적 rollback
 - `test/profileCompletion*.test.cjs`: 정적/단위와 격리 PostgreSQL HTTP·migration 검증
+
+
+## 비공개 이미지 조회 및 기존 데이터 전환 (2026-11-08)
+
+**Behavior change**: 관리 프로필 이미지의 `profile_image_url`은 서버 API 주소로 바뀐다. S3 bucket은 비공개를 유지한다. API가 인증한 AWS SDK GetObject 응답을 직접 스트리밍하며 S3 URL이나 presigned URL로 리다이렉트하지 않는다. 외부 OAuth 사진은 기존 URL을 유지하며 서버가 임의 외부 URL을 fetch하지 않는다.
+
+### 조회 계약과 권한
+
+`GET /api/v1/profile-images/{user_id}`에 `Authorization: Bearer <access_token>`이 필요하다. 기존 인증 사용자 검색이 친구가 아닌 계정의 기본 아바타도 제공하므로 활성 로그인 사용자에게 활성 계정의 기본 아바타 조회를 허용한다. `can_view`는 캘린더 공개 권한이며 이미지 조회에 재사용하지 않는다. 미인증 401, 잘못된 UUID 400, 탈퇴 중 요청자 409, 대상 미존재/탈퇴 중/관리 이미지 없음/객체 없음 404, 저장소 권한/연결/유효하지 않은 이미지 응답 503이다. DB 존재 여부를 외부 S3 에러 원문으로 구분하지 않는다.
+
+응답은 JPEG/PNG/WebP 바이트, `Cache-Control: private, no-store`, `Vary: Authorization`, `nosniff`이다. 크기 5MB, 핸들러 시작 기준 S3 요청·전달 10초 abort 제한과 클라이언트 연결 종료 시 abort를 적용한다. 스트리밍 시작 후 오류는 연결 종료로 처리한다. 원본의 공개 캐시 헤더·Location·S3 메타데이터는 전달하지 않는다. 새 업로드도 `private, no-store`로 저장한다. 과거 공개 캐시 사본의 회수는 별도 운영 조치다.
+
+객체 key는 `users.profile_image_key`가 정본이며 응답에서 숨긴다. 현재 환경 prefix·소유자 UUID·파일 UUID·확장자를 검증한다. DB CHECK는 소유자/형식을, 읽기 코드는 실제 실행 환경을 검사한다. key 없는 기존 값은 설정된 이전 base URL 또는 현재 bucket의 regional S3 origin과 정확히 일치하는 경로만 호환 조회한다. URL의 query·다른 환경·타인 namespace·임의 경로는 거절한다.
+
+JSON 공통 직렬화는 본인 OAuth/프로필뿐 아니라 raw SQL 친구/그룹과 과거 알림 payload의 `profile_image_url`에도 같은 변환을 적용한다. 식별된 잘못된 관리 원본/S3 URL은 null로 반환한다. 알 수 없는 외부 OAuth URL은 기존대로 유지한다. 사용자가 일반 프로필 수정에 임의 URL을 넣는 경로는 차단하며 기존 URL 유지 또는 null/빈 문자열 제거만 허용한다. `/profile/complete` multipart로 이미지를 교체할 때 최초 완료 시각은 유지된다.
+
+### 적용 순서
+
+1. 대상 DB와 복원 가능한 백업을 확인한다. 초기화용 `final_schema.sql`을 운영에서 실행하지 않는다.
+2. pgAdmin에서 `migrations/add_private_profile_images.sql` 전체를 실행한다. 기존 컬럼·URL은 보존하고 nullable key와 검증 제약을 추가한다. idempotent이며 5초 lock timeout의 단일 transaction이다. 새로운 모델을 읽는 API/worker보다 migration을 먼저 적용한다.
+3. API 환경에 `PROFILE_IMAGE_API_BASE_URL=https://<실제_API_도메인>`을 넣는다. 경로 없는 서버 HTTPS origin이며 S3 주소가 아니다. production API 시작 시 필수다. 미설정 개발 환경에서는 상대 경로를 반환하므로 앱 API origin에 resolve한다. worker는 이 값을 요구하지 않는다. `PROFILE_IMAGE_PUBLIC_BASE_URL`은 이전 S3/CDN base URL을 인식하는 선택 설정이다. 기존에 저장된 값과 일치하게 유지하며 API 도메인으로 덮어쓰지 않는다.
+4. 같은 새 이미지의 제한된 운영 실행 환경에서 아래 명령으로 dry-run 후 적용한다. DB/S3 자격증명이나 사용자 URL을 출력하지 않는다. 이 명령은 S3에 접근하지 않고 DB만 전환한다.
+
+```bash
+node dist/scripts/profileImageBackfill.js --dry-run
+node dist/scripts/profileImageBackfill.js --apply
+```
+
+`eligible`은 검증된 대상, `converted`는 경쟁 없이 갱신된 행, `external_unchanged`는 외부 사진/기타 유지 행, `invalid_managed`는 자동 전환 거절 행이다. invalid가 있으면 종료 코드 2로 끝나며 원본 설정·소유자·환경을 운영 DB에서 확인한다. apply는 행별 조건부 UPDATE로 처리하여 중간 실패 후 재실행 가능하고 동시 이미지 교체를 덮어쓰지 않는다. 검증된 URL만 key+서버 주소로 바꾸며 환경 외 이미지로 강제 전환하지 않는다.
+
+5. 새 API와 worker를 배포한다. backfill 이후 구 API가 원본 URL을 다시 저장할 수 있으므로 업로드를 drain하고 전환하거나 배포 직후 backfill을 재실행한다. 새 서버는 key 없는 검증된 기존 URL도 읽을 수 있다. 신규 업로드·기존 이미지·친구/그룹/알림·탈퇴 사용자 접근을 Stage에서 확인한다. 버킷에는 환경별 GetObject/PutObject/DeleteObject 권한만 필요한 기존 계약을 유지한다. 탈퇴 worker의 목록/버전 삭제 권한은 별도다.
+6. Flutter에 아래 인증 이미지 요청을 적용하고 로그인/로그아웃 시 이미지 메모리/디스크 캐시를 사용자별로 분리하거나 비운다. 이미지 교체 후에도 같은 API URL을 사용하므로 해당 NetworkImage provider를 evict하고 다시 표시한다. URL 문자열만 Image.network에 넘기면 401이므로 업로드 성공만으로 E2E 완료로 기록하지 않는다.
+
+```dart
+final image_uri = api_origin.resolve(profile_image_url);
+// 서버 API 이미지에만 앱 토큰을 보낸다. 외부 OAuth 호스트에는 보내지 않는다.
+final is_managed_image = image_uri.origin == api_origin.origin &&
+    image_uri.path.startsWith('/api/v1/profile-images/');
+Image.network(
+  image_uri.toString(),
+  headers: is_managed_image
+      ? {'Authorization': 'Bearer $access_token'}
+      : null,
+  errorBuilder: (_, __, ___) => const Icon(Icons.person),
+);
+```
+
+이미지 요청의 401은 기존 토큰 갱신 정책을 통해 재시도하며 404/503은 기본 아바타로 표시한다. 외부 URL로 토큰을 전송하지 않는다. Flutter Web은 Authorization preflight를 서버 CORS 허용 origin과 함께 확인한다. 사용하는 renderer가 인증 헤더 이미지를 지원하지 않으면 Dio로 인증된 bytes를 받아 Image.memory로 표시한다. 앱에 캐시된 예전 S3 URL은 프로필/친구/그룹 응답을 다시 받아 갱신한다.
+
+### 롤백과 검증
+
+코드 롤백 시 nullable key 컬럼은 유지한다. 구 코드는 서버 이미지 URL을 반환하지만 조회 route가 없으므로 단순 코드 롤백은 이미지 조회 복구를 보장하지 않는다. 필요하면 검증된 key와 원래 base 설정에서 원본 URL을 재생성하되 비공개 직접 읽기 한계가 되돌아온다. 임의 URL을 복원하거나 bucket을 공개로 바꾸지 않는다. 정상 복구는 수정된 API로 전진 배포한다. additive 컬럼 제거는 key 이관/백업과 새 코드 사용 중단을 확인한 별도 작업이며 이번 적용에서는 수행하지 않는다.
+
+로컬: `npm run test:private-profile-integration`은 고정된 격리 PostgreSQL schema를 초기화한다. 로컬 S3 호환 HTTP 서버와 실제 AWS SDK로 업로드·조회 바이트, Authorization 서명, 미인증/탈퇴/환경·소유 경계, AccessDenied/NoSuchKey, dry-run·멱등 전환을 검증한다. 실제 AWS IAM·CDN·Stage 도메인/앱 E2E를 대신하지 않는다.

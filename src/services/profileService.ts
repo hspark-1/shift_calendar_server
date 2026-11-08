@@ -3,6 +3,7 @@ import { sequelize } from "../config/database";
 import { User } from "../models";
 import { isValidIanaTimezone } from "./groupService";
 import { normalizePhoneNumber } from "../utils/phone";
+import { isOwnedProfileImageKey, legacyProfileImageKey, profileImageApiUrl } from "../utils/profileImageLocation";
 
 export const job_types = ["NURSE", "DOCTOR", "EMT", "OTHER"] as const;
 export type JobType = (typeof job_types)[number];
@@ -115,7 +116,7 @@ export interface CompleteProfileInput {
   phone: unknown;
   job_type?: unknown;
   workplace?: unknown;
-  profile_image_url?: string;
+  profile_image_key?: string;
 }
 
 export async function completeProfile(
@@ -145,8 +146,12 @@ export async function completeProfile(
       user.phone = normalized.phone;
       user.job_type = normalized.job_type;
       user.workplace = normalized.workplace;
-      if (input.profile_image_url !== undefined) {
-        user.profile_image_url = input.profile_image_url;
+      if (input.profile_image_key !== undefined) {
+        if (!isOwnedProfileImageKey(input.profile_image_key, user_id)) {
+          throw new ProfileError(400, "INVALID_PROFILE_IMAGE", "이미지 저장 경로가 올바르지 않습니다.");
+        }
+        user.profile_image_key = input.profile_image_key;
+        user.profile_image_url = profileImageApiUrl(user_id);
       }
       if (user.profile_completed_at == null) {
         user.profile_completed_at = new Date();
@@ -203,7 +208,17 @@ export async function updateProfileFields(
         user.workplace = normalizeOptionalText(input.workplace, 100);
       }
       if (input.profile_image_url !== undefined) {
-        user.profile_image_url = normalizeOptionalText(input.profile_image_url, 2048);
+        const image_url = normalizeOptionalText(input.profile_image_url, 2048);
+        const has_managed_image = Boolean(user.profile_image_key ||
+          (user.profile_image_url && legacyProfileImageKey(user.profile_image_url, user_id)));
+        const is_current_api_url = has_managed_image && image_url === profileImageApiUrl(user_id);
+        if (image_url !== null && image_url !== user.profile_image_url && !is_current_api_url) {
+          throw new ProfileError(400, "INVALID_PROFILE_IMAGE", "프로필 이미지는 파일 업로드로 변경해주세요.");
+        }
+        if (image_url === null) {
+          user.profile_image_url = null;
+          user.profile_image_key = null;
+        }
       }
 
       await user.save({ transaction });

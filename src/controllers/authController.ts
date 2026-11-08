@@ -612,8 +612,12 @@ export async function completeProfile(
     }
 
     const user = await completeProfileService(req.user.user_id, {
-      ...req.body,
-      ...(stored_image ? { profile_image_url: stored_image.public_url } : {}),
+      name: req.body.name,
+      timezone: req.body.timezone,
+      phone: req.body.phone,
+      job_type: req.body.job_type,
+      workplace: req.body.workplace,
+      ...(stored_image ? { profile_image_key: stored_image.key } : {}),
     });
     res.status(200).json({
       success: true,

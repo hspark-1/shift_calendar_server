@@ -6,6 +6,71 @@
     }
   ],
   "paths": {
+    "/profile-images/{user_id}": {
+      "get": {
+        "tags": [
+          "Profile"
+        ],
+        "summary": "인증된 비공개 프로필 이미지 조회",
+        "description": "활성 로그인 사용자에게 활성 계정의 기본 아바타를 제공합니다. 서버가 S3를 읽어 바이트를 직접 전달하며 원본 URL, key, 서명 URL로 redirect하지 않습니다. private, no-store 및 Vary: Authorization 적용. 외부 OAuth 사진은 이 경로에서 fetch하지 않습니다.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "이미지 바이트",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ProfileBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProfileUnauthorized"
+          },
+          "404": {
+            "description": "활성 계정·관리 이미지·객체 없음 (PROFILE_IMAGE_NOT_FOUND)"
+          },
+          "409": {
+            "description": "요청자 회원 탈퇴 진행 중"
+          },
+          "503": {
+            "$ref": "#/components/responses/ProfileStorageUnavailable"
+          }
+        }
+      }
+    },
     "/auth/profile/complete": {
       "post": {
         "tags": ["Profile"],
@@ -75,7 +140,7 @@
       "post": {
         "tags": ["Profile"],
         "summary": "일반 프로필 수정",
-        "description": "생략한 필드는 유지합니다. job_type, workplace, profile_image_url의 명시적 null 또는 빈 문자열은 null로 저장합니다. 이 API는 profile_completed_at을 생성하지 않습니다.",
+        "description": "생략한 필드는 유지합니다. profile_image_url은 현재 값 유지 또는 null/빈 문자열로 제거만 허용합니다. 파일 교체는 /auth/profile/complete의 multipart로 수행하며 최초 완료 시각은 보존합니다.",
         "security": [{ "bearerAuth": [] }],
         "requestBody": {
           "required": true,
@@ -131,7 +196,7 @@
             "nullable": true
           },
           "workplace": { "type": "string", "maxLength": 100, "nullable": true },
-          "profile_image_url": { "type": "string", "format": "uri", "maxLength": 2048, "nullable": true }
+          "profile_image_url": { "type": "string", "format": "uri", "maxLength": 2048, "nullable": true, "description": "현재 값 유지 또는 null/빈 문자열로 제거. 다른 URL로 교체는 INVALID_PROFILE_IMAGE로 거절합니다." }
         },
         "additionalProperties": false
       },
@@ -150,7 +215,7 @@
             "nullable": true
           },
           "workplace": { "type": "string", "nullable": true },
-          "profile_image_url": { "type": "string", "format": "uri", "nullable": true },
+          "profile_image_url": { "type": "string", "format": "uri", "nullable": true, "description": "관리 이미지는 서버의 /api/v1/profile-images/{user_id} 주소입니다. Authorization: Bearer 헤더가 필요합니다. 외부 OAuth 이미지 주소는 유지합니다." },
           "requires_profile_setup": { "type": "boolean" }
         },
         "additionalProperties": true
@@ -185,7 +250,8 @@
                   "UNAUTHORIZED",
                   "PHONE_ALREADY_EXISTS",
                   "AUTH_RATE_LIMIT_EXCEEDED",
-                  "PROFILE_IMAGE_STORAGE_UNAVAILABLE"
+                  "PROFILE_IMAGE_STORAGE_UNAVAILABLE",
+                  "PROFILE_IMAGE_NOT_FOUND"
                 ]
               },
               "message": { "type": "string" }
@@ -217,7 +283,7 @@
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProfileErrorResponse" } } }
       },
       "ProfileStorageUnavailable": {
-        "description": "object storage 업로드 실패",
+        "description": "object storage 업로드 또는 조회 실패. 원본 AccessDenied/응답 본문은 노출하지 않습니다.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProfileErrorResponse" } } }
       }
     }

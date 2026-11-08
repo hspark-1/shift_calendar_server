@@ -8,6 +8,7 @@ process.env.PROFILE_IMAGE_STORAGE_BUCKET = "profile-test";
 process.env.PROFILE_IMAGE_STORAGE_REGION = "ap-northeast-2";
 process.env.PROFILE_IMAGE_STORAGE_PREFIX = "test";
 process.env.PROFILE_IMAGE_PUBLIC_BASE_URL = "https://cdn.example.com";
+process.env.PROFILE_IMAGE_API_BASE_URL = "https://api.example.test";
 
 const {
   detectProfileImage,
@@ -57,15 +58,15 @@ test("S3 호환 저장소는 UUID key·안정 URL을 만들고 같은 key를 삭
     stored.key,
     /^test\/profiles\/00000000-0000-4000-8000-000000000001\/[0-9a-f-]{36}[.]png$/,
   );
-  assert.equal(stored.public_url, `https://cdn.example.com/${stored.key}`);
+  assert.equal(stored.public_url, "https://api.example.test/api/v1/profile-images/00000000-0000-4000-8000-000000000001");
   assert.equal(commands[0].input.ContentType, "image/png");
-  assert.equal(commands[0].input.CacheControl, "public, max-age=31536000, immutable");
+  assert.equal(commands[0].input.CacheControl, "private, no-store");
   await deleteProfileImage(stored.key);
   assert.equal(commands[1].input.Key, stored.key);
   setProfileImageStorageClientForTest(null);
 });
 
-test("profile storage 환경 검증은 query/hash 없는 HTTPS public URL을 강제한다", () => {
+test("profile storage 환경 검증은 이전 base URL이 있으면 query/hash 없는 HTTPS를 강제한다", () => {
   assert.doesNotThrow(() => validateProfileImageStorageEnvironment());
   const original_prefix = process.env.PROFILE_IMAGE_STORAGE_PREFIX;
   process.env.PROFILE_IMAGE_STORAGE_PREFIX = "stage/profiles";

@@ -12,6 +12,7 @@ import {
   validateEnvironment,
   validateKakaoAuthEnvironment,
   validateProfileImageStorageEnvironment,
+  validateProfileImageApiEnvironment,
 } from "./config/environment";
 import { requestContextMiddleware } from "./middlewares/requestContext";
 import routes from "./routes";
@@ -21,8 +22,10 @@ import { disconnectRedis } from "./config/redis";
 import { registerApiDocs } from "./openapi";
 import { appleService } from "./services/appleService";
 import { googleService } from "./services/googleService";
+import { profileImageJsonReplacer } from "./utils/profileImageLocation";
 
 const app = express();
+app.set("json replacer", profileImageJsonReplacer);
 const port = getPositiveIntegerEnvironmentVariable("PORT", 3000);
 const node_env = process.env.NODE_ENV || "development";
 const instance_name = process.env.INSTANCE_NAME ?? "unknown";
@@ -156,6 +159,7 @@ async function startServer(): Promise<void> {
     validateEnvironment();
     validateKakaoAuthEnvironment();
     validateProfileImageStorageEnvironment();
+    validateProfileImageApiEnvironment();
     // Apple private key는 API 프로세스에만 mount합니다. 공용 환경변수를 읽는
     // cache/push worker가 API 전용 secret을 요구하지 않도록 여기서 분리 검증합니다.
     validateAppleAuthEnvironment();

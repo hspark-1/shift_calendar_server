@@ -4,6 +4,16 @@
 
 ## 2026-11-08
 
+### [DONE] 비공개 프로필 이미지 서버 조회 구현
+
+- **목적**: 앱의 S3 직접 조회 AccessDenied를 해결하고 저장소 주소를 API 응답에서 제거한다.
+- **변경**: nullable 객체 key·소유자 CHECK migration/초기 schema, 인증된 GetObject 스트리밍 API, ORM/raw SQL/알림 공통 이미지 URL 직렬화와 key 비노출, 검증된 기존 URL dry-run/멱등 전환 CLI, 임의 URL 교체 차단과 기존 값 유지/제거, API origin 환경 검증, OpenAPI·Flutter 토큰/캐시·배포 문서 및 회귀 테스트를 구현했다. 기존 작업은 `1b6d990`으로 origin/develop push 완료 후 본 구현을 진행했다.
+- **영향범위**: 프로필 이미지 업로드/조회와 본인·친구·그룹·알림의 이미지 URL 응답. 외부 OAuth 이미지 URL은 유지한다. 이미지 조회는 기존 사용자 검색에서 제공하는 기본 아바타와 같이 활성 로그인 사용자에게 허용하며 캘린더 ACL과 분리한다.
+- **테스트**: strict TypeScript build, 신규 URL/JSON/환경 단위 3개 + 기존 탈퇴/Kakao/환경 20개 + 기존 프로필 관련 선택 5개 통과. PostgreSQL 16/로컬 S3 호환 HTTP/실제 AWS SDK 통합 6개 통과(업로드→DB→동일 bytes 조회, 인증/탈퇴/UUID/환경/소유 경계, AccessDenied/NoSuchKey 안전 응답, MIME/5MB 거절, 기존 URL 호환·dry-run·멱등 전환·URL 제거). migration 2회 적용 확인. 전체 npm test는 67 pass/18 fail/11 skip이며 변경 전 `1b6d990`의 임시 archive를 별도 build/test해 동일한 실패 18개(누락된 비공개 배포/프로필·Apple migration 및 기존 문서 기준)를 확인했다. 신규 실패 없음. JSON parse·diff 검사 통과. 실제 AWS IAM/Stage/Flutter E2E 미수행.
+- **롤백**: 서버 코드 복구 시 additive key 컬럼 유지. 기존 원본 URL 복원은 검증된 key와 원래 저장소 설정으로만 수행. 삭제된 객체는 복구되지 않는다.
+- **파일**: `src/{controllers/profileImageController.ts,routes/profileImageRoutes.ts,scripts/profileImageBackfill.ts,utils/profileImageLocation.ts}`, User/환경/프로필 storage·service·controller/라우팅/직렬화/OpenAPI, `migrations/{add_private_profile_images,final_schema}.sql`, 관련 테스트/fixture, `.env.example`, `.gitignore`, `package.json`, `_docs/{PROFILE_COMPLETION_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`.
+- **다음**: 별도 구현 커밋을 develop에 push. Stage는 key migration→실제 API origin 설정→검증된 backfill→새 서버 배포와 Flutter Bearer/이미지 캐시 연동이 필요하며 실제 운영 적용은 수행하지 않았다.
+
 ### [DONE] Stage 프로필 이미지 AccessDenied 원인 조사
 
 - **목적**: 업로드 후 앱 이미지 조회 거부 원인을 확인한다.

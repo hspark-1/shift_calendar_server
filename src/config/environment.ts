@@ -212,21 +212,12 @@ export function validateProfileImageStorageEnvironment(): void {
       "PROFILE_IMAGE_STORAGE_PREFIX는 local, test, stage, center 중 하나여야 합니다.",
     );
   }
-  const public_base_url = getRequiredEnvironmentVariable(
-    "PROFILE_IMAGE_PUBLIC_BASE_URL",
-  );
-  let parsed_public_base_url: URL;
-  try {
-    parsed_public_base_url = new URL(public_base_url);
-  } catch {
-    throw new Error("PROFILE_IMAGE_PUBLIC_BASE_URL은 유효한 HTTPS URL이어야 합니다.");
-  }
-  if (
-    parsed_public_base_url.protocol !== "https:" ||
-    parsed_public_base_url.search !== "" ||
-    parsed_public_base_url.hash !== ""
-  ) {
-    throw new Error("PROFILE_IMAGE_PUBLIC_BASE_URL은 query/hash 없는 HTTPS URL이어야 합니다.");
+  const legacy_base_url = process.env.PROFILE_IMAGE_PUBLIC_BASE_URL?.trim();
+  if (legacy_base_url) {
+    const parsed_url = new URL(legacy_base_url);
+    if (parsed_url.protocol !== "https:" || parsed_url.search || parsed_url.hash || parsed_url.username || parsed_url.password) {
+      throw new Error("PROFILE_IMAGE_PUBLIC_BASE_URL은 query/hash/credential 없는 HTTPS URL이어야 합니다.");
+    }
   }
 
   const endpoint = process.env.PROFILE_IMAGE_STORAGE_ENDPOINT?.trim();
@@ -248,6 +239,16 @@ export function validateProfileImageStorageEnvironment(): void {
     );
   }
   getBooleanEnvironmentVariable("PROFILE_IMAGE_STORAGE_FORCE_PATH_STYLE", false);
+}
+
+export function validateProfileImageApiEnvironment(): void {
+  const api_base_url = process.env.PROFILE_IMAGE_API_BASE_URL?.trim();
+  if (!api_base_url && process.env.NODE_ENV !== "production") return;
+  if (!api_base_url) throw new EnvironmentValidationError("PROFILE_IMAGE_API_BASE_URL", "API의 공개 HTTPS origin이 필요합니다.");
+  const parsed_url = new URL(api_base_url);
+  if (parsed_url.protocol !== "https:" || parsed_url.pathname !== "/" || parsed_url.search || parsed_url.hash || parsed_url.username || parsed_url.password) {
+    throw new Error("PROFILE_IMAGE_API_BASE_URL은 경로/query/hash/credential 없는 HTTPS origin이어야 합니다.");
+  }
 }
 
 export function validateEnvironment(): void {

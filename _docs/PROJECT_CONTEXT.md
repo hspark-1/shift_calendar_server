@@ -280,10 +280,21 @@ test/
 
 - **`src/services/profileService.ts` 역할**: 이름·IANA timezone·전화번호·직종·소속을 정규화하고 가입 완료 또는 일반 편집을 row lock과 단일 transaction으로 처리하며 전화번호 unique 경쟁을 409로 매핑
 - **`src/middlewares/profileImageUpload.ts` 역할**: multipart 메모리 parser에서 파일 1개·5MB를 제한하고 JPEG/PNG/WebP MIME과 magic/컨테이너 구조 일치를 검증
-- **`src/services/profileImageStorageService.ts` 역할**: 원본 파일명 대신 `<storage_prefix>/profiles/{user_id}/{uuid}.{ext}` key로 단일 S3 호환 object storage에 저장하고 CDN HTTPS URL을 생성하며 DB 실패 시 같은 key 삭제 지원
+- **`src/services/profileImageStorageService.ts` 역할**: 원본 파일명 대신 `<storage_prefix>/profiles/{user_id}/{uuid}.{ext}` key로 비공개 S3 호환 저장소에 저장하고 서버 이미지 API URL을 반환하며 DB 실패 시 같은 key 삭제 지원
 - **`src/openapi/profileAuthOpenApi.json` 역할**: `/auth/profile/complete`, 기존 `/auth/profile` 조회·편집과 JSON/multipart/오류 계약 정의
-- **의존성**: profile completion DB expand migration, `multer`, `@aws-sdk/client-s3`, 공유 bucket/region, 환경별 `stage|center` prefix·IAM credential, CDN URL과 필요 시 AWS credential chain
+- **의존성**: profile completion DB expand migration, `multer`, `@aws-sdk/client-s3`, 공유 bucket/region, 환경별 `stage|center` prefix·IAM credential, 서버 API origin과 필요 시 AWS credential chain
 - **사용 예**: DB와 storage를 먼저 준비한 뒤 `POST /api/v1/auth/profile/complete`에 JSON 또는 `profile_image` 파일 하나가 포함된 multipart 요청을 전송
+
+#### 비공개 프로필 이미지 조회 모듈 (2026-11-08)
+
+- 요청 흐름: `GET /api/v1/profile-images/:user_id` → JWT 활성 사용자 인증 → 대상 활성 사용자·현재 key 확인 → 현재 환경/소유자 key 검증 → S3 GetObject → 이미지 바이트 스트리밍. 기존 기본 아바타 검색 정책에 따라 활성 로그인 사용자에게 허용하며 캘린더 ACL과 분리한다.
+- **`src/routes/profileImageRoutes.ts` 역할**: auth + UUID validation + 이미지 controller 연결. `src/routes/index.ts`에서 광역 calendar auth router보다 먼저 등록한다.
+- **`src/controllers/profileImageController.ts` 역할**: ORM 대상 조회, 인증된 object 읽기, image MIME/5MB/10초/연결 종료 처리와 404/503 안전 응답. storage 서비스·User·Node stream에 의존한다. 사용 예는 위 GET API이며 Bearer 헤더가 필수다.
+- **`src/utils/profileImageLocation.ts` 역할**: 관리 key 환경·소유자 검증, 이전 URL의 정확한 base/path 검증, 서버 URL 구성 및 Express JSON replacer. 본인·친구·그룹·과거 알림의 `profile_image_url`에도 같은 규칙을 적용하고 key는 응답에서 숨긴다. 외부 OAuth 사진은 유지한다.
+- **`migrations/add_private_profile_images.sql` 역할**: nullable `users.profile_image_key`와 소유자/형식 CHECK를 기존 DB에 멱등 추가. API/worker 배포 전에 대상 DB 확인·백업 후 pgAdmin에서 전체 실행한다. 운영에 초기화 schema를 실행하지 않는다.
+- **`src/scripts/profileImageBackfill.ts` 역할**: 신뢰한 이전 URL만 key+서버 주소로 전환. Sequelize와 같은 URL 검증 유틸에 의존한다. 사용 예: `node dist/scripts/profileImageBackfill.js --dry-run` 후 `--apply`. UUID 순 100행씩 읽고 원본 값이 동일한 행만 갱신하여 동시 업로드를 보존한다. 저장소 URL·자격증명은 출력하지 않는다.
+- **`test/privateProfileImage.test.cjs`, `test/privateProfileImageIntegration.test.cjs` 역할**: URL/key/JSON 경계, 고정 격리 PostgreSQL + 로컬 S3 호환 HTTP 서버/실제 AWS SDK로 업로드→DB→인증된 HTTP 조회·오류·전환을 검증한다. `npm run test:private-profile-integration`은 명시된 로컬 테스트 DB만 초기화한다.
+- **Behavior change**: 관리 이미지 주소는 우리 API로 바뀌며 앱 이미지 요청에도 Bearer 토큰이 필요하다. `users.profile_image_key`는 내부 정본, `profile_image_url`은 클라이언트 전달용 주소다. 일반 프로필 수정의 임의 URL 교체는 거절하고 기존 값 유지/제거만 허용한다. 관리 이미지의 캐시는 private/no-store다. Stage 적용과 Flutter 토큰/캐시 연동은 `_docs/PROFILE_COMPLETION_GUIDE.md`를 따른다.
 
 #### 월별 근무표 캐시 모듈
 
@@ -919,7 +930,8 @@ catch (error) {
 | `PROFILE_IMAGE_STORAGE_BUCKET` | Stage·Center 공유 프로필 이미지 S3 호환 bucket | `shiftmate-profile-images` | API, 운영 환경 공통 |
 | `PROFILE_IMAGE_STORAGE_REGION` | 공유 object storage region | `ap-northeast-2` | API, 운영 환경 공통 |
 | `PROFILE_IMAGE_STORAGE_PREFIX` | 공유 bucket의 객체 환경 prefix | Stage `stage`, Center `center` | API, 환경별 필수 |
-| `PROFILE_IMAGE_PUBLIC_BASE_URL` | 저장 object 공개 CDN HTTPS base URL | `https://cdn.example.com` | API, 환경별 상이 |
+| `PROFILE_IMAGE_API_BASE_URL` | 이미지 API의 공개 HTTPS origin (경로 없음) | `https://api.example.com` | production API 필수, worker 불필요 |
+| `PROFILE_IMAGE_PUBLIC_BASE_URL` | 기존 S3/CDN URL의 검증·전환용 이전 base | `https://legacy.example.com` | 선택, 앱 반환 주소 아님 |
 
 #### 선택 환경변수
 
@@ -1068,6 +1080,7 @@ AUTH_RATE_LIMIT_MAX=10
 - `phone`: nullable unique, `000-000-0000` 또는 `000-0000-0000` 형식만 저장
 - `job_type`: nullable `NURSE | DOCTOR | EMT | OTHER`
 - `workplace`: nullable, trim 기준 1~100자
+- `profile_image_key`: 관리 이미지 객체 key 정본. 현재 환경/소유자 namespace를 검증하고 API 응답에서 숨김.
 - `profile_completed_at`: 가입 프로필 최초 완료 시각. `null`이면 `requires_profile_setup=true`
 - `kakao_id`, `apple_id`, `google_id`, `naver_id` (OAuth)
 - `timezone`

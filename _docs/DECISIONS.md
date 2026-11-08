@@ -2085,3 +2085,34 @@ OAuth의 `is_new_user`는 해당 로그인 요청에서 계정을 생성했는�
 ### 추후 과제(언제 다시 평가)
 
 Stage에서 migration 후 실제 탈퇴 요청 완료와 카카오 재가입 E2E를 확인한다. Kakao의 탈퇴 중 일반 예외 500 매핑은 별도 API 계약 보완 과제로 남긴다. 엄격 CHECK 롤백은 익명화된 이력이 있으면 중단하며 감사자를 추정 복원하지 않는다.
+
+
+## ADR-0038: 비공개 프로필 이미지는 인증된 API가 직접 스트리밍
+
+### 배경(문제)
+
+관리 이미지 업로드는 성공하지만 DB에 저장된 서명 없는 S3 URL을 앱이 직접 읽으면 비공개 bucket에서 AccessDenied가 발생한다. 기존 문서는 원본 비공개·서버 조회를 요구했으나 구현이 빠져 있었다. 친구/그룹 raw SQL과 과거 알림 snapshot에도 원본 URL이 포함될 수 있다.
+
+### 선택지(대안)
+
+1. bucket/객체 공개 읽기 허용
+2. S3 presigned URL 반환 또는 redirect
+3. 서버가 인증 후 GetObject로 읽어 이미지 바이트 전달
+
+### 결정(무엇을 선택)
+
+3번. nullable `profile_image_key`를 내부 정본으로 추가하고 현재 환경·소유자·UUID 확장자 namespace를 검증한다. 신규 upload는 key+서버 API URL을 저장한다. 이전 URL은 설정된 base 또는 현재 bucket의 regional S3 origin에 정확히 일치하는 자기 namespace만 호환 조회/멱등 backfill한다. 기존 URL의 임의 외부 fetch는 하지 않는다. 응답 직렬화에 공통 `profile_image_url` 변환을 두어 ORM/raw SQL/알림 snapshot의 원본 노출도 막는다.
+
+### 근거(왜)
+
+비공개 저장소 정책을 유지하고 원본 위치를 응답에서 제거하며 토큰/권한 검사를 서버에서 수행한다. 기존 사용자 검색은 친구가 아닌 활성 계정의 기본 아바타도 반환하므로 이미지 조회는 활성 로그인 사용자에게 활성 대상의 아바타를 제공한다. 캘린더 can_view ACL은 별도다. 외부 OAuth 아바타 URL은 유지하며 해당 호스트에 앱 토큰을 보내지 않는다.
+
+### 결과/영향(좋은 점/트레이드오프)
+
+**Behavior change**: 관리 URL은 `/api/v1/profile-images/:user_id`로 바뀌고 이미지 GET에 Bearer 인증이 필요하다. production API는 `PROFILE_IMAGE_API_BASE_URL` HTTPS origin 설정과 key migration이 필요하다. 모든 API/worker의 User 모델이 key를 읽으므로 schema를 먼저 확장한다. 기존 `PROFILE_IMAGE_PUBLIC_BASE_URL`은 선택적인 이전 원본 인식용으로만 남긴다. 일반 프로필 수정의 임의 이미지 URL 교체는 거절하고 파일 업로드 또는 제거를 사용한다.
+
+스트리밍은 5MB/10초 제한·연결 종료 abort·private no-store를 적용한다. 클라이언트가 취득한 사본/Flutter 메모리 캐시는 별도 제거가 필요하다. 저장소/DB 설정 변경은 새 요청부터 반영하며 전송 중 탈퇴는 이미 읽은 바이트를 회수하지 못한다. API에 이미지 트래픽 비용이 발생한다. additive schema는 코드 롤백 시 유지하며 예전 직접 URL 방식으로 돌아가도 비공개 읽기 문제가 해결되지 않으므로 전진 복구를 우선한다.
+
+### 추후 과제(언제 다시 평가)
+
+Stage 실제 IAM/도메인/Flutter 헤더·캐시·토큰 갱신 및 기존 이미지 backfill을 확인한다. profile visibility 정책이 변경되면 기본 아바타 접근 권한을 재설계한다. 고해상도 이미지/대량 요청이 늘면 인증된 edge 캐시나 리사이징을 별도 검토한다.

@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
+  GetObjectCommandOutput,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -8,6 +10,7 @@ import {
   getBooleanEnvironmentVariable,
   getRequiredEnvironmentVariable,
 } from "../config/environment";
+import { isOwnedProfileImageKey, profileImageApiUrl } from "../utils/profileImageLocation";
 
 interface ProfileImage {
   buffer: Buffer;
@@ -21,7 +24,7 @@ export interface StoredProfileImage {
 }
 
 interface ObjectStorageClient {
-  send(command: PutObjectCommand | DeleteObjectCommand): Promise<unknown>;
+  send(command: PutObjectCommand | DeleteObjectCommand | GetObjectCommand, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
 }
 
 let storage_client: ObjectStorageClient | null = null;
@@ -40,13 +43,6 @@ function getStorageClient(): ObjectStorageClient {
   return storage_client;
 }
 
-function getPublicBaseUrl(): string {
-  return getRequiredEnvironmentVariable("PROFILE_IMAGE_PUBLIC_BASE_URL").replace(
-    /\/$/,
-    "",
-  );
-}
-
 function getStoragePrefix(): string {
   return getRequiredEnvironmentVariable("PROFILE_IMAGE_STORAGE_PREFIX");
 }
@@ -62,19 +58,32 @@ export async function uploadProfileImage(
   image: ProfileImage,
 ): Promise<StoredProfileImage> {
   const key = `${getStoragePrefix()}/profiles/${user_id}/${crypto.randomUUID()}.${image.extension}`;
+  if (!isOwnedProfileImageKey(key, user_id)) throw new Error("INVALID_PROFILE_IMAGE_KEY");
   await getStorageClient().send(
     new PutObjectCommand({
       Bucket: getRequiredEnvironmentVariable("PROFILE_IMAGE_STORAGE_BUCKET"),
       Key: key,
       Body: image.buffer,
       ContentType: image.content_type,
-      CacheControl: "public, max-age=31536000, immutable",
+      CacheControl: "private, no-store",
     }),
   );
   return {
     key,
-    public_url: `${getPublicBaseUrl()}/${key}`,
+    public_url: profileImageApiUrl(user_id),
   };
+}
+
+export async function readProfileImage(
+  user_id: string,
+  key: string,
+  signal: AbortSignal,
+): Promise<GetObjectCommandOutput> {
+  if (!isOwnedProfileImageKey(key, user_id)) throw new Error("INVALID_PROFILE_IMAGE_KEY");
+  return await getStorageClient().send(new GetObjectCommand({
+    Bucket: getRequiredEnvironmentVariable("PROFILE_IMAGE_STORAGE_BUCKET"),
+    Key: key,
+  }), { abortSignal: signal }) as GetObjectCommandOutput;
 }
 
 export async function deleteProfileImage(key: string): Promise<void> {

@@ -10,6 +10,7 @@ CREATE TABLE users (
   email text NOT NULL UNIQUE,
   name text NOT NULL,
   profile_image_url text,
+  profile_image_key text,
   timezone text,
   job_type varchar(20),
   workplace varchar(100),

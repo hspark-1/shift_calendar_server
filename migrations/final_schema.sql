@@ -45,6 +45,7 @@ CREATE TABLE users (
   email text NOT NULL,
   name text NOT NULL,
   profile_image_url text,
+  profile_image_key text,
   timezone text,
   kakao_id text,
   apple_id text,
@@ -59,6 +60,12 @@ CREATE TABLE users (
   deletion_requested_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
 
+  CONSTRAINT ck_users_profile_image_key CHECK (
+    profile_image_key IS NULL OR profile_image_key ~ (
+      '^(local|test|stage|center)/profiles/' || user_id::text ||
+      '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$'
+    )
+  ),
   CONSTRAINT uq_users_email UNIQUE (email),
   CONSTRAINT ck_users_phone_format CHECK (
     phone IS NULL OR phone ~ '^[0-9]{3}-[0-9]{3,4}-[0-9]{4}$'
@@ -86,6 +93,7 @@ CREATE UNIQUE INDEX idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
 CREATE INDEX idx_users_account_status ON users(account_status, deletion_requested_at);
 
 COMMENT ON TABLE users IS '앱 사용자. 사용자 1명당 캘린더 1개(=모든 일정/근무 owner_user_id=user_id)';
+COMMENT ON COLUMN users.profile_image_key IS '비공개 관리 프로필 이미지의 소유자별 객체 key. API 응답에 포함하지 않음';
 COMMENT ON COLUMN users.user_id IS '사용자 PK(UUID)';
 COMMENT ON COLUMN users.email IS '로그인/식별용 이메일(유니크)';
 COMMENT ON COLUMN users.timezone IS '사용자 선호 타임존(렌더링용)';

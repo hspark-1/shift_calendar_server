@@ -24,6 +24,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
   process.env.PROFILE_IMAGE_STORAGE_REGION = "ap-northeast-2";
   process.env.PROFILE_IMAGE_STORAGE_PREFIX = "test";
   process.env.PROFILE_IMAGE_PUBLIC_BASE_URL = "https://cdn.example.com";
+  process.env.PROFILE_IMAGE_API_BASE_URL = "https://api.example.test";
 
   const jwt = require("jsonwebtoken");
   const { QueryTypes } = require("sequelize");
@@ -259,7 +260,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     assert.equal(success.status, 200);
     const success_body = await success.json();
     assert.equal(success_body.data.requires_profile_setup, false);
-    assert.match(success_body.data.profile_image_url, /^https:\/\/cdn[.]example[.]com\/test\/profiles\//);
+    assert.equal(success_body.data.profile_image_url, `https://api.example.test/api/v1/profile-images/${user.user_id}`);
 
     const storage_failure_user = await User.create({ email: "storage-failure@example.com", name: "저장 실패" });
     setProfileImageStorageClientForTest({

@@ -8,6 +8,7 @@ interface UserAttributes {
   email: string;
   name: string;
   profile_image_url?: string | null;
+  profile_image_key?: string | null;
   timezone?: string | null;
   kakao_id?: string | null;
   apple_id?: string | null;
@@ -28,6 +29,7 @@ interface UserCreationAttributes
     UserAttributes,
     | "user_id"
     | "profile_image_url"
+    | "profile_image_key"
     | "timezone"
     | "kakao_id"
     | "apple_id"
@@ -51,6 +53,7 @@ class User
   declare email: string;
   declare name: string;
   declare profile_image_url: string | null | undefined;
+  declare profile_image_key: string | null | undefined;
   declare timezone: string | null | undefined;
   declare kakao_id: string | null | undefined;
   declare apple_id: string | null | undefined;
@@ -72,14 +75,15 @@ class User
   }
 
   // JSON 변환 시 비밀번호 제외
-  public toJSON(): Omit<UserAttributes, "password" | "profile_completed_at"> & {
+  public toJSON(): Omit<UserAttributes, "password" | "profile_completed_at" | "profile_image_key"> & {
     requires_profile_setup: boolean;
   } {
     const values = { ...this.get() };
     delete (values as Partial<UserAttributes>).password;
     delete (values as Partial<UserAttributes>).profile_completed_at;
+    delete (values as Partial<UserAttributes>).profile_image_key;
     return {
-      ...(values as Omit<UserAttributes, "password" | "profile_completed_at">),
+      ...(values as Omit<UserAttributes, "password" | "profile_completed_at" | "profile_image_key">),
       requires_profile_setup: this.profile_completed_at == null,
     };
   }
@@ -105,6 +109,10 @@ User.init(
       allowNull: false,
     },
     profile_image_url: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    profile_image_key: {
       type: DataTypes.TEXT,
       allowNull: true,
     },
