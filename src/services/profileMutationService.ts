@@ -22,9 +22,9 @@ export async function mutateProfile(
   if (image && body?.profile_image_url !== undefined) {
     throw new ProfileError(400, "VALIDATION_ERROR", "profile_image와 profile_image_url은 함께 전송할 수 없습니다.");
   }
-  validateProfileInput(input, complete);
   // 텍스트만 수정하는 기존 JSON 경로는 row lock만으로 원자성을 유지한다.
   if (!image && input.profile_image_url === undefined) {
+    validateProfileInput(input, complete);
     return complete
       ? completeProfile(user_id, { ...input, name: input.name, phone: input.phone, timezone: input.timezone })
       : updateProfileFields(user_id, input);
@@ -36,6 +36,7 @@ export async function mutateProfile(
       if (!active_user || active_user.account_status !== "ACTIVE") {
         throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
       }
+      validateProfileInput(input, complete);
       try {
         let key: string | undefined;
         if (image) {

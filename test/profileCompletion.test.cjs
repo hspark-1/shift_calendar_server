@@ -166,3 +166,25 @@ test("친구 목록과 그룹 응답 경로는 phone/workplace를 공개하지 �
   const group_types = readRepositoryFile("src/types/group.ts");
   assert.doesNotMatch(group_types, /phone|workplace/);
 });
+
+
+test("탈퇴 진행 계정의 늦은 이미지 요청은 필드 검증보다 활성 상태 검사를 우선한다", async () => {
+  const { User } = require("../dist/models");
+  const lock_module = require("../dist/utils/accountDataLock");
+  const { mutateProfile } = require("../dist/services/profileMutationService");
+  const original_find = User.findByPk;
+  const original_lock = lock_module.withAccountDataLock;
+  User.findByPk = async () => ({ account_status: "DELETION_PENDING" });
+  lock_module.withAccountDataLock = async (_user_id, action) => action();
+  try {
+    for (const complete of [false, true]) {
+      await assert.rejects(
+        mutateProfile("00000000-0000-4000-8000-000000000001", { name: null }, detectProfileImage(one_pixel_png), complete),
+        (error) => error.code === "UNAUTHORIZED" && error.status_code === 401,
+      );
+    }
+  } finally {
+    User.findByPk = original_find;
+    lock_module.withAccountDataLock = original_lock;
+  }
+});

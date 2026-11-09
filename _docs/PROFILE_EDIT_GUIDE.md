@@ -20,14 +20,15 @@ Flutter 전달 요청을 서버 코드에 반영한 문서다. 실제 Stage/Cent
 
 ```text
 Router → auth rate limit → JWT/활성 사용자 검사 → multipart parser/이미지 검증
- → Controller → mutateProfile(필드 검증)
+ → Controller → mutateProfile(입력 필드 제한)
  → 이미지 변경 시 account-data session advisory lock + 활성 계정 재검사
- → 새 UUID key 정리 작업 선기록 → S3 PutObject (DB transaction 없음)
+ → 필드 검증 → 새 UUID key 정리 작업 선기록 → S3 PutObject (DB transaction 없음)
  → DB transaction: 활성 계정 재검사/row lock/부분 저장
     + 새 key 정리 취소 + 이전 관리 key 정리 예약
  → commit → 이전 파일 정리 시도 → 최신 프로필 응답
 ```
 
+- 탈퇴 진행 계정의 늦은 이미지 요청은 lock 안 활성 상태 검사를 필드 검증보다 먼저 실행해 기존 UNAUTHORIZED 계약을 유지한다. 모든 필드 검증은 업로드 전에 끝난다.
 - 이미지 없는 일반 필드 수정/가입 완료는 기존 DB row lock transaction만 사용하므로 사진 업로드 중에도 다른 필드를 수정할 수 있다. 사진 교체/URL 제거는 session lock을 사용한다.
 - 가입 완료도 같은 이미지 조정 서비스를 사용한다. 가입 필수값·최초 완료 시각 정책은 유지한다.
 - 업로드 실패·전화 중복·DB 실패는 새 key 작업을 남기고 즉시 정리를 시도한다. 기존 값은 transaction rollback으로 보존한다. 업로드 응답 유실/프로세스 종료도 선기록된 작업으로 복구한다.
