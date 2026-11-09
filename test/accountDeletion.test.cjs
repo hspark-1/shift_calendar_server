@@ -143,6 +143,7 @@ const worker_loop_probe = `
     '../services/deviceService': { cleanupUnboundDevices: async () => 0 },
     '../services/accountDeletionService': { cleanupCompletedAccountDeletionRequests: async () => {} },
     '../services/accountDeletionImageService': {},
+    '../services/profileImageCleanupService': { processProfileImageCleanupBatch: async () => {} },
     '../services/accountDeletionProviderService': {},
     '../services/workShiftMonthCacheService': {},
     '../utils/accountDataLock': {},

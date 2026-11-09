@@ -36,6 +36,7 @@ import {
 } from "../services/accountDeletionProviderService";
 import { purgeDeletedUserWorkShiftCache } from "../services/workShiftMonthCacheService";
 import { logError } from "../utils/logger";
+import { processProfileImageCleanupBatch } from "../services/profileImageCleanupService";
 
 interface ClaimedDeletionRequest {
   deletion_request_id: string;
@@ -315,6 +316,7 @@ async function runHealthCheck(): Promise<void> {
     await connectDatabase();
     await checkDatabaseConnection();
     await sequelize.query("SELECT worker_name, last_seen_at FROM privacy_worker_heartbeats LIMIT 0");
+    await sequelize.query("SELECT object_key, storage_fingerprint, next_attempt_at FROM profile_image_cleanup_tasks LIMIT 0");
     if (isAccountDeletionWorkerEnabled()) {
       await Promise.all([
         sequelize.query(
@@ -359,6 +361,7 @@ async function runWorker(): Promise<void> {
   console.log(JSON.stringify({ context: "account_deletion_worker_started", poll_ms }));
   while (!is_stopping) {
     try {
+      await processProfileImageCleanupBatch();
       if (!isAccountDeletionWorkerEnabled()) {
         await waitForNextPoll(poll_ms);
         continue;

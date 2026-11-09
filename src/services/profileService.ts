@@ -5,9 +5,6 @@ import { isValidIanaTimezone } from "./groupService";
 import { normalizePhoneNumber } from "../utils/phone";
 import { isOwnedProfileImageKey, legacyProfileImageKey, profileImageApiUrl } from "../utils/profileImageLocation";
 
-export const job_types = ["NURSE", "DOCTOR", "EMT", "OTHER"] as const;
-export type JobType = (typeof job_types)[number];
-
 export class ProfileError extends Error {
   constructor(
     readonly status_code: number,
@@ -75,17 +72,47 @@ function normalizePhone(value: unknown): string {
   return normalized_phone;
 }
 
-function normalizeJobType(value: unknown): JobType | null {
+function normalizeJobType(value: unknown): string | null {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value !== "string") {
-    throw new ProfileError(400, "INVALID_JOB_TYPE", "지원하지 않는 직종입니다.");
+    throw new ProfileError(400, "INVALID_JOB_TYPE", "직종은 trim 후 1~20자 문자열이어야 합니다.");
   }
   const normalized_value = value.trim();
   if (normalized_value === "") return null;
-  if (!job_types.includes(normalized_value as JobType)) {
-    throw new ProfileError(400, "INVALID_JOB_TYPE", "지원하지 않는 직종입니다.");
+  if (Array.from(normalized_value).length > 20) {
+    throw new ProfileError(400, "INVALID_JOB_TYPE", "직종은 trim 후 1~20자 문자열이어야 합니다.");
   }
-  return normalized_value as JobType;
+  return normalized_value;
+}
+
+// Storage I/O 전에 검증하며, DB service 직접 호출에도 같은 규칙을 적용한다.
+export function validateProfileInput(input: UpdateProfileInput, complete = false): void {
+  if (complete || input.name !== undefined) normalizeRequiredText(input.name, "name", 50);
+  if (complete || input.timezone !== undefined) normalizeTimezone(input.timezone);
+  if (complete || input.phone !== undefined) normalizePhone(input.phone);
+  normalizeJobType(input.job_type);
+  normalizeOptionalText(input.workplace, 100);
+  if (input.profile_image_url !== undefined) normalizeOptionalText(input.profile_image_url, 2048);
+}
+
+export interface ProfileWriteOptions {
+  profile_image_key?: string;
+  on_image_change?: (previous_key: string | null, next_key: string | null, transaction: Transaction) => Promise<void>;
+}
+
+function managedImageKey(user: User): string | null {
+  if (user.profile_image_key && isOwnedProfileImageKey(user.profile_image_key, user.user_id)) {
+    return user.profile_image_key;
+  }
+  return user.profile_image_url ? legacyProfileImageKey(user.profile_image_url, user.user_id) : null;
+}
+
+function applyImageKey(user: User, key: string): void {
+  if (!isOwnedProfileImageKey(key, user.user_id)) {
+    throw new ProfileError(400, "INVALID_PROFILE_IMAGE", "이미지 저장 경로가 올바르지 않습니다.");
+  }
+  user.profile_image_key = key;
+  user.profile_image_url = profileImageApiUrl(user.user_id);
 }
 
 function isPhoneUniqueConstraint(error: unknown): boolean {
@@ -122,6 +149,7 @@ export interface CompleteProfileInput {
 export async function completeProfile(
   user_id: string,
   input: CompleteProfileInput,
+  options: ProfileWriteOptions = {},
 ): Promise<User> {
   const normalized = {
     name: normalizeRequiredText(input.name, "name", 50),
@@ -140,23 +168,22 @@ export async function completeProfile(
       if (!user || user.account_status !== "ACTIVE") {
         throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
       }
+      const previous_key = managedImageKey(user);
       await assertPhoneAvailable(normalized.phone, user_id, transaction);
       user.name = normalized.name;
       user.timezone = normalized.timezone;
       user.phone = normalized.phone;
       user.job_type = normalized.job_type;
       user.workplace = normalized.workplace;
-      if (input.profile_image_key !== undefined) {
-        if (!isOwnedProfileImageKey(input.profile_image_key, user_id)) {
-          throw new ProfileError(400, "INVALID_PROFILE_IMAGE", "이미지 저장 경로가 올바르지 않습니다.");
-        }
-        user.profile_image_key = input.profile_image_key;
-        user.profile_image_url = profileImageApiUrl(user_id);
-      }
+      const next_key = options.profile_image_key ?? input.profile_image_key;
+      if (next_key !== undefined) applyImageKey(user, next_key);
       if (user.profile_completed_at == null) {
         user.profile_completed_at = new Date();
       }
       await user.save({ transaction });
+      if (previous_key !== managedImageKey(user)) {
+        await options.on_image_change?.(previous_key, managedImageKey(user), transaction);
+      }
       return user;
     });
   } catch (error) {
@@ -179,6 +206,7 @@ export interface UpdateProfileInput {
 export async function updateProfileFields(
   user_id: string,
   input: UpdateProfileInput,
+  options: ProfileWriteOptions = {},
 ): Promise<User> {
   try {
     return await sequelize.transaction(async (transaction) => {
@@ -189,6 +217,7 @@ export async function updateProfileFields(
       if (!user || user.account_status !== "ACTIVE") {
         throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
       }
+      const previous_key = managedImageKey(user);
 
       if (input.name !== undefined) {
         user.name = normalizeRequiredText(input.name, "name", 50);
@@ -220,8 +249,12 @@ export async function updateProfileFields(
           user.profile_image_key = null;
         }
       }
+      if (options.profile_image_key !== undefined) applyImageKey(user, options.profile_image_key);
 
       await user.save({ transaction });
+      if (previous_key !== managedImageKey(user)) {
+        await options.on_image_change?.(previous_key, managedImageKey(user), transaction);
+      }
       return user;
     });
   } catch (error) {

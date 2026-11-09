@@ -101,3 +101,5 @@ __pycache__/
 !migrations/fix_account_deletion_audit_constraints.sql
 
 !migrations/add_private_profile_images.sql
+
+!migrations/add_profile_edit_support.sql

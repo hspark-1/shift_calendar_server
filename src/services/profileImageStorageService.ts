@@ -12,7 +12,7 @@ import {
 } from "../config/environment";
 import { isOwnedProfileImageKey, profileImageApiUrl } from "../utils/profileImageLocation";
 
-interface ProfileImage {
+export interface ProfileImage {
   buffer: Buffer;
   content_type: "image/jpeg" | "image/png" | "image/webp";
   extension: "jpg" | "png" | "webp";
@@ -56,8 +56,9 @@ export function setProfileImageStorageClientForTest(
 export async function uploadProfileImage(
   user_id: string,
   image: ProfileImage,
+  prepared_key?: string,
 ): Promise<StoredProfileImage> {
-  const key = `${getStoragePrefix()}/profiles/${user_id}/${crypto.randomUUID()}.${image.extension}`;
+  const key = prepared_key ?? createProfileImageKey(user_id, image.extension);
   if (!isOwnedProfileImageKey(key, user_id)) throw new Error("INVALID_PROFILE_IMAGE_KEY");
   await getStorageClient().send(
     new PutObjectCommand({
@@ -72,6 +73,12 @@ export async function uploadProfileImage(
     key,
     public_url: profileImageApiUrl(user_id),
   };
+}
+
+export function createProfileImageKey(user_id: string, extension: ProfileImage["extension"]): string {
+  const key = `${getStoragePrefix()}/profiles/${user_id}/${crypto.randomUUID()}.${extension}`;
+  if (!isOwnedProfileImageKey(key, user_id)) throw new Error("INVALID_PROFILE_IMAGE_KEY");
+  return key;
 }
 
 export async function readProfileImage(

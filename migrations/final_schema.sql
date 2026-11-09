@@ -71,7 +71,7 @@ CREATE TABLE users (
     phone IS NULL OR phone ~ '^[0-9]{3}-[0-9]{3,4}-[0-9]{4}$'
   ),
   CONSTRAINT ck_users_job_type CHECK (
-    job_type IS NULL OR job_type IN ('NURSE', 'DOCTOR', 'EMT', 'OTHER')
+    job_type IS NULL OR char_length(btrim(job_type)) BETWEEN 1 AND 20
   ),
   CONSTRAINT ck_users_workplace CHECK (
     workplace IS NULL OR char_length(btrim(workplace)) BETWEEN 1 AND 100
@@ -102,12 +102,30 @@ COMMENT ON COLUMN users.apple_id IS '애플 OAuth 사용자 sub';
 COMMENT ON COLUMN users.google_id IS 'Google OIDC subject(sub). 검증된 ID Token에서만 저장';
 COMMENT ON COLUMN users.naver_id IS '네이버 OAuth 사용자 ID';
 COMMENT ON COLUMN users.phone IS '전화번호. 000-000-0000 또는 000-0000-0000 형식으로 저장(친구 검색용)';
-COMMENT ON COLUMN users.job_type IS '선택 직종. NURSE, DOCTOR, EMT, OTHER 중 하나';
+COMMENT ON COLUMN users.job_type IS '선택 직종. trim 기준 1~20자 자유 문자열. 기존 직종 코드도 허용';
 COMMENT ON COLUMN users.workplace IS '선택 소속 병원·부서. trim 기준 1~100자';
 COMMENT ON COLUMN users.profile_completed_at IS '가입 프로필 최초 완료 시각. null이면 가입 프로필 설정이 필요함';
 COMMENT ON COLUMN users.password IS '패스워드 인증용 bcrypt 해시 (OAuth 사용자는 null)';
 COMMENT ON COLUMN users.account_status IS 'ACTIVE 또는 DELETION_PENDING. 탈퇴 접수 즉시 일반 인증을 차단한다.';
 COMMENT ON COLUMN users.deletion_requested_at IS '회원 탈퇴가 접수된 시각. ACTIVE이면 null';
+
+CREATE TABLE IF NOT EXISTS public.profile_image_cleanup_tasks (
+  object_key text PRIMARY KEY,
+  owner_user_id uuid NOT NULL,
+  storage_fingerprint char(64) NOT NULL,
+  request_id text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  last_error_code text,
+  CONSTRAINT ck_profile_image_cleanup_key CHECK (
+    object_key ~ ('^(local|test|stage|center)/profiles/' || owner_user_id::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$')
+  ),
+  CONSTRAINT ck_profile_image_cleanup_fingerprint CHECK (storage_fingerprint ~ '^[0-9a-f]{64}$')
+);
+CREATE INDEX IF NOT EXISTS idx_profile_image_cleanup_due
+  ON public.profile_image_cleanup_tasks(next_attempt_at, owner_user_id);
+COMMENT ON TABLE public.profile_image_cleanup_tasks IS '관리 이미지 교체/실패 정리 재시도. 업로드 전에 기록하고 DB commit으로 현재 key 작업 취소. 탈퇴 후에도 정리하도록 논리 소유자 참조만 유지. 성공 시 즉시 행 삭제';
 
 -- =========================================================
 -- 3) FRIEND REQUESTS

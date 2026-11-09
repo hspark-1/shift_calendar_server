@@ -16,7 +16,7 @@ interface UserAttributes {
   naver_id?: string | null;
   password?: string | null;
   phone?: string | null; // 전화번호: 000-000-0000 또는 000-0000-0000
-  job_type?: "NURSE" | "DOCTOR" | "EMT" | "OTHER" | null;
+  job_type?: string | null;
   workplace?: string | null;
   profile_completed_at?: Date | null;
   created_at?: Date;
@@ -61,7 +61,7 @@ class User
   declare naver_id: string | null | undefined;
   declare password: string | null | undefined;
   declare phone: string | null | undefined;
-  declare job_type: "NURSE" | "DOCTOR" | "EMT" | "OTHER" | null | undefined;
+  declare job_type: string | null | undefined;
   declare workplace: string | null | undefined;
   declare profile_completed_at: Date | null | undefined;
   declare created_at: Date | undefined;
@@ -156,7 +156,12 @@ User.init(
       type: DataTypes.STRING(20),
       allowNull: true,
       validate: {
-        isIn: [["NURSE", "DOCTOR", "EMT", "OTHER"]],
+        validJobType(value: unknown) {
+          if (value === null || value === undefined) return;
+          if (typeof value !== "string" || Array.from(value.trim()).length < 1 || Array.from(value.trim()).length > 20) {
+            throw new Error("직종은 trim 후 1~20자 문자열이어야 합니다.");
+          }
+        },
       },
     },
     workplace: {

@@ -8,10 +8,13 @@
 
 ```text
 auth route → JWT/rate limit → multipart 제한·이미지 검증
-  → controller의 object upload → profile service DB transaction/row lock
-  → 성공 URL 응답
-  → DB 실패 시 새 object 삭제
+  → 공용 mutation service 검증·account-data lock
+  → 새 key 정리 작업 선기록 → object upload (열린 DB transaction 없음)
+  → profile service DB transaction/row lock + 정리 큐 원자 변경
+  → commit 후 이전 object 정리·실패 재시도 → 성공 API URL 응답
 ```
+
+일반 편집·자유 직종·이미지 교체의 후속 migration/실패 복구·파일 역할은 [PROFILE_EDIT_GUIDE.md](PROFILE_EDIT_GUIDE.md)를 따른다. 가입 완료와 일반 편집은 같은 이미지 조정 서비스를 사용하며 일반 편집은 완료 시각을 생성하지 않는다.
 
 ## DB migration
 
@@ -125,7 +128,8 @@ AWS workload role을 사용할 수 없고 S3 호환 공급자가 static credenti
 
 - `POST /api/v1/auth/profile/complete`: JSON 또는 `profile_image` 하나가 포함된 multipart, HTTP 200
 - `GET /api/v1/auth/profile`: 본인 필드와 `requires_profile_setup`
-- `POST /api/v1/auth/profile`: 생략 필드 유지, 선택 필드 명시적 null 제거, 완료 시각 불변
+- `POST /api/v1/auth/profile`: JSON/multipart 부분 수정·사진 단독 교체, 생략 필드 유지, 선택 필드 null/빈 문자열·공백 제거, 완료 시각 불변
+- `job_type`: trim 후 1~20자 자유 문자열(기존 4개 코드 허용). 자유 직종 저장 전 후속 `add_profile_edit_support.sql` 적용 필요
 
 이미지는 JPEG/PNG/WebP, 최대 5MB이며 client MIME과 감지 형식이 일치해야 합니다. key는 `<storage_prefix>/profiles/{user_id}/{uuid}.{ext}`이고 원본 파일명은 사용하지 않습니다. 운영 prefix는 Stage `stage`, Center `center`로 고정합니다.
 
@@ -153,7 +157,7 @@ npm run test:profile-integration
 
 - `src/services/profileService.ts`: 입력 정규화, 완료/편집 transaction, 전화번호 충돌 매핑
 - `src/middlewares/profileImageUpload.ts`: multipart 제한과 이미지 내용 검증
-- `src/services/profileImageStorageService.ts`: S3 Put/Delete와 public URL 생성
+- `src/services/profileImageStorageService.ts`: S3 Put/Get/Delete와 UUID key·인증 이미지 API URL 생성
 - `src/openapi/profileAuthOpenApi.json`: 공개 API/오류 정본
 - `migrations/*profile_completion*`: 범용·Stage·Center apply와 제한적 rollback
 - `test/profileCompletion*.test.cjs`: 정적/단위와 격리 PostgreSQL HTTP·migration 검증
@@ -171,7 +175,7 @@ npm run test:profile-integration
 
 객체 key는 `users.profile_image_key`가 정본이며 응답에서 숨긴다. 현재 환경 prefix·소유자 UUID·파일 UUID·확장자를 검증한다. DB CHECK는 소유자/형식을, 읽기 코드는 실제 실행 환경을 검사한다. key 없는 기존 값은 설정된 이전 base URL 또는 현재 bucket의 regional S3 origin과 정확히 일치하는 경로만 호환 조회한다. URL의 query·다른 환경·타인 namespace·임의 경로는 거절한다.
 
-JSON 공통 직렬화는 본인 OAuth/프로필뿐 아니라 raw SQL 친구/그룹과 과거 알림 payload의 `profile_image_url`에도 같은 변환을 적용한다. 식별된 잘못된 관리 원본/S3 URL은 null로 반환한다. 알 수 없는 외부 OAuth URL은 기존대로 유지한다. 사용자가 일반 프로필 수정에 임의 URL을 넣는 경로는 차단하며 기존 URL 유지 또는 null/빈 문자열 제거만 허용한다. `/profile/complete` multipart로 이미지를 교체할 때 최초 완료 시각은 유지된다.
+JSON 공통 직렬화는 본인 OAuth/프로필뿐 아니라 raw SQL 친구/그룹과 과거 알림 payload의 `profile_image_url`에도 같은 변환을 적용한다. 식별된 잘못된 관리 원본/S3 URL은 null로 반환한다. 알 수 없는 외부 OAuth URL은 기존대로 유지한다. 사용자가 일반 프로필 수정에 임의 URL을 넣는 경로는 차단하며 기존 URL 유지 또는 null/빈 문자열 제거만 허용한다. `/profile` multipart로 사진만 교체할 수 있고 완료 시각은 유지된다. `/profile/complete`는 가입 필수 필드를 계속 요구한다.
 
 ### 적용 순서
 

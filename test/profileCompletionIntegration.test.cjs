@@ -71,6 +71,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     await connectDatabase();
     await loadSql("test/fixtures/profileCompletionMigrationBaseSchema.sql");
     await loadSql("migrations/add_profile_completion_support.sql");
+    await loadSql("migrations/add_profile_edit_support.sql");
     await new Promise((resolve) => {
       api_server = app.listen(0, "127.0.0.1", resolve);
     });
@@ -158,7 +159,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
       [{ name: " ", timezone: "UTC", phone: "01033334444" }, "VALIDATION_ERROR"],
       [{ name: "정상", timezone: "Invalid/Timezone", phone: "01033334444" }, "INVALID_TIMEZONE"],
       [{ name: "정상", timezone: "UTC", phone: "123" }, "INVALID_PHONE"],
-      [{ name: "정상", timezone: "UTC", phone: "01033334444", job_type: "PILOT" }, "INVALID_JOB_TYPE"],
+      [{ name: "정상", timezone: "UTC", phone: "01033334444", job_type: "X".repeat(21) }, "INVALID_JOB_TYPE"],
     ];
     for (const [input, code] of cases) {
       await assert.rejects(

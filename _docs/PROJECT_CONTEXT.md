@@ -289,6 +289,14 @@ test/
 - **의존성**: Express Request/Response, Node.js `crypto`, 공통 환경변수 파서
 - **사용 예**: 인증 컨트롤러에서 `logError("auth_login_failed", error, req.request_id)` 호출
 
+#### 일반 프로필 편집·사진 교체 (2026-11-10)
+
+- `POST /auth/profile`은 기존 JSON과 사진 단독/부분 필드 multipart를 지원한다. parser 뒤 공용 service에서 필드를 검증하고 인증 사용자만 수정한다. 직종은 trim 후 1~20자 자유 문자열이며 선택값 null/빈 문자열·공백은 삭제, 생략은 유지한다. 일반 편집의 완료 시각/boolean은 DB 상태를 보존한다. 파일+URL 동시 입력은 400이다.
+- `src/services/profileMutationService.ts`는 가입/편집 allowlist·검증·계정 session lock·upload→DB→정리를 조정한다. `profileService`는 row lock·부분 저장과 내부 이미지 변경 transaction callback을 제공한다. 외부 storage I/O 동안 DB transaction은 열지 않는다.
+- `src/services/profileImageCleanupService.ts`는 PostgreSQL 영속 큐와 현재 key·소유자·환경·storage fingerprint 검사를 담당한다. 업로드 전 새 key 작업을 선기록하고 commit에서 새 작업 취소·이전 소유 key 작업 예약을 원자화한다. commit 이후 삭제 실패는 200을 유지한다. 기존 탈퇴 worker는 기능 플래그와 무관하게 매 루프 재시도한다. 기본 재시도/유휴 폴링은 10분이며 worker 실행이 필요하다.
+- **DB/배포**: `migrations/add_profile_edit_support.sql`로 기존 enum CHECK를 길이 CHECK로 바꾸고 `profile_image_cleanup_tasks`를 추가한 뒤 API/기존 worker를 함께 배포한다. 새 사진 컬럼·env·seed는 없다. 작업은 성공 시 삭제하며 탈퇴 후 남은 파일도 정리하도록 소유자 FK를 두지 않는다. 자유 직종 호환을 유지하는 서버로 복구하고 큐를 보존한다.
+- **파일 역할/의존성/사용 예·오류·실기기 인수**: `_docs/PROFILE_EDIT_GUIDE.md` 및 ADR-0043. 검증은 `npm run test:private-profile-integration`으로 격리 PostgreSQL/로컬 S3 실제 SDK를 사용한다. Stage/운영 적용 완료는 별도 증거가 필요하다.
+
 #### 가입 프로필 완료 모듈
 
 - **`src/services/profileService.ts` 역할**: 이름·IANA timezone·전화번호·직종·소속을 정규화하고 가입 완료 또는 일반 편집을 row lock과 단일 transaction으로 처리하며 전화번호 unique 경쟁을 409로 매핑
@@ -809,7 +817,7 @@ const work_shifts = await WorkShift.findAll({
 - `POST /logout` - 로그아웃
 - `POST /logout-all` - 모든 기기 로그아웃 (인증 필요)
 - `GET /profile` - 내 정보 조회 (인증 필요)
-- `POST /profile` - 내 정보 수정 (인증 필요)
+- `POST /profile` - JSON/multipart 내 정보 부분 수정·사진 교체 (인증·rate limit 적용, 완료 상태 불변)
 - `POST /profile/complete` - 가입 프로필 최초 완료, JSON 또는 이미지 multipart (인증·rate limit 적용)
 
 **캘린더/근무표** (`/api/v1`):
@@ -1092,7 +1100,7 @@ AUTH_RATE_LIMIT_MAX=10
 - `user_id` (UUID, PK)
 - `email`, `name`, `profile_image_url`
 - `phone`: nullable unique, `000-000-0000` 또는 `000-0000-0000` 형식만 저장
-- `job_type`: nullable `NURSE | DOCTOR | EMT | OTHER`
+- `job_type`: nullable, trim 후 1~20자 자유 문자열(기존 직종 코드 포함)
 - `workplace`: nullable, trim 기준 1~100자
 - `profile_image_key`: 관리 이미지 객체 key 정본. 현재 환경/소유자 namespace를 검증하고 API 응답에서 숨김.
 - `profile_completed_at`: 가입 프로필 최초 완료 시각. `null`이면 `requires_profile_setup=true`

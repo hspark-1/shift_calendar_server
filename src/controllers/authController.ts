@@ -1,4 +1,3 @@
-import { withAccountDataLock } from "../utils/accountDataLock";
 import { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import { User } from "../models";
@@ -35,15 +34,8 @@ import {
   getAccountDeletionStatus,
   requestAccountDeletion,
 } from "../services/accountDeletionService";
-import {
-  completeProfile as completeProfileService,
-  ProfileError,
-  updateProfileFields,
-} from "../services/profileService";
-import {
-  deleteProfileImage,
-  uploadProfileImage,
-} from "../services/profileImageStorageService";
+import { ProfileError } from "../services/profileService";
+import { mutateProfile } from "../services/profileMutationService";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -561,7 +553,7 @@ export async function updateProfile(
       });
       return;
     }
-    const user = await updateProfileFields(req.user.user_id, req.body);
+    const user = await mutateProfile(req.user.user_id, req.body, req.validated_profile_image, false, req.request_id);
 
     res.json({
       success: true,
@@ -587,51 +579,14 @@ export async function completeProfile(
     return;
   }
 
-  let stored_image: { key: string; public_url: string } | null = null;
   try {
-    if (req.validated_profile_image) {
-      try {
-        const user_id = req.user.user_id;
-        const image = req.validated_profile_image;
-        stored_image = await withAccountDataLock(user_id, async () => {
-          const current_user = await User.findByPk(user_id);
-          if (!current_user || current_user.account_status !== "ACTIVE") {
-            throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
-          }
-          return uploadProfileImage(user_id, image);
-        });
-      } catch (error) {
-        if (error instanceof ProfileError) throw error;
-        logError("profile_image_upload_failed", error, req.request_id);
-        throw new ProfileError(
-          503,
-          "PROFILE_IMAGE_STORAGE_UNAVAILABLE",
-          "프로필 이미지를 저장할 수 없습니다. 잠시 후 다시 시도해주세요.",
-        );
-      }
-    }
-
-    const user = await completeProfileService(req.user.user_id, {
-      name: req.body.name,
-      timezone: req.body.timezone,
-      phone: req.body.phone,
-      job_type: req.body.job_type,
-      workplace: req.body.workplace,
-      ...(stored_image ? { profile_image_key: stored_image.key } : {}),
-    });
+    const user = await mutateProfile(req.user.user_id, req.body, req.validated_profile_image, true, req.request_id);
     res.status(200).json({
       success: true,
       data: user.toJSON(),
       request_id: req.request_id,
     });
   } catch (error) {
-    if (stored_image) {
-      try {
-        await deleteProfileImage(stored_image.key);
-      } catch (cleanup_error) {
-        logError("profile_image_cleanup_failed", cleanup_error, req.request_id);
-      }
-    }
     sendProfileError(req, res, error, "auth_profile_complete_failed");
   }
 }

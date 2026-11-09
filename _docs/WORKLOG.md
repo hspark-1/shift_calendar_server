@@ -2,6 +2,27 @@
 
 # 작업 일지
 
+## 2026-11-10
+
+### [TODO] 프로필 편집 변경 커밋 정리·배포
+
+- 목적: 사용자가 Stage/Center 쿼리 적용 완료를 알리고 커밋 정리와 배포를 요청했다.
+- 변경: 공개 develop에 기능 변경을 커밋하고 private main에 병합한 뒤 기존 배포 경로를 실행한다.
+- 영향범위: API·기존 탈퇴 worker 배포. DB migration은 사용자 적용 완료 보고를 기준으로 재실행하지 않고 배포 검증에서 schema 준비를 확인한다.
+- 테스트: 배포 대상 코드/회귀·workflow·실행 상태와 health를 확인하고 결과를 기록한다.
+- 롤백: 자유 직종·큐 schema를 유지하는 호환 버전으로 복구하며 작업 중 발견한 배포 전제와 한계를 기록한다.
+- 다음: 원격 브랜치와 private main 배포 문서를 확인한다.
+
+### [DONE] 일반 프로필 부분 수정·사진 교체·자유 직종 지원
+
+- 목적: 전달받은 Flutter 프로필 편집 계약을 기존 JSON/가입 완료·비공개 이미지 계약과 호환되게 구현한다.
+- 변경: 일반 multipart 파일 단독/부분 수정, 자유 직종 1~20자와 선택값 삭제, 내부 필드 allowlist·파일/URL 동시 입력 거절을 구현했다. 가입/편집 공용 이미지 조정 서비스가 업로드→DB 저장→정리까지 계정 session lock을 보유하고 I/O 중 DB transaction은 열지 않는다. 새 key 작업 선기록·DB commit 안 새 작업 취소/이전 소유 key 예약·영속 재시도를 추가했다. 기존 탈퇴 worker가 비활성 플래그와 무관하게 정리하며 healthcheck도 새 schema를 검사한다. 완료 시각/boolean·인증 이미지 GET·개인정보 공개 범위는 보존한다.
+- 영향범위: 본인 수정·가입 이미지 공용 처리, 기존 탈퇴 worker의 이미지 정리, users 직종 CHECK와 새 정리 큐. 이미지 없는 필드 수정은 기존 row lock transaction을 유지한다. 새 env/사진 컬럼/seed는 없다. **Behavior change**: 일반 수정 rate limit·multipart·자유 직종, 파일+URL 400 및 동시 이미지 수정 잠금 충돌 503.
+- 파일: `src/services/{profileMutationService,profileImageCleanupService,profileService,profileImageStorageService}.ts`, auth controller/routes·upload middleware·User·profile OpenAPI, `src/workers/accountDeletionWorker.ts`, `migrations/{add_profile_edit_support,final_schema}.sql`, `.gitignore`, `schema.drawio`, profile/private-image/worker 테스트, `_docs/{PROFILE_EDIT_GUIDE,PROFILE_COMPLETION_GUIDE,PROJECT_CONTEXT,DECISIONS,WORKLOG}.md`. 신규 파일 역할·의존성·사용 예는 [PROFILE_EDIT_GUIDE.md](PROFILE_EDIT_GUIDE.md)에 기록했다. `visibility_flow.drawio`는 현재 checkout에 없어 공개 범위는 실제 모델/조회 코드와 기존 문서로 확인했다.
+- 테스트: strict TypeScript build, OpenAPI JSON·draw.io XML 파싱, `git diff --check` 성공. 격리 PostgreSQL 16+로컬 S3 호환 HTTP/실제 AWS SDK 통합 **21 pass/0 fail**: migration 멱등·기존 데이터 보존, JSON/multipart/사진 단독·선택값 삭제·Unicode/자료형 경계, 완료 시각/내부 key 비노출, MIME/손상/미지원/5MB/다중 파일/part, 401/탈퇴 상태, DB rollback·storage 503·unique 경쟁 409, commit 후 삭제 실패·재시도·현재 key 보호·fingerprint 변경 거절, commit 후 lock 정리 예외, 중단 고아 객체 복구, legacy/OAuth, 동시 교체/텍스트 수정·실제 탈퇴 접수/worker lock 경합을 검증했다. 관련 회귀 7파일 **52 pass/0 fail/1 skip**(공개 checkout에 없는 과거 비공개 가입 배포 SQL만 명시적 skip). 전체 `npm test`는 **83 pass/17 fail/12 skip**이며 `origin/develop` 원본 임시 사본의 기존 실패 18개와 비교해 **신규 실패 0개**다. 관련 profile 테스트를 공개/비공개 검증으로 분리해 1개 누락 실패를 해소했고, 남은 17개는 범위 밖 비공개 배포 파일/Apple Stage SQL 누락 및 기존 Apple Portal 문구 assertion이다. 운영 파일을 공개 브랜치로 복사해 우회하지 않았다.
+- 롤백: 자유 직종 호환 서버로 복구하고 additive schema/미완료 정리 큐를 유지한다. 사용자의 자유 직종을 enum으로 변환하거나 삭제하지 않는다. API와 worker를 함께 복구하며 큐가 비기 전에 처리 경로를 제거하지 않는다.
+- 결과/다음: `origin/develop` 기반 `codex/profile-edit`에 로컬 구현·검증·ADR-0043·서버 인수 가이드 완료. 실제 Stage/운영 DB 변경·배포·실기기 E2E·commit/push는 수행하지 않았다. 대상 DB/백업 확인→후속 migration→API/기존 worker 동시 배포→Stage 실기기 인수→운영 순서로 진행한다.
+
 ## 2026-11-09
 
 ### [DONE] 미커밋 Stage 개발 실행 기능 검토·정리

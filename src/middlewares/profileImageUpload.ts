@@ -162,7 +162,7 @@ export function profileImageUploadMiddleware(
       return;
     }
     if (error) {
-      next(error);
+      sendUploadError(req, res, 400, "INVALID_PROFILE_IMAGE", "이미지 multipart 요청이 올바르지 않습니다.");
       return;
     }
     if (!req.file) {

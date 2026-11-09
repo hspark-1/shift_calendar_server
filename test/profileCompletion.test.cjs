@@ -81,22 +81,42 @@ test("profile storage 환경 검증은 이전 base URL이 있으면 query/hash �
   process.env.PROFILE_IMAGE_PUBLIC_BASE_URL = original;
 });
 
-test("가입 프로필 route·OpenAPI·migration과 Stage/Center 실행 쿼리 계약", () => {
+test("가입·일반 편집 route와 OpenAPI·자유 직종 migration 계약", () => {
   const routes = readRepositoryFile("src/routes/authRoutes.ts");
   const service = readRepositoryFile("src/services/profileService.ts");
+  const migration = readRepositoryFile("migrations/add_profile_edit_support.sql");
+  const spec = JSON.parse(readRepositoryFile("src/openapi/profileAuthOpenApi.json"));
+  for (const route of ["/profile/complete", "/profile"]) {
+    const section = routes.slice(routes.indexOf(`  "${route}",`, routes.indexOf("// 가입 프로필")));
+    assert.match(section, /authRateLimitMiddleware[\s\S]*authMiddleware[\s\S]*profileImageUploadMiddleware/);
+    const post = spec.paths[`/auth${route}`].post;
+    assert.ok(post.requestBody.content["application/json"]);
+    assert.ok(post.requestBody.content["multipart/form-data"]);
+    for (const code of ["200", "400", "401", "409", "413", "429", "503"]) assert.ok(post.responses[code]);
+  }
+  assert.match(service, /sequelize[.]transaction/);
+  assert.match(service, /LOCK[.]UPDATE/);
+  assert.match(service, /profile_completed_at == null/);
+  assert.match(migration, /char_length\(btrim\(job_type\)\) BETWEEN 1 AND 20/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public[.]profile_image_cleanup_tasks/);
+  assert.doesNotMatch(migration, /UPDATE public[.]users|DROP SCHEMA/);
+  for (const name of ["ProfileCompleteFields", "ProfileUpdateRequest", "OwnProfile"]) {
+    assert.equal(spec.components.schemas[name].properties.job_type.enum, undefined);
+    assert.equal(spec.components.schemas[name].properties.job_type.maxLength, 20);
+  }
+});
+
+test("기존 가입 migration과 비공개 Stage/Center 실행 쿼리 계약", (t) => {
+  const private_files = ["add_profile_completion_support.sql", "rollback_profile_completion_support.sql", "stage_profile_completion_apply_pgadmin.sql", "center_profile_completion_apply_pgadmin.sql"];
+  const present = private_files.filter((file) => fs.existsSync(path.join(repository_root, "migrations", file)));
+  if (present.length === 0) { t.skip("공개 develop checkout에는 기존 가입 배포 SQL을 포함하지 않습니다."); return; }
+  assert.equal(present.length, private_files.length, "기존 배포 SQL은 모두 있어야 검증할 수 있습니다.");
   const migration = readRepositoryFile("migrations/add_profile_completion_support.sql");
   const rollback = readRepositoryFile("migrations/rollback_profile_completion_support.sql");
   const stage = readRepositoryFile("migrations/stage_profile_completion_apply_pgadmin.sql");
   const center = readRepositoryFile("migrations/center_profile_completion_apply_pgadmin.sql");
   const spec = JSON.parse(readRepositoryFile("src/openapi/profileAuthOpenApi.json"));
 
-  assert.match(
-    routes,
-    /"\/profile\/complete"[\s\S]*authRateLimitMiddleware[\s\S]*authMiddleware[\s\S]*profileImageUploadMiddleware/,
-  );
-  assert.match(service, /sequelize[.]transaction/);
-  assert.match(service, /LOCK[.]UPDATE/);
-  assert.match(service, /profile_completed_at == null/);
   assert.match(migration, /ADD COLUMN job_type[\s\S]*ADD COLUMN workplace[\s\S]*ADD COLUMN profile_completed_at/);
   assert.ok(
     migration.indexOf("ADD COLUMN job_type") <

@@ -26,7 +26,6 @@ import {
 } from "../middlewares/auth";
 import { authRateLimitMiddleware } from "../middlewares/rateLimit";
 import { validateRequestMiddleware } from "../middlewares/validateRequest";
-import { normalizePhoneNumber } from "../utils/phone";
 import { profileImageUploadMiddleware } from "../middlewares/profileImageUpload";
 
 const router = Router();
@@ -347,42 +346,9 @@ router.post(
 // 내 정보 수정
 router.post(
   "/profile",
+  authRateLimitMiddleware,
   authMiddleware,
-  [
-    body("name")
-      .optional()
-      .isString()
-      .withMessage("이름은 문자열이어야 합니다."),
-    body("timezone")
-      .optional()
-      .isString()
-      .withMessage("타임존은 문자열이어야 합니다."),
-    body("profile_image_url")
-      .optional({ nullable: true })
-      .isString()
-      .withMessage("프로필 이미지 URL은 문자열이어야 합니다."),
-    body("phone")
-      .optional()
-      .isString()
-      .withMessage("전화번호는 문자열이어야 합니다.")
-      .bail()
-      .custom((phone) => normalizePhoneNumber(phone) !== null)
-      .withMessage(
-        "전화번호는 10~11자리 숫자 또는 000-000-0000/000-0000-0000 형식이어야 합니다."
-      )
-      .customSanitizer((phone) => normalizePhoneNumber(phone)),
-    body("job_type")
-      .optional({ nullable: true })
-      .custom((value) =>
-        value === null || ["NURSE", "DOCTOR", "EMT", "OTHER", ""].includes(value),
-      )
-      .withMessage("job_type 형식이 올바르지 않습니다."),
-    body("workplace")
-      .optional({ nullable: true })
-      .isString()
-      .withMessage("workplace는 문자열 또는 null이어야 합니다."),
-  ],
-  validateRequestMiddleware,
+  profileImageUploadMiddleware,
   updateProfile
 );
 
