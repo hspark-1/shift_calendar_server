@@ -4,6 +4,7 @@
   "description": "Shift Calendar API Server",
   "main": "dist/index.js",
   "scripts": {
+    "dev:stage": "node --env-file=.env.stage.local scripts/dev-stage.cjs",
     "dev": "nodemon --exec \"node --inspect -r ts-node/register src/index.ts\"",
     "build": "tsc",
     "test": "npm run build && node --test test/*.test.cjs",

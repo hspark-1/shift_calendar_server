@@ -4,6 +4,15 @@
 
 ## 2026-11-09
 
+### [DONE] 미커밋 Stage 개발 실행 기능 검토·정리
+
+- 목적: main에 남은 Markdown·JSON·CJS 변경을 확인하고 공개 가능한 로컬 개발 기능을 develop에서 관리한다.
+- 변경: 일반 SSH 터널/nodemon 실행 스크립트와 npm dev:stage 명령을 추가하고 파일 역할·필수/기본 설정·사용 예·종료 절차를 문서화했다. 내부 장애 조사·실제 환경 기록은 private main에서 별도 정리한다.
+- 영향범위: 로컬 개발 실행만. 실제 서버 env·DB·API 동작 변경 없음. .vscode와 .env.stage.local은 Git 제외 상태 유지.
+- 테스트: node --check, package.json/개인 launch.json 파싱·명령 연결, strict TypeScript build, git diff --check 통과. 실제 SSH 대신 VM 모의 실행으로 성공·터널 실패·필수 env 누락·SIGINT·SIGTERM·터널 유실·nodemon spawn 오류의 7개 경로와 소유 socket 정리를 검증했다. 실제 Stage 접속·DB 변경은 수행하지 않았다.
+- 롤백: 본 커밋 revert. 기존 수동 터널과 npm run dev 사용.
+- 결과/다음: 검토 완료한 공개 기능을 develop에 커밋한다. 사용자 요청에 따라 기존 미전송 앱 정책/10분 폴링 커밋과 함께 origin/develop에 push하며, 비공개 main 변경은 자동 배포 없이 별도 반영한다.
+
 ### [DONE] 회원 탈퇴 워커 유휴 폴링을 10분으로 변경
 
 - 목적: 탈퇴 요청이 드문 환경에서 반복 선점 SQL과 heartbeat 쓰기를 줄인다.

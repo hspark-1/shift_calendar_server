@@ -1373,6 +1373,11 @@ node dist/workers/pushWorker.js --healthcheck
 
 ### Stage 자원을 사용하는 로컬 API 디버깅 원칙
 
+- `npm run dev:stage`: Git에서 제외된 `.env.stage.local`을 읽고 SSH 터널 연결 성공 후 nodemon으로 로컬 API를 실행한다. 기존 수동 터널이 같은 로컬 포트를 사용하면 먼저 종료한다. Ctrl+C/SIGTERM/nodemon 종료 시 이 명령이 만든 터널을 정리하며, 터널 유실을 감지하면 로컬 서버에도 종료 신호를 보낸다.
+- `scripts/dev-stage.cjs` 역할: SSH control socket과 nodemon의 수명주기 관리. 의존성: `--env-file`을 지원하는 Node.js, OpenSSH, 설치된 nodemon/ts-node. 사용 예: `npm run dev:stage`. DB schema·배포·실제 서버 설정은 변경하지 않는다.
+- 추가 설정: `STAGE_SSH_HOST`, `STAGE_SSH_USER`, `STAGE_SSH_KEY_PATH` 필수. `STAGE_SSH_PORT` 기본 22, `STAGE_DB_HOST` 기본 127.0.0.1, `STAGE_DB_PORT` 기본 5433. `DB_HOST=127.0.0.1`과 숫자 `DB_PORT`는 로컬 터널 입구이며 `STAGE_DB_*`는 SSH 서버가 연결할 DB 목적지다. 실제 접속 주소·키 경로는 `.env.stage.local`에만 둔다.
+- VS Code에서 사용할 때 로컬 `.vscode/launch.json`은 npm의 `run dev:stage`, `autoAttachChildProcesses=true`, `killBehavior=polite`로 구성할 수 있다. `.vscode/`는 Git 제외 대상으로 유지한다.
+
 - 개발 PC에서 Stage PostgreSQL·Redis를 확인할 때는 외부 포트를 공개하지 않고 SSH local forwarding을 사용합니다.
 - 기존 `.env`를 덮어쓰지 않고 gitignore 대상인 `.env.stage.local`에 터널의 `127.0.0.1` 포트와 Stage 접속 정보를 둔 뒤 `node --env-file=.env.stage.local -r ts-node/register src/index.ts`로 API만 실행합니다.
 - Redis key 충돌을 막기 위해 `CACHE_KEY_PREFIX=shiftmate:stage-local:<개발자>`처럼 실제 Stage의 `shiftmate:stage`와 다른 prefix를 사용합니다.
