@@ -341,3 +341,11 @@ worker는 provider task와 관리 이미지 원본·버전 삭제가 모두 완�
 - root 운영 CLI, 독립 heartbeat 감시, 7일 목표·30일 내 운영자 최종 처리, 30일 기기/완료 작업 정리를 구현했습니다.
 - 배포/예외/테스트/신규 파일 역할은 `_docs/PRIVACY_IMPLEMENTATION_REPORT.md`와 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`를 따릅니다.
 - Google/Naver의 FE 경계와 신규 연령 확인 계약은 `_docs/PRIVACY_FE_CONTRACT_PROPOSAL.md`에 기록했습니다.
+
+
+## 14. 2026-11-09 유휴 폴링 간격 변경
+
+- **Behavior change**: `ACCOUNT_DELETION_POLL_MS` 기본값·예시는 `600000`ms(10분). 빈 배치·비활성·루프 오류 뒤에 대기하며 선점된 작업을 처리한 다음에는 즉시 다음 배치를 조회한다. 새 요청과 예약 재시도 착수는 다음 폴링까지 지연될 수 있다.
+- 탈퇴 heartbeat stale 기준은 15분이며 푸시 기준 5분·독립 monitor 실행 주기 5분은 유지한다. SIGTERM/SIGINT는 대기 타이머를 취소하고 기존 연결 종료 흐름을 실행한다.
+- 실제 env override가 기본값보다 우선하며 API/ops의 감시 코드와 worker를 같이 교체한다. DB migration은 필요 없다. Docker healthcheck의 별도 30초 DB/Redis 조회는 기존 설정을 따른다.
+- 목적·대안·트레이드오프는 ADR-0042, 적용·검증·롤백은 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`의 10분 폴링 절을 따른다.

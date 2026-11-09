@@ -2,6 +2,18 @@
 
 # 작업 일지
 
+## 2026-11-09
+
+### [DONE] 회원 탈퇴 워커 유휴 폴링을 10분으로 변경
+
+- 목적: 탈퇴 요청이 드문 환경에서 반복 선점 SQL과 heartbeat 쓰기를 줄인다.
+- 변경: 기본 폴링·환경 예시 600000ms, 탈퇴 heartbeat stale 기준 15분, AbortController로 유휴·비활성·오류 대기 취소, 시작 로그 poll_ms 추가. 관련 회귀·ADR-0042·설계/운영 문서를 갱신했다.
+- 영향범위: 탈퇴 워커 유휴·오류 후 대기와 탈퇴 감시. 푸시 워커·탈퇴 접수/삭제 단계·DB schema 변경 없음. 기존 환경변수 값은 기본값보다 우선한다.
+- 파일: `src/workers/accountDeletionWorker.ts`, `src/config/environment.ts`, `.env.example`, `src/services/accountDeletionOperationsService.ts`, 관련 테스트와 `_docs/` 문서.
+- 테스트: develop strict TypeScript build와 탈퇴 11개 테스트(신규 5개) 통과. 실제 컴파일된 루프·Node 타이머를 자식 프로세스에서 실행해 기본/override, 빈 큐·비활성·오류·작업 연속 처리, SIGTERM/SIGINT 즉시 종료를 확인했다. develop 전체 테스트는 비공개 배포 파일/운영 로컬 SQL 누락 및 sandbox HTTP bind 제한으로 실패하여, private main 853be8d 기반 임시 검증 사본에 이번 src/test/.env.example diff와 기존 로컬 SQL만 결합하고 로컬 HTTP를 허용해 npm test 전체 124개 중 113 pass/0 fail/11 명시적 통합 skip으로 검증했다. Python 개인정보 monitor 3개와 git diff --check도 통과했다. 감시 통합 테스트는 탈퇴 6·14분 정상/15분 stale 및 푸시 6분 stale 경계를 갱신했으나 Docker daemon 미실행으로 실제 PostgreSQL·스토리지 통합은 미수행.
+- 롤백: 본 작업 diff 복원 및 기존 ACCOUNT_DELETION_POLL_MS 재설정 후 컨테이너 재생성. DB migration 불필요.
+- 결과/다음: develop 작업 트리 `/private/tmp/shiftmate-app-policy-develop`에서 완료. 원래 main의 미커밋 문서·package·scripts를 보존했다. 실제 서버 env 변경·배포·push는 미수행이며 기존 override가 있으면 운영 env를 600000으로 맞추고 worker와 API/ops 이미지를 함께 재생성해야 한다. Docker healthcheck의 별도 30초 DB 조회는 유지되므로 전체 DB 부하가 600분의 1이 되었다고 주장하지 않는다.
+
 ## 2026-11-08
 
 ### [DONE] 앱 호환 정책을 소스 코드 정본으로 전환

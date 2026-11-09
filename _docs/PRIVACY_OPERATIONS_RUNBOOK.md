@@ -12,6 +12,19 @@
 - 미완료 탈퇴·provider 자격정보는 기간만으로 삭제하지 않음. 원인 해결 후 완료하고, 완료 기록은 30일 기준 정리. 30일 내 해결 불가능한 예외는 운영자가 책임자·원인·최소 보존 항목·다음 검토일을 기록하고 즉시 조치. 무기한 방치나 자동 provider 성공 간주는 금지.
 - 로그 최대 30일, 백업 최대 30일 순환, 문의 완료 후 1년은 승인 정책이나 실제 서버/메일 설정 증거는 별도 수집 필요.
 
+## 10분 폴링 적용·검증·롤백 (2026-11-09)
+
+**Behavior change**: 신규 worker 기본값은 `ACCOUNT_DELETION_POLL_MS=600000`(밀리초)이다. 빈 배치·비활성·루프 오류 후 10분 대기하며, 작업을 선점한 배치 다음에는 즉시 다시 조회한다. 접수와 계정 이용 중지는 즉시 이루어진다. 신규 요청 발견·available_at 이후 재시도에는 다음 폴링까지 약 10분이 추가될 수 있고, 외부 장애·재시도를 포함한 완료 상한은 1시간으로 보장하지 않는다.
+
+1. Stage의 실제 worker 환경에서 기존 override를 확인한다. `ACCOUNT_DELETION_POLL_MS=1000`이 남아 있으면 새 기본값으로 바뀌지 않는다. 해당 환경의 런타임 env에 `ACCOUNT_DELETION_POLL_MS=600000`을 설정하거나 override를 제거한다. 숫자 tuning 값은 boolean 전용 feature-flags config에 추가하지 않는다.
+2. 15분 탈퇴 heartbeat 기준을 포함한 새 이미지로 worker와 감시 CLI를 실행하는 API/ops 컨테이너를 재생성한다. monitor 실행 주기 5분, 푸시 heartbeat 기준 5분, 수동 재처리의 최근 claim 5분 제한은 그대로 둔다. DB migration은 필요 없다.
+3. 시작 로그의 `account_deletion_worker_started.poll_ms=600000`을 확인한다. 큐가 빈 상태에서 heartbeat 갱신 간격과 `monitor`의 `worker_stale=false`를 확인한다. 10분 대기 중 정상 worker에 경보가 없어야 한다. 검증용 계정은 다음 조회에서 처리되고 COMPLETED가 되는지 확인한다. 유휴·비활성·오류 대기 중 SIGTERM/SIGINT로 종료할 때 타이머를 기다리지 않아야 한다.
+4. Stage 검증 후 Production에도 같은 값을 적용하고 worker 및 API/ops 이미지를 함께 교체한다. 본 저장소 수정만으로 실제 서버 env/이미지가 적용된 것으로 기록하지 않는다.
+
+부하 범위: 유휴 루프의 선점 SQL 2개와 heartbeat UPSERT 1개는 실행시간을 제외하면 worker당 하루 약 144루프·432문으로 줄어든다. 배포의 Docker healthcheck는 별도 30초 주기로 DB/Redis를 확인하므로 전체 DB SQL 횟수를 432회로 계산하지 않는다. 24시간 정리와 다른 worker도 별도다. 폴링을 15분 이상으로 다시 늘릴 때는 감시 여유도 함께 재설계한다.
+
+롤백: 런타임 env를 이전 폴링 값(기존 기본 1000ms)으로 복원하고 컨테이너를 재생성한다. 15분 감시는 짧은 폴링에서도 동작하지만 장애 탐지가 늦으므로 기존 5분 정책까지 복원하려면 worker·API/ops를 함께 이전 버전으로 되돌린다. DB와 진행 중 요청/checkpoint는 그대로 보존한다.
+
 ## BE-01 처리와 호환 경계
 
 ```text
@@ -64,7 +77,7 @@ node dist/scripts/accountDeletionOps.js attention
 node dist/scripts/accountDeletionOps.js inspect REQUEST_UUID
 ```
 
-monitor는 성공 0, 조치 대상 2, DB/프로그램 오류 1로 종료합니다. request ID 없는 건수·최장 대기·heartbeat만 출력합니다. attention은 가장 오래된 100개 작업 ID/상태를 반환하며 운영자 내부에서만 사용합니다. heartbeat가 5분 이상 갱신되지 않으면 worker 중단/정체로 봅니다. 탈퇴/푸시 worker가 모두 대상입니다. 24시간 이상 미완료 푸시도 경보에 포함합니다.
+monitor는 성공 0, 조치 대상 2, DB/프로그램 오류 1로 종료합니다. request ID 없는 건수·최장 대기·heartbeat만 출력합니다. attention은 가장 오래된 100개 작업 ID/상태를 반환하며 운영자 내부에서만 사용합니다. heartbeat가 탈퇴 worker는 15분 이상, 푸시 worker는 5분 이상 갱신되지 않으면 중단/정체로 봅니다. 24시간 이상 미완료 푸시도 경보에 포함합니다.
 
 원인을 먼저 해결한 뒤 root로 실행합니다. 웹 사용자·일반 앱 JWT로 호출할 수 없습니다. root 실행 권한·DB 자격정보·컨테이너 exec 권한은 운영자에게만 부여하고 임의 인자를 허용하는 공개 sudo wrapper는 만들지 않습니다.
 

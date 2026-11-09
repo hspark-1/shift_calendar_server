@@ -134,6 +134,14 @@ Flutter Kakao SDK Access Token
 
 ### 회원 탈퇴 구조
 
+#### 유휴 폴링과 감시 (2026-11-09)
+
+- **Behavior change**: `ACCOUNT_DELETION_POLL_MS`의 기본값과 `.env.example`을 `600000`ms(10분)로 변경한다. 유휴·worker 비활성·루프 오류 후 대기에 적용하며 처리할 작업이 있으면 다음 배치를 바로 선점한다. 요청 접수 즉시 이용 중지되며 삭제 착수·예약 재시도는 다음 조회까지 추가로 약 10분 기다릴 수 있다. 실제 삭제 완료 시간을 1시간으로 보장하지 않는다.
+- 성공 루프 heartbeat 감시는 탈퇴 worker 15분, 푸시 worker 5분이다. 독립 monitor timer 주기는 기존 5분이다. 긴 대기는 SIGTERM/SIGINT에서 취소하여 종료 타이머가 프로세스를 붙잡지 않는다. 시작 로그의 `poll_ms`로 적용값을 확인한다.
+- 기존 환경변수 값은 새 기본값보다 우선한다. 적용 시 Stage/Production 각각의 실제 worker 환경에 `ACCOUNT_DELETION_POLL_MS=600000`을 설정하거나 기존 override를 제거하고 감시를 실행하는 API/ops와 worker를 새 이미지로 재생성한다. DB migration은 필요 없다. 구체적인 적용·검증·롤백은 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`를 따른다.
+- 부하 감소는 반복 선점/heartbeat에 대한 것이다. 배포 Compose의 별도 Docker healthcheck는 기존 30초마다 DB/Redis를 확인하므로 전체 DB 접근이 10분 주기가 되지는 않는다.
+- `test/accountDeletion.test.cjs`는 실제 컴파일된 worker 루프와 Node 타이머를 별도 프로세스에서 실행하고 DB/provider를 대체하여 기본값·override·활성/비활성·오류 대기·연속 배치·SIGTERM/SIGINT 종료를 검증한다. 사용 예: `npm run build && node --test test/accountDeletion.test.cjs`.
+
 #### 그룹 감사자 탈퇴 정합성 (2026-11-08)
 
 - **Behavior change**: `groups.deleted_at`, `group_members.removed_at`이 있으면 해당 감사자는 계정 탈퇴로 NULL이 될 수 있다. 시각 없이 감사자만 지정하는 입력은 계속 거절한다. 활성 판정은 기존처럼 시각 컬럼 기준이다.
@@ -985,6 +993,7 @@ catch (error) {
 | `PUSH_MAX_ATTEMPTS`                   | 최대 provider 시도 수                    | `6`                            |
 | `PUSH_JOB_TTL_SECONDS`                | job·FCM TTL                              | `3600`                         |
 | `PUSH_TERMINAL_RETENTION_DAYS`        | terminal job/delivery 보관일             | `30`                           |
+| `ACCOUNT_DELETION_POLL_MS`            | 탈퇴 worker 유휴·오류 후 대기(밀리초)    | `600000` (10분)                |
 | `APPLE_TEAM_ID`                       | Apple Developer Team ID                  | 활성 시 필수                   |
 | `APPLE_KEY_ID`                        | Sign in with Apple key ID                | 활성 시 필수                   |
 | `APPLE_IOS_CLIENT_ID`                 | iOS Bundle ID                            | `com.hspark.shiftmate`         |

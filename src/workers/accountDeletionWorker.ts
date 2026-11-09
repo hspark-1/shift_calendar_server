@@ -1,5 +1,6 @@
 import { getPrivacyRetentionDays } from "../config/privacy";
 import crypto from "crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { cleanupUnboundDevices } from "../services/deviceService";
 import { withAccountDataLock } from "../utils/accountDataLock";
 import { getAccountImageScope, purgeAccountImages } from "../services/accountDeletionImageService";
@@ -41,6 +42,15 @@ interface ClaimedDeletionRequest {
 }
 
 let is_stopping = false;
+const shutdown_controller = new AbortController();
+
+async function waitForNextPoll(poll_ms: number): Promise<void> {
+  try {
+    await delay(poll_ms, undefined, { signal: shutdown_controller.signal });
+  } catch (error) {
+    if (!shutdown_controller.signal.aborted) throw error;
+  }
+}
 
 export function calculateAccountDeletionRetryDelayMs(
   attempt_count: number,
@@ -329,6 +339,7 @@ async function runHealthCheck(): Promise<void> {
 async function shutdown(signal: string): Promise<void> {
   if (is_stopping) return;
   is_stopping = true;
+  shutdown_controller.abort();
   console.log(JSON.stringify({ context: "account_deletion_worker_stopping", signal }));
   await disconnectRedis().catch(() => undefined);
   await disconnectDatabase().catch(() => undefined);
@@ -342,14 +353,14 @@ async function runWorker(): Promise<void> {
   await connectDatabase();
   const poll_ms = getPositiveIntegerEnvironmentVariable(
     "ACCOUNT_DELETION_POLL_MS",
-    1000,
+    600000,
   );
   let last_cleanup_at = 0;
-  console.log(JSON.stringify({ context: "account_deletion_worker_started" }));
+  console.log(JSON.stringify({ context: "account_deletion_worker_started", poll_ms }));
   while (!is_stopping) {
     try {
       if (!isAccountDeletionWorkerEnabled()) {
-        await new Promise((resolve) => setTimeout(resolve, poll_ms));
+        await waitForNextPoll(poll_ms);
         continue;
       }
       const processed_count = await processAccountDeletionBatch();
@@ -367,11 +378,11 @@ async function runWorker(): Promise<void> {
         ON CONFLICT (worker_name) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
       `);
       if (processed_count === 0) {
-        await new Promise((resolve) => setTimeout(resolve, poll_ms));
+        await waitForNextPoll(poll_ms);
       }
     } catch (error) {
       logError("account_deletion_worker_batch_failed", error);
-      await new Promise((resolve) => setTimeout(resolve, poll_ms));
+      await waitForNextPoll(poll_ms);
     }
   }
 }

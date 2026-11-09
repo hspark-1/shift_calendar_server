@@ -203,7 +203,14 @@ if (!enabled) {
     assert.ok(monitor.failed_count >= 1); assert.ok(monitor.overdue_count >= 1); assert.equal(monitor.worker_stale, true);
     await sequelize.query("INSERT INTO privacy_worker_heartbeats VALUES ('account-deletion', now()) ON CONFLICT(worker_name) DO UPDATE SET last_seen_at=now()");
     monitor = await getDeletionMonitor(); assert.equal(monitor.worker_stale, false);
+    await sequelize.query("INSERT INTO privacy_worker_heartbeats VALUES ('push', now()) ON CONFLICT(worker_name) DO UPDATE SET last_seen_at=now()");
     await sequelize.query("UPDATE privacy_worker_heartbeats SET last_seen_at=now()-interval '6 minutes'");
+    monitor = await getDeletionMonitor();
+    assert.equal(monitor.worker_stale, false);
+    assert.equal(monitor.push_worker_stale, true);
+    await sequelize.query("UPDATE privacy_worker_heartbeats SET last_seen_at=now()-interval '14 minutes' WHERE worker_name='account-deletion'");
+    assert.equal((await getDeletionMonitor()).worker_stale, false);
+    await sequelize.query("UPDATE privacy_worker_heartbeats SET last_seen_at=now()-interval '15 minutes' WHERE worker_name='account-deletion'");
     assert.equal((await getDeletionMonitor()).worker_stale, true);
     await retry(await readRequest(receipt), 'WORKER_RECOVERED');
     await processAccountDeletionRequest(receipt.deletion_request_id);

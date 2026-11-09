@@ -311,7 +311,7 @@ export function validateEnvironment(): void {
   getPositiveIntegerEnvironmentVariable("PUSH_JOB_TTL_SECONDS", 3600);
   getPositiveIntegerEnvironmentVariable("PUSH_TERMINAL_RETENTION_DAYS", 30);
   getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_REAUTH_SECONDS", 600);
-  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_POLL_MS", 1000);
+  getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_POLL_MS", 600000);
   getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_BATCH_SIZE", 10);
   getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_LEASE_SECONDS", 120);
   getPositiveIntegerEnvironmentVariable("ACCOUNT_DELETION_MAX_ATTEMPTS", 12);

@@ -101,3 +101,98 @@ test("회원 탈퇴 worker health는 활성화 시 migration schema를 검증한
   assert.match(health_body, /AccountDeletionRequest\.count\(\)/);
   assert.match(health_body, /AccountDeletionProviderTask\.count\(\)/);
 });
+
+const worker_loop_probe = `
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { setTimeout: delay } = require('node:timers/promises');
+  const actual_environment = require('./dist/config/environment');
+  const scenario = process.env.WORKER_TEST_SCENARIO;
+  let claim_count = 0;
+  let heartbeat_count = 0;
+  const modules = {
+    '../config/privacy': { getPrivacyRetentionDays: () => 30 },
+    '../config/environment': {
+      ...actual_environment,
+      validateEnvironment() {},
+      validateAccountDeletionWorkerEnvironment() {},
+      validateAppleAuthEnvironment() {},
+    },
+    '../config/accountDeletion': require('./dist/config/accountDeletion'),
+    '../config/database': {
+      connectDatabase: async () => {},
+      disconnectDatabase: async () => console.log(JSON.stringify({ closed: 'database' })),
+      sequelize: {
+        transaction: async (callback) => callback({}),
+        query: async (sql) => {
+          if (scenario === 'error') throw new Error('TEST_DATABASE_UNAVAILABLE');
+          if (sql.includes('RETURNING deletion_request_id')) {
+            claim_count += 1;
+            return scenario === 'busy' && claim_count === 1
+              ? [{ deletion_request_id: 'completed-request' }] : [];
+          }
+          if (sql.includes('INSERT INTO privacy_worker_heartbeats')) heartbeat_count += 1;
+          return [];
+        },
+      },
+    },
+    '../config/redis': {
+      disconnectRedis: async () => console.log(JSON.stringify({ closed: 'redis' })),
+    },
+    '../models': { AccountDeletionRequest: { findByPk: async () => null } },
+    '../services/deviceService': { cleanupUnboundDevices: async () => 0 },
+    '../services/accountDeletionService': { cleanupCompletedAccountDeletionRequests: async () => {} },
+    '../services/accountDeletionImageService': {},
+    '../services/accountDeletionProviderService': {},
+    '../services/workShiftMonthCacheService': {},
+    '../utils/accountDataLock': {},
+    '../utils/logger': { logError: (context) => console.log(JSON.stringify({ error_context: context })) },
+    'sequelize': { QueryTypes: { SELECT: 'SELECT' } },
+    'node:timers/promises': {
+      setTimeout: (poll_ms, value, options) => {
+        console.log(JSON.stringify({ waiting: true, poll_ms, claim_count, heartbeat_count }));
+        const pending = delay(poll_ms, value, options);
+        setImmediate(() => process.kill(process.pid, process.env.WORKER_TEST_SIGNAL));
+        return pending;
+      },
+    },
+  };
+  const worker_module = { exports: {} };
+  const worker_require = (name) => {
+    if (!(name in modules) && name !== 'crypto') throw new Error('Unexpected dependency: ' + name);
+    return name in modules ? modules[name] : require(name);
+  };
+  worker_require.main = worker_module;
+  vm.runInNewContext(fs.readFileSync('./dist/workers/accountDeletionWorker.js', 'utf8'), {
+    require: worker_require, module: worker_module, exports: worker_module.exports,
+    process, console, AbortController,
+  });
+`;
+
+for (const scenario of ['empty', 'busy', 'disabled', 'error', 'override']) {
+  test(`탈퇴 워커 ${scenario}: 폴링 주기와 종료 신호 처리`, () => {
+    const { spawnSync } = require('node:child_process');
+    const signal = scenario === 'override' ? 'SIGINT' : 'SIGTERM';
+    const env = { ...process.env, ACCOUNT_DELETION_WORKER_ENABLED: String(scenario !== 'disabled'),
+      WORKER_TEST_SCENARIO: scenario, WORKER_TEST_SIGNAL: signal };
+    env.ACCOUNT_DELETION_POLL_MS = "";
+    if (scenario === 'override') env.ACCOUNT_DELETION_POLL_MS = '20000';
+    const result = spawnSync(process.execPath, ['-e', worker_loop_probe], {
+      cwd: repository_root, env, encoding: 'utf8', timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.signal, null);
+    const events = result.stdout.trim().split('\n').map((line) => JSON.parse(line));
+    const waits = events.filter((event) => event.waiting);
+    assert.equal(waits.length, 1);
+    assert.equal(waits[0].poll_ms, scenario === 'override' ? 20000 : 600000);
+    assert.equal(waits[0].claim_count, scenario === 'busy' ? 2 : ['disabled', 'error'].includes(scenario) ? 0 : 1);
+    assert.equal(waits[0].heartbeat_count, scenario === 'busy' ? 2 : ['disabled', 'error'].includes(scenario) ? 0 : 1);
+    assert.ok(events.some((event) => event.context === 'account_deletion_worker_stopping' && event.signal === signal));
+    assert.equal(events.filter((event) => event.closed === 'database').length, 1);
+    assert.equal(events.filter((event) => event.closed === 'redis').length, 1);
+    const errors = events.filter((event) => event.error_context);
+    assert.deepEqual(errors.map((event) => event.error_context), scenario === 'error' ? ['account_deletion_worker_batch_failed'] : []);
+  });
+}

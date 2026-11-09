@@ -14,7 +14,7 @@ export async function getDeletionMonitor(): Promise<Record<string, unknown>> {
       count(*) FILTER (WHERE completed_at IS NULL)::int AS pending_count,
       COALESCE(EXTRACT(EPOCH FROM now() - min(requested_at) FILTER (WHERE completed_at IS NULL)), 0)::bigint AS oldest_pending_seconds,
       NOT EXISTS (SELECT 1 FROM privacy_worker_heartbeats WHERE worker_name = 'account-deletion'
-        AND last_seen_at > now() - interval '5 minutes') AS worker_stale,
+        AND last_seen_at > now() - interval '15 minutes') AS worker_stale,
       NOT EXISTS (SELECT 1 FROM privacy_worker_heartbeats WHERE worker_name = 'push'
         AND last_seen_at > now() - interval '5 minutes') AS push_worker_stale,
       (SELECT count(*)::int FROM push_jobs WHERE status IN ('PENDING', 'PROCESSING', 'RETRY')
