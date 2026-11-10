@@ -142,7 +142,8 @@ Authorization: Bearer {access_token}
         "all_day": false,
         "start_at": "2026-07-05T10:00:00.000Z",
         "end_at": "2026-07-05T11:00:00.000Z",
-        "visibility_level": 1
+        "visibility_level": 1,
+        "is_private": false
       }
     ]
   }
@@ -155,7 +156,7 @@ Authorization: Bearer {access_token}
 - 캘린더 소유자: `friend_user_id`
 - 접근 설정: `friend_level_settings.owner_user_id = :friend_user_id` AND `friend_level_settings.friend_user_id = :viewer_user_id`
 - 근무표 노출: `can_view = true`인 친구 관계이면 조회 가능 (`work_shifts.visibility_level = 0`)
-- 개인 일정 노출: `can_view = true` AND `friend_level_settings.friend_level >= events.visibility_level`
+- 개인 일정 노출: 친구 관계 존재 AND `events.is_private = false` AND `can_view = true` AND `friend_level_settings.friend_level >= events.visibility_level`. private 행 전체는 레벨 5도 조회할 수 없으며 공개 행은 `is_private:false`를 포함한다. 상세 계약은 [EVENT_PRIVACY_GUIDE.md](EVENT_PRIVACY_GUIDE.md)를 따른다.
 - 근무표 응답 필드는 개인 캘린더와 동일하며, `shift_type_color`는 `#AARRGGBB`, `start_time`/`end_time`은 `HH:mm:ss`로 반환
 
 #### Error Codes

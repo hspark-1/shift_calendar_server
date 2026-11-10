@@ -111,6 +111,7 @@ export interface FriendCalendarEvent {
   start_at: Date;
   end_at: Date;
   visibility_level: number;
+  is_private: boolean;
 }
 
 export type UserSearchField = "email" | "phone";
@@ -256,7 +257,8 @@ export async function getFriendCalendarRange(
         all_day,
         start_at,
         end_at,
-        visibility_level
+        visibility_level,
+        is_private
       FROM v_visible_events_for_friend
       WHERE owner_user_id = :friend_user_id
         AND viewer_user_id = :viewer_user_id

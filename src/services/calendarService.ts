@@ -36,6 +36,7 @@ export interface EventApiModel {
   start_at: Date;
   end_at: Date;
   visibility_level: number;
+  is_private: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -48,6 +49,7 @@ export interface CreateEventInput {
   start_at: string;
   end_at: string;
   visibility_level: number;
+  is_private?: boolean;
 }
 
 const max_event_visibility_level = 5;
@@ -86,6 +88,7 @@ function toEventApiModel(event: Event): EventApiModel {
     start_at: event.start_at,
     end_at: event.end_at,
     visibility_level: event.visibility_level,
+    is_private: event.is_private,
     created_at: event.created_at!,
     updated_at: event.updated_at!,
   };
@@ -362,6 +365,10 @@ export async function createEvent(
     throw new Error("INVALID_VISIBILITY_LEVEL");
   }
 
+  if (input.is_private !== undefined && typeof input.is_private !== "boolean") {
+    throw new Error("INVALID_EVENT_PRIVACY");
+  }
+
   const event = await Event.create({
     owner_user_id: user_id,
     created_by_user_id: user_id,
@@ -372,6 +379,7 @@ export async function createEvent(
     start_at,
     end_at,
     visibility_level,
+    is_private: input.is_private ?? false,
   });
 
   return toEventApiModel(event);

@@ -44,6 +44,13 @@ function getCreateEventValidationError(errors: any[]): {
     };
   }
 
+  if (error_paths.has("is_private")) {
+    return {
+      code: "INVALID_EVENT_PRIVACY",
+      message: "공개 범위가 올바르지 않습니다.",
+    };
+  }
+
   return {
     code: "VALIDATION_ERROR",
     message: "입력값 검증에 실패했습니다.",
@@ -411,6 +418,17 @@ export async function createEvent(
     });
   } catch (error: any) {
     logError("calendar_create_event_failed", error, req.request_id);
+
+    if (error.message === "INVALID_EVENT_PRIVACY") {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_EVENT_PRIVACY",
+          message: "공개 범위가 올바르지 않습니다.",
+        },
+      });
+      return;
+    }
 
     if (error.message === "INVALID_TITLE") {
       res.status(400).json({

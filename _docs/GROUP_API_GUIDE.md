@@ -74,7 +74,7 @@ Local/Stage만 `API_DOCS_ENABLED=true`를 명시하고 Center는 기본 비활�
 
 1. Query 1은 활성 그룹·actor membership·모든 활성 멤버와 `SELF/VISIBLE/DENIED`를 계산합니다.
 2. Query 2는 본인 `work_shifts`와 다른 멤버의 `v_visible_work_shifts_for_friend`를 union하고 schedule/type을 조인합니다.
-3. Query 3은 본인 `events`와 `v_visible_events_for_friend`를 union하고 그룹 timezone overlap을 적용합니다.
+3. Query 3은 본인 `events`(private 포함)와 `v_visible_events_for_friend`(is_private=false만)를 union하고 그룹 timezone overlap을 적용합니다. 모든 이벤트에 is_private를 반환합니다. 그룹 OWNER/ADMIN도 타인 private 행을 조회할 수 없습니다. 상세 계약은 [EVENT_PRIVACY_GUIDE.md](EVENT_PRIVACY_GUIDE.md)를 따릅니다.
 
 이벤트 조건은 `start_at < 종료일 다음 날 00:00`과 `end_at > 시작일 00:00`이며 end-exclusive입니다. `work_date`는 사용자 날짜 문자열을 변환하지 않습니다. 모든 shift/event에는 `owner_user_id`가 있습니다.
 

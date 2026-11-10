@@ -1,5 +1,14 @@
 # 프로젝트 컨텍스트
 
+## 개인 일정 나만 보기 (2026-11-11)
+
+- `events.is_private boolean NOT NULL DEFAULT false`는 레벨과 독립적인 소유자 전용 공개 설정이다. 요청 생략은 false이며 실제 boolean만 허용하고 잘못된 타입은 `400 INVALID_EVENT_PRIVACY`다. visibility_level 필수 0~5와 기존 시간/삭제 계약을 유지한다.
+- 본인 목록·기간·날짜·그룹 본인 행은 private도 포함한다. 친구·그룹 타인 일정은 `is_private=false AND 친구 관계 AND can_view=true AND friend_level>=visibility_level`인 행만 DB 뷰에서 조회한다. 모든 일정 DTO에 is_private를 포함한다. 근무표 공개/캐시는 변경하지 않는다.
+- Router → auth/validation → Controller → Service → events / 공개 view → DTO 흐름이며 개인 일정은 캐시하지 않는다. 그룹은 기존 3개 set-based query를 유지한다.
+- **Behavior change**: private=true는 타인 전체 행을 차단한다. DB 증분 migration을 서버보다 먼저 적용하고 Stage/운영 인수 후 Flutter를 활성화한다. private 데이터가 있으면 필터 제거·컬럼 삭제로 롤백하지 않는다.
+- 신규 파일 역할·의존성·사용 예·테스트·사전 점검·롤백은 [EVENT_PRIVACY_GUIDE.md](EVENT_PRIVACY_GUIDE.md), 결정은 ADR-0044를 따른다. 루트 `visibility_flow.drawio`는 현재 단일 캘린더 공개 흐름을 문서화한다. 로컬 검증 완료이며 실제 배포는 미수행이다.
+
+
 ## 앱 API 호환 정책 (2026-11-08)
 
 `GET /api/v1/app/version-policy?platform=IOS|ANDROID`를 로그인 없이 제공한다. 최소 호환 번호·스토어 URL·안내 문구는 `src/config/appVersionPolicy.ts`의 `app_version_policies`가 유일한 정본이며 양 플랫폼 현재 최소값은 1이다. env override는 지원하지 않는다. Router(query validation) → Controller(no-store/안전 오류) → Service(소스 설정 검증) 흐름이며 DB 변경은 없다. 값 0은 차단 비활성, 같은 호환 번호는 허용한다. 정책 변경은 소스 수정·검토 후 재실행 또는 재빌드·배포로 반영하고, 긴급 해제도 최소값 0의 정상 정책 endpoint를 유지한다. 신규 파일 역할·의존성·사용 예·롤백은 [APP_VERSION_POLICY.md](APP_VERSION_POLICY.md), 결정은 ADR-0041을 참조한다. 이 소스 전환의 실제 재배포는 수행하지 않았다.
@@ -1601,7 +1610,7 @@ P0/P1 그룹 요청
 - 그룹은 별도 캘린더·일정·근무를 소유하지 않습니다. `group_members`는 구성과 역할만 나타냅니다.
 - 그룹 가입은 친구 관계나 `friend_level_settings`를 만들거나 변경하지 않습니다.
 - 본인 캘린더는 `SELF`, 다른 활성 멤버는 friendship과 소유자→조회자 `can_view=true`일 때 `VISIBLE`, 그 외 `DENIED`입니다.
-- `VISIBLE` 이벤트는 기존 `friend_level >= visibility_level`, 근무는 `visibility_level=0` 규칙을 그대로 사용합니다.
+- `VISIBLE` 이벤트는 `is_private=false AND friend_level >= visibility_level`, 근무는 `visibility_level=0` 규칙을 그대로 사용합니다.
 - `DENIED` 멤버는 응답에 남지만 그 멤버의 row와 숨겨진 개수는 반환하지 않습니다.
 - 그룹 캘린더는 멤버/접근 상태, visible work shifts, visible events를 최대 3개 set-based query로 조회합니다.
 - owner별 월 Redis v1은 그룹 aggregate에서 사용하지 않습니다. Stage 측정으로 병목이 확인될 때만 multi-owner cache를 별도 설계합니다.

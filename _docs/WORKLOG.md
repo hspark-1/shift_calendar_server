@@ -2,6 +2,30 @@
 
 # 작업 일지
 
+## 2026-11-11
+
+### [TODO] 개인 일정 나만 보기 커밋 정리·배포 푸시
+
+- 목적: 사용자가 승인한 개인 일정 비공개 서버 변경을 공개 develop과 비공개 배포 main에 반영한다.
+- 변경: 이번 diff·문서·검증 결과를 검토하고 커밋, 원격 최신 변경과 충돌 없이 통합, 배포 트리 검증 후 push한다.
+- 영향범위: 기존 승인된 is_private 기능과 배포용 schema 사전 검사. DB migration은 자동 재실행하지 않는다.
+- 테스트: 관련 회귀와 배포용 전체 테스트·배포 워크플로를 확인한다.
+- 롤백: private 데이터를 유지하는 호환 서버로 복구하고 DB 컬럼/필터는 제거하지 않는다.
+- 다음: 사용자가 Stage 정상 및 Center migration 적용 완료를 확인했다. DB를 재변경하지 않고 배포용 검증 후 push한다.
+
+
+### [DONE] 개인 일정 나만 보기 서버 로컬 구현·검증
+
+- **목적**: 레벨과 독립적인 `is_private`로 개인 일정 전체 행의 타인 노출을 차단한다.
+- **변경**: NOT NULL/default false 모델·증분 migration·정본 DDL, route와 service의 엄격한 boolean 검증, 생성/본인/친구/그룹 DTO, 공통 공개 view 필터를 반영했다. 기존 15개 view 컬럼 이름·타입·순서를 preflight로 확인하고 viewer_user_id 뒤에 새 컬럼을 추가한다. OpenAPI·ADR-0044·가이드·로컬 AGENTS·서버 도면을 동기화했다.
+- **영향범위**: **Behavior change**: true 개인 일정은 레벨 5·can_view=true·같은 그룹 OWNER/ADMIN도 전체 행을 볼 수 없다. 기존 데이터/요청 생략은 false로 유지하며 visibility_level 필수 0~5, 시간/soft delete/소유자 삭제·근무표 공개/캐시는 보존한다. 신규 env/인덱스/seed는 없다.
+- **파일**: `src/models/Event.ts`, calendar route/controller/service, friend/group service·group types, calendar/group OpenAPI, `migrations/{add_event_privacy,final_schema}.sql`, `package.json`, `.gitignore`, `test/eventPrivacy{,Integration}.test.cjs`, 기존 cache/group 통합 초기화, `schema.drawio`, `visibility_flow.drawio`, `_docs/{EVENT_PRIVACY_GUIDE,PROJECT_CONTEXT,DECISIONS,FRIEND_API_GUIDE,GROUP_API_GUIDE,WORKLOG}.md`. 신규 파일 역할·의존성·사용 예는 [EVENT_PRIVACY_GUIDE.md](EVENT_PRIVACY_GUIDE.md)에 기록했다. AGENTS는 기존 Git 제외 정책을 유지하고 로컬 DDL만 갱신했다.
+- **테스트**: strict TypeScript build·CJS 구문·OpenAPI JSON/내부 참조·draw.io XML·git diff --check 통과. 단위/인증 HTTP/병합 OpenAPI/삭제 회귀 **7 pass/0 fail**. 고정 격리 PostgreSQL 16+실제 HTTP **7 pass/0 fail**: 기존 행 false, view 컬럼 순서·타입·OID·권한·종속 view, 중복/동명 컬럼/drift 거절·원자성, 신규/증분 view 정의 동일성, 구형 INSERT/SELECT/API, owner 위조, timed/종일/다일·레벨 0/2/3/5·soft delete·배타적 경계, 본인 4경로·친구·그룹 관리자·차단/비친구·권한 철회·private 삭제 확인. 기존 notSelf validator가 bulk 부분 update에서 두 ID 없이 실행되는 테스트 fixture 오류는 기존 서비스와 같은 인스턴스 update로 수정했다. DebugMCP 세션이 시작되지 않아 모델·Sequelize 실제 build/validate 경로와 실패 stack을 직접 확인했으며 제품 모델은 변경하지 않았다.
+- **전체 회귀**: 최종 npm test **88 pass/17 fail/13 skip**. 별도 `origin/develop` 기준 4f452bf 원본 사본은 **82 pass/17 fail/14 skip**이며 실패 이름 17개가 동일하여 **신규 실패 0개**다. 기존 실패는 비공개 배포 파일·Apple Stage SQL 누락/가이드 문구 assertion이며 목표 밖 파일은 수정하지 않았다. skip 차이는 로컬 Git 제외 파일의 존재에 따른 기존 테스트 조건과 새 통합 opt-in 항목이다. 별도 lint 명령/설정은 없다.
+- **롤백**: private 행이 있으면 컬럼·타인 차단 view를 제거하지 않는다. 신규 private 생성만 중지하거나 private 호환 서버로 복구한다. 다운 migration은 제공하지 않는다.
+- **결과/다음**: `origin/develop`이 다른 worktree에서 사용 중이므로 이 checkout은 `codex/private-events`로 전환했다. 로컬 구현·검증 완료, commit/push·Stage/운영 DB 변경/배포·실사용자 인수·Flutter 활성화는 미수행이다. 이번 검증용 격리 테스트 컨테이너·네트워크는 제거했다. 서버 배포 시 백업/실제 view 확인 → add_event_privacy.sql → 서버 → A/B/C 권한별 인수 → 운영 인수 후 Flutter 활성화 순서로 진행한다.
+
+
 ## 2026-11-10
 
 ### [DONE] 프로필 편집 변경 커밋 정리·배포

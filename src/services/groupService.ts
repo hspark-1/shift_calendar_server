@@ -1167,6 +1167,7 @@ interface CalendarEventRow {
   start_at: Date;
   end_at: Date;
   visibility_level: number;
+  is_private: boolean;
 }
 
 export async function getGroupCalendarRange(
@@ -1304,7 +1305,8 @@ export async function getGroupCalendarRange(
             e.all_day,
             e.start_at,
             e.end_at,
-            e.visibility_level
+            e.visibility_level,
+            e.is_private
           FROM events e
           WHERE e.owner_user_id = :actor_user_id
             AND e.deleted_at IS NULL
@@ -1328,7 +1330,8 @@ export async function getGroupCalendarRange(
             e.all_day,
             e.start_at,
             e.end_at,
-            e.visibility_level
+            e.visibility_level,
+            e.is_private
           FROM v_visible_events_for_friend e
           WHERE e.viewer_user_id = :actor_user_id
             AND e.owner_user_id IN (:member_user_ids)
@@ -1381,6 +1384,7 @@ export async function getGroupCalendarRange(
     start_at: toUtcIso(row.start_at),
     end_at: toUtcIso(row.end_at),
     visibility_level: row.visibility_level,
+    is_private: row.is_private,
   }));
 
   return {

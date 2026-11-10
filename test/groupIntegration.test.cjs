@@ -129,6 +129,9 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
       "utf8",
     );
     await sequelize.query(base_schema);
+    await sequelize.query(fs.readFileSync(
+      path.join(__dirname, "..", "migrations", "add_event_privacy.sql"), "utf8",
+    ));
 
     await applyMigration();
     const tables_after_apply = await sequelize.query(

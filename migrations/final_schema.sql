@@ -16,7 +16,7 @@ Source: AGENTS.md
   - can_view (내 캘린더 열람 허용/차단)
   - friend_level (레벨 비교로 일정 노출)
 - 노출 규칙:
-  - (can_view = true) AND (friend_level >= visibility_level)
+  - 개인 일정: is_private=false AND (can_view = true) AND (friend_level >= visibility_level)
   - work_shifts.visibility_level = 0 고정
 - UUID 사용: pgcrypto + gen_random_uuid()
 - 시간: timestamptz (UTC 저장 권장)
@@ -329,6 +329,7 @@ CREATE TABLE events (
 
   deleted_at timestamptz,
   deleted_by_user_id uuid,
+  is_private boolean NOT NULL DEFAULT false,
 
   CONSTRAINT fk_events_owner FOREIGN KEY (owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   CONSTRAINT fk_events_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
@@ -345,7 +346,8 @@ CREATE INDEX idx_events_owner_visibility_not_deleted
 ON events(owner_user_id, visibility_level, start_at)
 WHERE deleted_at IS NULL;
 
-COMMENT ON TABLE events IS '개인 일정. 노출 조건: (친구 설정 can_view=true) AND (friend_level >= visibility_level)';
+COMMENT ON TABLE events IS '개인 일정. 타인 노출: is_private=false AND 친구 관계 AND can_view=true AND friend_level>=visibility_level';
+COMMENT ON COLUMN events.is_private IS 'true면 소유자만 조회 가능. 친구 레벨/열람/그룹보다 우선';
 
 -- =========================================================
 -- 8) WORK SHIFTS
@@ -645,13 +647,18 @@ EXECUTE FUNCTION fn_on_friend_request_status_change();
 -- =========================================================
 CREATE OR REPLACE VIEW v_visible_events_for_friend AS
 SELECT
-  e.*,
-  fls.friend_user_id AS viewer_user_id
+  e.event_id, e.owner_user_id, e.created_by_user_id,
+  e.title, e.memo, e.place, e.all_day, e.start_at, e.end_at,
+  e.visibility_level, e.created_at, e.updated_at,
+  e.deleted_at, e.deleted_by_user_id,
+  fls.friend_user_id AS viewer_user_id,
+  e.is_private
 FROM events e
 JOIN friend_level_settings fls
   ON fls.owner_user_id = e.owner_user_id
  AND fls.can_view = true
 WHERE e.deleted_at IS NULL
+  AND e.is_private = false
   AND EXISTS (
     SELECT 1
     FROM friendships f

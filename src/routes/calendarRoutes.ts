@@ -130,6 +130,10 @@ router.post(
       .isInt({ min: 0, max: 5 })
       .withMessage("공개 레벨이 올바르지 않습니다.")
       .toInt(),
+    body("is_private")
+      .optional()
+      .custom((value) => typeof value === "boolean")
+      .withMessage("공개 범위가 올바르지 않습니다."),
     body("memo").optional({ nullable: true }).isString(),
     body("place").optional({ nullable: true }).isString(),
   ],

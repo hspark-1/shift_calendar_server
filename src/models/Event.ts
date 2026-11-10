@@ -13,6 +13,7 @@ interface EventAttributes {
   start_at: Date; // timestamptz
   end_at: Date; // timestamptz
   visibility_level: number; // 0 이상
+  is_private: boolean;
   created_at?: Date;
   updated_at?: Date;
   deleted_at?: Date | null;
@@ -27,6 +28,7 @@ interface EventCreationAttributes
     | "place"
     | "all_day"
     | "visibility_level"
+    | "is_private"
     | "created_at"
     | "updated_at"
     | "deleted_at"
@@ -47,6 +49,7 @@ class Event
   declare start_at: Date;
   declare end_at: Date;
   declare visibility_level: number;
+  declare is_private: boolean;
   declare created_at: Date | undefined;
   declare updated_at: Date | undefined;
   declare deleted_at: Date | null | undefined;
@@ -110,6 +113,11 @@ Event.init(
       validate: {
         min: 0,
       },
+    },
+    is_private: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
     created_at: {
       type: DataTypes.DATE,

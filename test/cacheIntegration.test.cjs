@@ -53,6 +53,9 @@ if (process.env.RUN_CACHE_INTEGRATION !== "true") {
       "utf8",
     );
     await sequelize.query(schema_sql);
+    await sequelize.query(fs.readFileSync(
+      path.join(__dirname, "..", "migrations", "add_event_privacy.sql"), "utf8",
+    ));
     const redis = await getRedisClient();
     assert.ok(redis?.isReady);
     await redis.flushDb();

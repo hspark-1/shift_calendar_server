@@ -1,0 +1,82 @@
+<mxfile host="app.diagrams.net" modified="2026-11-11T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="event-visibility" name="개인 일정·근무표 공개 판정">
+    <mxGraphModel dx="1900" dy="1500" grid="1" gridSize="10" page="1" pageWidth="1900" pageHeight="1500">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="start" value="인증 사용자 viewer_user_id → owner_user_id 개인 캘린더&#10;그룹 요청: 활성 그룹·멤버 확인 후 구성원별 판정" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="580" y="30" width="540" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="self" value="owner_user_id == viewer_user_id?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="670" y="170" width="360" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="own" value="본인 events + work_shifts&#10;is_private=true 포함&#10;deleted_at IS NULL + 기존 기간/날짜 조건" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="100" y="180" width="400" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="acl" value="친구 관계 EXISTS&#10;owner → viewer can_view=true?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="650" y="360" width="400" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="denied" value="친구 API: 404(친구 아님) / 403(열람 차단)&#10;그룹 API: DENIED 멤버만, 일정·근무 row 없음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="380" width="460" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="private" value="개인 일정 is_private = false?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="380" y="610" width="380" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="hidden" value="해당 일정 전체 행 제외&#10;event_id/title/memo/place/start/end 없음&#10;숨겨진 개수·날짜 마커도 없음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="50" y="850" width="400" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="level" value="friend_level &gt;= visibility_level?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="570" y="850" width="400" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="events" value="v_visible_events_for_friend&#10;deleted_at IS NULL + is_private=false&#10;친구/ACL/레벨 + 기간 overlap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="570" y="1090" width="400" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="shifts" value="v_visible_work_shifts_for_friend&#10;visibility_level=0 고정&#10;기존 soft delete·날짜 범위&#10;is_private 정책 적용 대상 아님" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="640" width="430" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="result" value="필터된 events + work_shifts 응답&#10;그룹: 본인 events UNION ALL 타인 공개 view&#10;개인 일정은 캐시하지 않음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1100" width="490" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="" edge="1" parent="1" source="start" target="self" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="예" edge="1" parent="1" source="self" target="own" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="아니오" edge="1" parent="1" source="self" target="acl" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="아니오" edge="1" parent="1" source="acl" target="denied" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="예: 개인 일정" edge="1" parent="1" source="acl" target="private" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="예: 근무표" edge="1" parent="1" source="acl" target="shifts" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="아니오 / private=true" edge="1" parent="1" source="private" target="hidden" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="예" edge="1" parent="1" source="private" target="level" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="아니오" edge="1" parent="1" source="level" target="hidden" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="예" edge="1" parent="1" source="level" target="events" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="" edge="1" parent="1" source="events" target="result" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="" edge="1" parent="1" source="own" target="result" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="" edge="1" parent="1" source="shifts" target="result" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

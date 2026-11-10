@@ -87,6 +87,7 @@ export interface GroupCalendarEvent {
   start_at: string;
   end_at: string;
   visibility_level: number;
+  is_private: boolean;
 }
 
 export interface GroupCalendarRange {

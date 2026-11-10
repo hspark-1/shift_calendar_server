@@ -103,3 +103,7 @@ __pycache__/
 !migrations/add_private_profile_images.sql
 
 !migrations/add_profile_edit_support.sql
+
+# 공개 가능한 개인 일정 비공개 계약
+!migrations/add_event_privacy.sql
+!visibility_flow.drawio

@@ -11,6 +11,7 @@
     "test:integration": "RUN_CACHE_INTEGRATION=true node --test test/cacheIntegration.test.cjs",
     "debug:group-db:up": "docker compose -f test/fixtures/groupDebug.compose.yml up -d --wait",
     "debug:group-db:down": "docker compose -f test/fixtures/groupDebug.compose.yml down --volumes --remove-orphans",
+    "test:event-privacy-integration": "npm run build && RUN_EVENT_PRIVACY_INTEGRATION=true EVENT_PRIVACY_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/eventPrivacyIntegration.test.cjs",
     "test:group-integration": "npm run build && RUN_GROUP_INTEGRATION=true GROUP_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/groupIntegration.test.cjs",
     "test:push-integration": "npm run build && RUN_PUSH_INTEGRATION=true PUSH_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/pushIntegration.test.cjs",
     "test:apple-integration": "npm run build && RUN_APPLE_AUTH_INTEGRATION=true APPLE_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/appleAuthIntegration.test.cjs",
