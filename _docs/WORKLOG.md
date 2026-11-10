@@ -4,15 +4,14 @@
 
 ## 2026-11-11
 
-### [TODO] 개인 일정 나만 보기 커밋 정리·배포 푸시
+### [DONE] 개인 일정 나만 보기 커밋 정리·배포
 
-- 목적: 사용자가 승인한 개인 일정 비공개 서버 변경을 공개 develop과 비공개 배포 main에 반영한다.
-- 변경: 이번 diff·문서·검증 결과를 검토하고 커밋, 원격 최신 변경과 충돌 없이 통합, 배포 트리 검증 후 push한다.
-- 영향범위: 기존 승인된 is_private 기능과 배포용 schema 사전 검사. DB migration은 자동 재실행하지 않는다.
-- 테스트: 관련 회귀와 배포용 전체 테스트·배포 워크플로를 확인한다.
-- 롤백: private 데이터를 유지하는 호환 서버로 복구하고 DB 컬럼/필터는 제거하지 않는다.
-- 다음: 사용자가 Stage 정상 및 Center migration 적용 완료를 확인했다. DB를 재변경하지 않고 배포용 검증 후 push한다.
-
+- 목적: 사용자가 승인한 비공개 일정 변경을 공개 develop과 비공개 배포 main에 반영한다.
+- 변경: 기능 `10cdc03`을 origin/develop에 push하고 private main에 통합했다. 배포용 schema 사전 검사와 개인 일정 PostgreSQL CI 통합 검사를 추가한 뒤 자동 배포를 완료했다. 비공개 실행 정보는 private main 작업 일지에 기록한다.
+- 영향범위: 개인 일정 API·응답·DB view와 배포 전 검사. 사용자가 Stage 정상 및 Center migration 적용 완료를 확인했고 DB SQL은 재실행하지 않았다. 환경변수·사용자 데이터를 직접 변경하지 않았다.
+- 테스트: 최종 배포용 main strict build·전체 **128 pass/0 fail/14 skip**, 격리 PostgreSQL/HTTP 개인 일정 **7 pass/0 fail**과 실제 배포 catalog/view SELECT 통과. CI 단위·cache/Redis·개인 일정·Push·Apple/Google/Kakao·프로필·탈퇴·개인정보 통합과 monitor, 이미지 빌드·배포 모두 success. 배포 시 Stage/Center 새 컬럼/뷰 필터 검사 성공을 확인했다. 배포 후 두 환경 readiness HTTP 200/success=true/cache=ready 및 Stage OpenAPI 요청 default=false·본인/친구/그룹 응답 계약 반영을 확인했다.
+- 롤백: private 데이터를 유지하는 호환 서버로 복구한다. 컬럼·private 차단 필터를 제거하지 않는다.
+- 결과/다음: 공개 기능 반영 및 Stage/Center 서버 배포 완료. 실제 인증 사용자 A/B/C의 권한별 실응답·실기기 인수와 Flutter 활성화는 별도 후속 작업이다. 결과 기록은 문서만 변경하며 실행 소스에는 영향이 없다.
 
 ### [DONE] 개인 일정 나만 보기 서버 로컬 구현·검증
 

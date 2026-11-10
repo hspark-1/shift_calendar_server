@@ -1,6 +1,6 @@
 # 개인 일정 나만 보기 서버 계약
 
-작성일: 2026-11-11 (Asia/Seoul). 로컬 구현·격리 PostgreSQL 검증 완료. Stage/운영 DB 적용·배포·실사용자 인수와 Flutter 활성화는 별도 후속 작업이다.
+작성일: 2026-11-11 (Asia/Seoul). 공개 기능 `10cdc03` 반영·격리 PostgreSQL 검증·Stage/운영 서버 배포 완료. migration은 사용자 적용 완료를 확인했고 배포 전 컬럼/뷰 검사 및 배포 후 readiness·Stage OpenAPI를 확인했다. 실제 인증 사용자별 실응답·실기기 인수와 Flutter 활성화는 후속 작업이다.
 
 ## 목적과 요청 흐름
 
@@ -111,7 +111,7 @@ npm run debug:group-db:down
 - 격리 PostgreSQL 16 및 실제 HTTP: 7 pass / 0 fail. 기존 행 false, view 컬럼 이름/순서/타입·OID·SELECT 권한·의존 view, 중복/동명 컬럼/drift 실패, 신규 DDL과 증분 적용 view 정의의 동일성, 구형 INSERT/SELECT/API, owner 위조, timed/종일/다일·레벨 0/2/3/5·soft delete·배타적 경계, 본인 4경로, 레벨 5/2 친구·그룹, 차단/비친구/관리자·다음 요청 권한 철회, private 삭제를 검증했다.
 - 전체 npm test는 원본 develop에서도 존재하는 비공개 배포 파일·Apple Stage SQL 누락 및 Apple 가이드 문구 assertion 실패 17개가 있다. 별도 원본 사본과 실패 이름을 비교해 이번 변경의 신규 실패는 0개다. 최종 건수는 WORKLOG를 따른다. 범위 밖 배포 파일을 공개 브랜치로 복사하지 않았다.
 - 통합 테스트의 권한 변경 fixture는 기존 모델의 bulk 부분 update가 IDs 없이 notSelf 검증을 실행하는 문제를 피하도록 조회한 인스턴스를 갱신한다. 기존 서비스와 같은 방식이며 제품 모델은 변경하지 않는다.
-- 실제 Stage/운영 배포·DB 상태·외부 캐시/프록시 설정·실기기 인수는 검증하지 않았다. commit/push와 Flutter 파일 수정도 수행하지 않았다.
+- Stage/운영 DB migration은 사용자 적용 완료 보고를 기준으로 재실행하지 않았다. 배포 시 두 DB 컬럼/뷰 필터 검사와 배포 후 두 환경 외부 readiness, Stage 병합 OpenAPI 반영을 확인했다. 실제 인증 사용자 A/B/C 실응답·실기기 인수 및 외부 캐시/프록시 구성은 별도이며 Flutter 파일은 수정하지 않았다.
 
 ## 롤백
 
@@ -122,7 +122,8 @@ private 데이터가 존재하면 컬럼 삭제 또는 private 차단 조건 제
 - [x] 증분 migration·정본 DDL·로컬 AGENTS·서버 도면 동기화
 - [x] 모델·검증·생성·응답·친구/그룹 SELECT 반영
 - [x] 관련 단위·격리 PostgreSQL·구형 요청 호환·병합 OpenAPI 검증
-- [ ] Stage/운영 migration 적용·서버 배포·권한별 실응답 인수
+- [x] Stage/운영 migration 적용 사용자 확인·서버 자동 배포·컬럼/뷰 검사·readiness 확인
+- [ ] 실제 인증 사용자 A/B/C 권한별 실응답·실기기 인수
 - [ ] Flutter 요청/응답 필드·나만 보기 활성화(인접 저장소 후속 작업)
 
-Stage/운영 기록에는 적용 커밋, `add_event_privacy.sql` 실행 시각/환경, 본인·친구·그룹별 결과를 남긴다. 사용자가 Stage 정상 및 Center migration 실행 완료를 보고했다. 서버 배포와 권한별 API 인수 결과는 후속 배포 기록에서 확인한다. migration은 재실행하지 않는다.
+Stage/운영 기록에는 적용 커밋, `add_event_privacy.sql` 실행 시각/환경, 본인·친구·그룹별 결과를 남긴다. 사용자가 Stage 정상 및 Center migration 실행 완료를 보고했고 서버 배포·DB 스키마 사전 검사·외부 readiness·Stage OpenAPI 반영을 확인했다. 세부 검증 결과는 WORKLOG를 따른다. migration은 재실행하지 않았다.

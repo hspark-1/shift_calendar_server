@@ -6,7 +6,7 @@
 - 본인 목록·기간·날짜·그룹 본인 행은 private도 포함한다. 친구·그룹 타인 일정은 `is_private=false AND 친구 관계 AND can_view=true AND friend_level>=visibility_level`인 행만 DB 뷰에서 조회한다. 모든 일정 DTO에 is_private를 포함한다. 근무표 공개/캐시는 변경하지 않는다.
 - Router → auth/validation → Controller → Service → events / 공개 view → DTO 흐름이며 개인 일정은 캐시하지 않는다. 그룹은 기존 3개 set-based query를 유지한다.
 - **Behavior change**: private=true는 타인 전체 행을 차단한다. DB 증분 migration을 서버보다 먼저 적용하고 Stage/운영 인수 후 Flutter를 활성화한다. private 데이터가 있으면 필터 제거·컬럼 삭제로 롤백하지 않는다.
-- 신규 파일 역할·의존성·사용 예·테스트·사전 점검·롤백은 [EVENT_PRIVACY_GUIDE.md](EVENT_PRIVACY_GUIDE.md), 결정은 ADR-0044를 따른다. 루트 `visibility_flow.drawio`는 현재 단일 캘린더 공개 흐름을 문서화한다. 로컬 검증 완료이며 실제 배포는 미수행이다.
+- 신규 파일 역할·의존성·사용 예·테스트·사전 점검·롤백은 [EVENT_PRIVACY_GUIDE.md](EVENT_PRIVACY_GUIDE.md), 결정은 ADR-0044를 따른다. 루트 `visibility_flow.drawio`는 현재 단일 캘린더 공개 흐름을 문서화한다. 공개 기능 커밋 `10cdc03` 반영 및 Stage/Center 서버 배포·DB 컬럼/뷰 사전 검사·외부 readiness 확인을 완료했다. 실제 인증 사용자별 실기기 인수와 Flutter 활성화는 후속 작업이다.
 
 
 ## 앱 API 호환 정책 (2026-11-08)
