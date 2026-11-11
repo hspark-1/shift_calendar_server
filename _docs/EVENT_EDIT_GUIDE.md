@@ -1,6 +1,6 @@
 # 개인 일정 전체 수정 API
 
-작성일: 2026-11-12 (Asia/Seoul). 로컬 구현·검증 완료, Stage/운영 배포 전.
+작성일: 2026-11-12 (Asia/Seoul). 구현·검증 및 Stage/운영 배포 완료. Flutter 실기기 인수는 후속.
 
 ## 목적과 요청 흐름
 
@@ -44,7 +44,9 @@ Flutter 메인에서 본인 개인 일정을 탭해 편집한 값을 저장한�
 - 고정 격리 PostgreSQL16 및 실제 HTTP 8 pass/0 fail: 기존7개+수정 소유권/선택정보 null 삭제·기간 이동·전체 timestamps·공개↔private/친구·그룹 차단·삭제 경합 인수.
 - 전체 npm test:91 pass/17 fail/13 skip. 변경 전 HEAD 사본은86 pass/17 fail/15 skip. 실패 이름17개가 같고 신규 실패0개다. 비공개 배포 파일·기존 Apple SQL/문서 assertion 실패는 변경 범위 밖으로 보존했다. 로컬 Git 제외 파일 존재에 따라 pass/skip 수가 다르다.
 - 디버거에서 UPDATE 반환 timestamp getter/fieldAttributeMap을 직접 확인해 응답 누락을 수정했다. 임시 진입점/중단점·세션은 정리했다.
-- 서버 구현→격리 검증→Stage 배포→실제 본인/타인/private·종일·다일 수정/삭제 인수→운영 배포→Flutter 실기기 순서로 진행한다. 이번 작업은 배포·원격 사용자 요청/DB 변경·커밋/푸시를 하지 않았다.
+- 후속 배포 검증: 비공개 main 통합 코드 strict build·전체 131 pass/0 fail/14 명시적 skip, 개인 일정 PostgreSQL/실제 HTTP 8 pass/0 fail 및 배포 CI의 캐시·푸시·인증·프로필·탈퇴/개인정보 통합 검사·이미지 빌드·배포가 통과했다.
+- 기능 `744b106`을 공개 develop에 push하고 기존 자동 배포로 Stage/운영 반영을 완료했다. 양 환경 readiness HTTP 200/success=true/cache=ready 및 실제 OpenAPI의 PUT과 8개 필수 필드를 확인했다. DB SQL·실제 환경변수·사용자 데이터를 직접 변경하지 않았다. 실제 사용자 Flutter 실기기 수정/재조회 인수는 후속이다.
+- `npm audit --audit-level=high`는 기존 잠금파일의 22건(낮음 1·보통 13·높음 7·치명적 1)으로 실패했다. 이번 API 변경의 의존성 diff는 없으며 보완은 별도 작업이다.
 
 ## Behavior change와 롤백
 

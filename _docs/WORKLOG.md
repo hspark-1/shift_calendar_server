@@ -4,13 +4,14 @@
 
 ## 2026-11-12
 
-### [IN_PROGRESS] 개인 일정 전체 편집 API 커밋·배포
+### [DONE] 개인 일정 전체 편집 API 커밋·배포
 
 - 목적: 사용자 요청에 따라 검증된 수정 API를 공개 develop과 비공개 배포 main에 반영한다.
 - 변경/영향: 관련 소스·OpenAPI·테스트·문서를 커밋하고 기존 자동 배포로 Stage/운영 API와 worker를 갱신한다. DB migration·환경변수 변경은 없다.
-- 테스트: 배포용 통합 코드의 빌드·회귀·격리 PostgreSQL/HTTP 검증 후 CI/배포 결과와 외부 readiness·OpenAPI 반영을 확인한다.
+- 테스트: 비공개 main 통합 코드 strict build·전체 131 pass/0 fail/14 명시적 skip, 개인 일정 PostgreSQL/실제 HTTP 8 pass/0 fail, Python monitor 3개·Bash/YAML·문서 cmp·diff check 통과. 배포 CI의 전체 통합 검사·이미지 빌드·배포 success. Stage/운영 readiness HTTP 200/success=true/cache=ready 및 실제 OpenAPI PUT·8개 필수 필드 반영을 확인했다.
 - 롤백: 직전 private 호환 이미지로 복구하며 사용자 데이터와 private 필터를 유지한다.
-- 결과/다음: 관련 소스·테스트·OpenAPI 검토, strict build와 수정/생성/삭제/private HTTP 회귀 10개 통과. 비공개 main 통합 검증 후 커밋/푸시·자동 배포·배포 후 확인을 진행한다. 실제 실행 정보는 비공개 배포 브랜치에만 기록한다.
+- 결과/다음: 기능 744b106을 origin/develop에 push하고 기존 비공개 main에 충돌 없이 통합해 Stage/운영 자동 배포를 완료했다. DB SQL·실제 env·사용자 데이터는 직접 변경하지 않았다. 실제 실행 정보는 비공개 배포 브랜치에만 기록한다. Flutter 실기기 수정/재조회 인수는 후속이며 이번 배포 확인에는 포함하지 않는다. 임시 격리 DB 컨테이너·네트워크를 정리했다.
+- 보완 항목: npm audit --audit-level=high는 기존 잠금파일에서 22건(낮음 1·보통 13·높음 7·치명적 1)으로 실패했다. 이번 변경은 package.json/package-lock.json을 바꾸지 않았으며 의존성 보완은 별도 작업으로 남긴다.
 
 ### [DONE] 개인 일정 전체 편집 API
 
