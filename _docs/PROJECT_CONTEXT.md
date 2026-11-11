@@ -1,5 +1,13 @@
 # 프로젝트 컨텍스트
 
+## 개인 일정 전체 수정 (2026-11-12)
+
+- PUT /api/v1/events/{event_id}는 title·memo/place·all_day·start/end·visibility_level·is_private 전체8개 필드를 받는다. 선택정보 null 삭제·엄격 boolean/정수/UTC 시간 검증을 route와 서비스에 적용한다.
+- JWT 소유자·활성 조건의 단일 Sequelize UPDATE RETURNING으로 수정하고 전체 최신 DTO를 반환한다. owner/creator/created_at과 private 조회 필터는 보존한다. bulk 반환 timestamp의 camelCase 매핑은 수정 응답에서 fallback 처리한다. 타인/미존재/삭제 일정은 동일404다.
+- DB migration/env 추가 없이 기존 GET/POST/DELETE와 호환된다. 마지막 성공 저장 정책이며 version/Undo는 없다. 본문을 기록하지 않는 구조화 실패 로그를 사용한다.
+- 계약/파일 역할·의존성/사용 예·검증/배포·롤백 정본은 [EVENT_EDIT_GUIDE.md](EVENT_EDIT_GUIDE.md), 결정은 ADR-0045다. 새 test/eventEditing.test.cjs는 dist/Express/JWT 기반 서비스·HTTP 검증이고 기존 eventPrivacyIntegration에 실제 PostgreSQL/친구·그룹 공개 전환/삭제 경합을 추가했다.
+- 로컬 구현·검증 완료, Stage/운영 배포/원격 인수·커밋/푸시는 미수행. PUT만 비활성화해 롤백하고 사용자 데이터·private 필터를 유지한다.
+
 ## 개인 일정 나만 보기 (2026-11-11)
 
 - `events.is_private boolean NOT NULL DEFAULT false`는 레벨과 독립적인 소유자 전용 공개 설정이다. 요청 생략은 false이며 실제 boolean만 허용하고 잘못된 타입은 `400 INVALID_EVENT_PRIVACY`다. visibility_level 필수 0~5와 기존 시간/삭제 계약을 유지한다.

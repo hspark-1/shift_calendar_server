@@ -6,6 +6,7 @@ import {
   getDaySchedule,
   getEvents,
   createEvent,
+  updateEvent,
   deleteEvent,
   getCalendarRange,
   upsertWorkShift,
@@ -138,6 +139,24 @@ router.post(
     body("place").optional({ nullable: true }).isString(),
   ],
   createEvent
+);
+
+// 개인 일정 전체 편집: 선택정보 null은 기존 값 삭제를 뜻한다.
+router.put(
+  "/events/:event_id",
+  [
+    param("event_id").isUUID().withMessage("일정 ID가 올바르지 않습니다."),
+    body("title").custom(value => typeof value === "string" && value.trim().length > 0),
+    body("all_day").custom(value => typeof value === "boolean"),
+    body("start_at").custom(isUtcIsoDateTime),
+    body("end_at").custom((value, { req }) => isUtcIsoDateTime(value) &&
+      isUtcIsoDateTime(req.body.start_at) && new Date(req.body.start_at) < new Date(value)),
+    body("visibility_level").custom(value => Number.isInteger(value) && value >= 0 && value <= 5),
+    body("is_private").custom(value => typeof value === "boolean"),
+    body("memo").custom(value => value === null || typeof value === "string"),
+    body("place").custom(value => value === null || typeof value === "string"),
+  ],
+  updateEvent,
 );
 
 // 일정 삭제

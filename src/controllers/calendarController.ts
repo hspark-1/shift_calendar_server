@@ -473,6 +473,40 @@ export async function createEvent(
   }
 }
 
+/** 개인 일정 전체 편집. 타인/미존재/삭제 행은 동일한 404다. */
+export async function updateEvent(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const validation_error = errors.array().some(error => getValidationErrorPath(error) === "event_id")
+        ? { code: "INVALID_EVENT_ID", message: "일정 ID가 올바르지 않습니다." }
+        : getCreateEventValidationError(errors.array());
+      res.status(400).json({ success: false, error: validation_error });
+      return;
+    }
+    const event = await calendarService.updateEvent(req.user!.user_id, req.params.event_id, req.body);
+    res.json({ success: true, data: event, message: "일정이 수정되었습니다." });
+  } catch (error: any) {
+    const messages: Record<string, string> = {
+      INVALID_EVENT_ID: "일정 ID가 올바르지 않습니다.",
+      INVALID_TITLE: "제목을 입력해주세요.",
+      INVALID_EVENT_TIME: "일정 시간이 올바르지 않습니다.",
+      INVALID_VISIBILITY_LEVEL: "공개 레벨이 올바르지 않습니다.",
+      INVALID_EVENT_PRIVACY: "공개 범위가 올바르지 않습니다.",
+      VALIDATION_ERROR: "입력값 검증에 실패했습니다.",
+      EVENT_NOT_FOUND: "일정을 찾을 수 없습니다.",
+    };
+    const code = error instanceof Error ? error.message : "";
+    if (messages[code]) {
+      res.status(code === "EVENT_NOT_FOUND" ? 404 : 400).json({ success: false, error: { code, message: messages[code] } });
+      return;
+    }
+    // 일정 본문/DB 오류의 입력값이 로그에 남지 않도록 안전한 오류만 기록한다.
+    logError("calendar_update_event_failed", new Error("EVENT_UPDATE_FAILED"), req.request_id);
+    res.status(500).json({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message: "서버 오류가 발생했습니다." } });
+  }
+}
+
 /**
  * 일정 삭제 (soft delete)
  * DELETE /api/v1/events/:event_id

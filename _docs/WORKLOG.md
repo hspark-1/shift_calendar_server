@@ -2,6 +2,26 @@
 
 # 작업 일지
 
+## 2026-11-12
+
+### [IN_PROGRESS] 개인 일정 전체 편집 API 커밋·배포
+
+- 목적: 사용자 요청에 따라 검증된 수정 API를 공개 develop과 비공개 배포 main에 반영한다.
+- 변경/영향: 관련 소스·OpenAPI·테스트·문서를 커밋하고 기존 자동 배포로 Stage/운영 API와 worker를 갱신한다. DB migration·환경변수 변경은 없다.
+- 테스트: 배포용 통합 코드의 빌드·회귀·격리 PostgreSQL/HTTP 검증 후 CI/배포 결과와 외부 readiness·OpenAPI 반영을 확인한다.
+- 롤백: 직전 private 호환 이미지로 복구하며 사용자 데이터와 private 필터를 유지한다.
+- 결과/다음: 관련 소스·테스트·OpenAPI 검토, strict build와 수정/생성/삭제/private HTTP 회귀 10개 통과. 비공개 main 통합 검증 후 커밋/푸시·자동 배포·배포 후 확인을 진행한다. 실제 실행 정보는 비공개 배포 브랜치에만 기록한다.
+
+### [DONE] 개인 일정 전체 편집 API
+
+- 목적: Flutter 메인 개인 일정 탭 수정에 필요한 PUT /api/v1/events/{event_id}를 제공한다.
+- 변경/영향: route/controller/service·OpenAPI·관련 테스트/문서. JWT 소유자·활성 행만 갱신하고 private 필터와 기존 생성/삭제 계약을 보존한다.
+- 변경 상세/파일: calendar route/controller/service·calendarOpenApi와 새 test/eventEditing.test.cjs·기존 eventPrivacyIntegration·EVENT_EDIT_GUIDE/PROJECT_CONTEXT/DECISIONS(ADR-0045)/WORKLOG. null 삭제/엄격 타입·소유권/soft-delete·RETURNING·timestamps 보정·본문 없는 오류 로그를 구현했다. 새 파일 역할/의존성/사용 예는 가이드에 기록했다.
+- 테스트: strict build·수정/생성/삭제/private HTTP·서비스10 pass, PostgreSQL16/실제HTTP8 pass. 전체91 pass/17 fail/13 skip이며 변경 전 HEAD 사본86 pass/17 fail/15 skip과 실패17개 이름 동일·신규 실패0개. 기존 비공개 배포/Apple 계약 실패와 로컬 Git 제외 파일 차이를 보존했다. JSON/내부참조·diff 검사도 확인한다. 별도 lint 명령은 없다.
+- 검증 보완: 실제 DB 반환 created_at 누락을 debug-live로 추적해 fieldAttributeMap의 createdAt/updatedAt 매핑을 확인하고 수정 응답에 한정해 fallback을 추가했다. 임시 진입점·중단점/세션은 정리했다. 격리 테스트 컨테이너는 검증 후 정리한다.
+- 결과/한계: 로컬 구현·검증 완료. 새 DB migration/env·Stage/운영 배포/원격·실기기 인수·커밋/푸시는 미수행. 기존 codex/private-events checkout에서 관련 diff만 추가했다.
+- 롤백: 신규 PUT 경로만 비활성화하며 사용자 데이터/private 컬럼·필터는 보존한다.
+
 ## 2026-11-11
 
 ### [DONE] 개인 일정 나만 보기 커밋 정리·배포

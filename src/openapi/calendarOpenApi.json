@@ -117,6 +117,91 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "Calendar"
+        ],
+        "summary": "본인 개인 일정 전체 편집",
+        "description": "JWT 소유자의 활성 일정만 갱신한다. 타인/미존재/삭제 행은 동일404. 기존 ID/created_at과 private 공개 필터를 유지한다.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateEventInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "수정 성공: 전체 최신 일정",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventUpdateSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "UUID/필수값/시간/레벨/공개 범위 검증 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "인증 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "미존재/타인 소유/삭제된 일정",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "서버 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventApiError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/events": {
@@ -1036,6 +1121,78 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "UpdateEventInput": {
+        "type": "object",
+        "required": [
+          "title",
+          "memo",
+          "place",
+          "all_day",
+          "start_at",
+          "end_at",
+          "visibility_level",
+          "is_private"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "memo": {
+            "type": "string",
+            "nullable": true
+          },
+          "place": {
+            "type": "string",
+            "nullable": true
+          },
+          "all_day": {
+            "type": "boolean"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC ISO 8601 Z 형식"
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC ISO 8601 Z 형식. start_at보다 이후인 배타적 종료"
+          },
+          "visibility_level": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "is_private": {
+            "type": "boolean",
+            "description": "true이면 소유자만 조회 가능. 친구 레벨·can_view·그룹 가입보다 우선한다."
+          }
+        },
+        "description": "개인 일정 전체 편집. 8개 필드 필수, memo/place의 null은 기존 값 삭제. 마지막 성공 저장을 적용한다."
+      },
+      "EventUpdateSuccess": {
+        "type": "object",
+        "required": [
+          "success",
+          "data",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/EventApiModel"
+          },
+          "message": {
+            "type": "string"
           }
         }
       }

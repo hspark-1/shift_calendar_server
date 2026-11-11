@@ -52,6 +52,17 @@ export interface CreateEventInput {
   is_private?: boolean;
 }
 
+export interface UpdateEventInput {
+  title: string;
+  memo: string | null;
+  place: string | null;
+  all_day: boolean;
+  start_at: string;
+  end_at: string;
+  visibility_level: number;
+  is_private: boolean;
+}
+
 const max_event_visibility_level = 5;
 const utc_iso_datetime_pattern =
   /^(\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d)(?:\.(\d{1,3}))?Z$/;
@@ -667,6 +678,48 @@ export async function deleteWorkShift(
     );
   });
   await invalidateChangedWorkShiftMonths(user_id, changed_months);
+}
+
+/** 인증 사용자의 활성 일정만 단일 조건부 UPDATE로 편집한다. */
+export async function updateEvent(
+  user_id: string,
+  event_id: string,
+  input: UpdateEventInput,
+): Promise<EventApiModel> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(event_id)) {
+    throw new Error("INVALID_EVENT_ID");
+  }
+  if (!input || typeof input !== "object") throw new Error("VALIDATION_ERROR");
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (!title) throw new Error("INVALID_TITLE");
+  if (typeof input.all_day !== "boolean") throw new Error("VALIDATION_ERROR");
+  if (typeof input.is_private !== "boolean") throw new Error("INVALID_EVENT_PRIVACY");
+  if (!Number.isInteger(input.visibility_level) || input.visibility_level < 0 || input.visibility_level > 5) {
+    throw new Error("INVALID_VISIBILITY_LEVEL");
+  }
+  for (const value of [input.memo, input.place]) {
+    if (value !== null && typeof value !== "string") throw new Error("VALIDATION_ERROR");
+  }
+  const start_at = parseEventDate(input.start_at);
+  const end_at = parseEventDate(input.end_at);
+  if (start_at >= end_at) throw new Error("INVALID_EVENT_TIME");
+  const [affected_count, rows] = await Event.update({
+    title, memo: normalizeOptionalText(input.memo), place: normalizeOptionalText(input.place),
+    all_day: input.all_day, start_at, end_at,
+    visibility_level: input.visibility_level, is_private: input.is_private,
+    updated_at: new Date(),
+  }, {
+    where: { event_id, owner_user_id: user_id, deleted_at: null },
+    returning: true,
+  });
+  if (affected_count !== 1) throw new Error("EVENT_NOT_FOUND");
+  const event = rows[0];
+  // bulk UPDATE RETURNING은 동일 DB timestamp 컬럼을 Sequelize의 camelCase 속성에 매핑한다.
+  return {
+    ...toEventApiModel(event),
+    created_at: event.created_at ?? event.get("createdAt") as Date,
+    updated_at: event.updated_at ?? event.get("updatedAt") as Date,
+  };
 }
 
 /**

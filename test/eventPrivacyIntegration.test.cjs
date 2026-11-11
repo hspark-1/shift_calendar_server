@@ -217,4 +217,40 @@ if (process.env.RUN_EVENT_PRIVACY_INTEGRATION !== "true") {
     }
     const deleted=await Event.findByPk(target.event_id);assert.equal(deleted.deleted_by_user_id,owner.user_id);assert.equal(deleted.is_private,true);
   });
+
+  test("PUT 실제 DB/HTTP: 소유권·null 삭제·기간 이동·private 공개 전환·삭제 경합을 보존한다",async()=>{
+    const setting=await FriendLevelSetting.findOne({where:{owner_user_id:owner.user_id,friend_user_id:high_friend.user_id}});
+    await setting.update({can_view:true});
+    const body={title:"편집 대상",memo:"메모",place:"장소",all_day:false,start_at:"2026-11-11T00:00:00.000Z",end_at:"2026-11-11T01:00:00.000Z",visibility_level:2,is_private:false};
+    const created=await request(owner,"/events",{method:"POST",body});assert.equal(created.status,201);
+    const id=created.body.data.event_id;
+    for(const user of [high_friend,non_friend]) {
+      const denied=await request(user,`/events/${id}`,{method:"PUT",body});
+      assert.equal(denied.status,404);assert.equal(denied.body.error.code,"EVENT_NOT_FOUND");
+    }
+    const moved={...body,title:"편집 완료",memo:null,place:null,all_day:true,start_at:"2026-11-12T00:00:00.000Z",end_at:"2026-11-14T00:00:00.000Z",is_private:true};
+    const updated=await request(owner,`/events/${id}`,{method:"PUT",body:{...moved,owner_user_id:high_friend.user_id,created_by_user_id:high_friend.user_id}});
+    assert.equal(updated.status,200);assert.equal(updated.body.data.event_id,id);
+    assert.equal(updated.body.data.created_at,created.body.data.created_at);
+    assert.ok(Date.parse(updated.body.data.updated_at)>=Date.parse(created.body.data.updated_at));
+    const saved=await Event.findByPk(id);assert.equal(saved.owner_user_id,owner.user_id);assert.equal(saved.created_by_user_id,owner.user_id);
+    assert.equal(saved.memo,null);assert.equal(saved.place,null);assert.equal(saved.is_private,true);
+    const own_old=await request(owner,"/events?start_date=2026-11-11&end_date=2026-11-11");
+    assert.ok(!own_old.body.data.events.some(event=>event.event_id===id));
+    const own_new=await request(owner,"/calendar/range?start_date=2026-11-12&end_date=2026-11-13");
+    assert.ok(own_new.body.data.events.some(event=>event.event_id===id));
+    for(const route of [`/friends/${owner.user_id}/calendar/range?start_date=2026-11-12&end_date=2026-11-13`,`/groups/${group.group_id}/calendar/range?start_date=2026-11-12&end_date=2026-11-13`]) {
+      const result=await request(high_friend,route);assert.equal(result.status,200);assert.ok(!JSON.stringify(result.body).includes(id));
+    }
+    assert.equal((await request(owner,`/events/${id}`,{method:"PUT",body:{...moved,is_private:false}})).status,200);
+    const visible=await request(high_friend,`/friends/${owner.user_id}/calendar/range?start_date=2026-11-12&end_date=2026-11-13`);
+    assert.ok(visible.body.data.events.some(event=>event.event_id===id));
+    assert.equal((await request(owner,`/events/${id}`,{method:"DELETE"})).status,200);
+    const missing=await request(owner,`/events/${id}`,{method:"PUT",body:moved});assert.equal(missing.status,404);
+    assert.ok((await Event.findByPk(id)).deleted_at);
+    // 삭제/수정 실행 순서와 무관하게 삭제된 행을 되살리지 않는다.
+    const racing=await request(owner,"/events",{method:"POST",body});const racing_id=racing.body.data.event_id;
+    const results=await Promise.all([request(owner,`/events/${racing_id}`,{method:"DELETE"}),request(owner,`/events/${racing_id}`,{method:"PUT",body:moved})]);
+    assert.equal(results[0].status,200);assert.ok([200,404].includes(results[1].status));assert.ok((await Event.findByPk(racing_id)).deleted_at);
+  });
 }
