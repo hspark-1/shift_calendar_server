@@ -6,7 +6,7 @@
 - 개인 일정은 기존 `is_private=false AND 친구 관계 AND can_view=true AND friend_level>=visibility_level`을 유지한다. 그룹 가입으로 친구 관계/공개 설정을 생성하거나 레벨을 저장하지 않는다. 친구 전용 캘린더 API와 DB 공개 view는 변경하지 않는다.
 - 흐름: groupRoutes 인증/기간 검증 → groupController → groupService 멤버 상태 → 활성 그룹·조회자/소유자 멤버십·차단 확인 후 work_shifts → 기존 개인 일정 view. 그룹 집계는 기존 3개 set-based query, Redis 미사용이다. 근무 쿼리도 활성 멤버십·그룹 삭제 여부를 직접 재확인한다.
 - 계약·검증/배포·롤백은 [GROUP_API_GUIDE.md](GROUP_API_GUIDE.md), 프론트 상태 해석은 [GROUP_FRONTEND_API_GUIDE.md](GROUP_FRONTEND_API_GUIDE.md), 결정은 ADR-0047을 따른다. 신규 DB migration/env/seed와 응답 enum 추가는 없다. 아래 과거 그룹 근무표 친구 필수 설명보다 이 정책이 우선한다.
-- 로컬 검증: strict build·관련 서비스/HTTP18개·실제 격리 PostgreSQL/HTTP11개·그룹20명/100일 통합8개 통과. 전체123개는93 pass/기존17 fail/13 skip이며 별도 변경 전 HEAD 사본과 실패 목록이 같아 신규 실패0개다. JSON/XML·diff 검사도 통과했다. Stage/운영 배포·실기기 인수·커밋/푸시는 수행하지 않았다.
+- 로컬 검증: strict build·관련 서비스/HTTP18개·실제 격리 PostgreSQL/HTTP11개·그룹20명/100일 통합8개 통과. 전체123개는93 pass/기존17 fail/13 skip이며 별도 변경 전 HEAD 사본과 실패 목록이 같아 신규 실패0개다. JSON/XML·diff 검사도 통과했다. 기능 커밋 [30add46](https://github.com/hspark-1/shift_calendar_server/commit/30add46)을 origin/develop에 push 완료했다. Stage/운영 배포·실기기 인수는 수행하지 않았다.
 
 ## 개인 일정 공개 레벨1~5 (2026-11-12)
 

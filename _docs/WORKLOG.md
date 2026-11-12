@@ -4,13 +4,13 @@
 
 ## 2026-11-12
 
-### [IN_PROGRESS] 그룹 레벨0 근무표 변경 커밋·푸시
+### [DONE] 그룹 레벨0 근무표 변경 커밋·푸시
 
 - 목적: 사용자 요청에 따라 검증된 그룹 비친구 근무표 공개 변경을 origin/develop에 반영한다.
 - 변경/영향: 관련 소스·OpenAPI·테스트·도면·문서만 커밋한다. develop은 다른 worktree에서 사용 중이므로 현재 origin/develop 기반 codex/private-events에서 커밋하고 HEAD:develop으로 명시적으로 push한다.
 - 테스트: 커밋 전 strict build·CJS 구문·OpenAPI JSON/도면 XML·diff 검사를 통과했다. fetch 후 HEAD와 origin/develop 이력 차이는0이다. 기존 구현의 관련37개 통과·전체 기존17개 실패 동일 결과를 유지하며 이번에는 DB/전체 테스트를 재실행하지 않았다.
 - 롤백: 해당 기능 커밋의 그룹 조회/계약 변경을 복구한다. DB 데이터와 개인 일정 보호는 유지한다.
-- 다음: 커밋·푸시 후 원격 HEAD 및 작업 트리 상태 확인. Stage/운영 배포는 이번 요청에 포함하지 않는다.
+- 결과/다음: 기능 커밋 [30add46](https://github.com/hspark-1/shift_calendar_server/commit/30add46)을 origin/develop으로 push 완료했다(021d19c→30add46). 현재 checkout은 codex/private-events를 유지하며 결과 기록은 후속 문서 커밋으로 반영한다. Stage/운영 배포·DB 변경은 수행하지 않았다.
 
 ### [DONE] 그룹 비친구 멤버의 레벨0 근무표 열람
 
