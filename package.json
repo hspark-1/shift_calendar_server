@@ -25,7 +25,8 @@
     "start:cache-worker": "node dist/workers/workShiftCacheWorker.js",
     "start:push-worker": "node dist/workers/pushWorker.js",
     "start:account-deletion-worker": "node dist/workers/accountDeletionWorker.js",
-    "test:privacy-integration": "npm run build && RUN_PRIVACY_INTEGRATION=true PRIVACY_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/privacyDeletionIntegration.test.cjs"
+    "test:privacy-integration": "npm run build && RUN_PRIVACY_INTEGRATION=true PRIVACY_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55432 DB_NAME=shift_calendar_group_debug DB_USER=group_debug DB_PASSWORD=group_debug_local_only DB_SSL=false node --test test/privacyDeletionIntegration.test.cjs",
+    "test:naver-integration": "npm run build && RUN_NAVER_AUTH_INTEGRATION=true NAVER_INTEGRATION_ALLOW_SCHEMA_RESET=true DB_HOST=127.0.0.1 DB_PORT=55433 DB_NAME=shift_calendar_naver_test DB_USER=naver_test DB_PASSWORD=naver_test_local_only DB_SSL=false node --test test/naverAuthIntegration.test.cjs"
   },
   "keywords": [
     "shift",

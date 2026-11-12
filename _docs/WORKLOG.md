@@ -4,6 +4,24 @@
 
 ## 2026-11-13
 
+### [TODO] 네이버·구글 변경을 함께 병합 배포하고 로컬 상태 정리
+
+- 목적: 사용자 요청에 따라 누락된 네이버 전화번호/사진 변경을 커밋·푸시하고 기존 구글 변경과 함께 develop→main 실제 병합으로 배포한다.
+- 변경/영향: 네이버 서비스·두 인증 경로·OpenAPI·관련 테스트/문서와 CI 통합 검증을 반영한다. 이미 배포된 구글 소스가 최신 develop과 동일한지 확인한다. 별도 그룹/이전 Flutter UI 작업은 보존한다.
+- 검증: 두 공급자 단위/실DB 통합·병합 main 전체 회귀·자동 CI·Stage/운영 readiness/두 공급자 OpenAPI/실행 코드를 확인한다. 기존 phone 컬럼/unique를 사용하므로 신규 SQL/env는 없다.
+- 상태 정리: 기존 checkout이 origin/develop보다2커밋 뒤여서 이미 커밋된 구글 코드도 수정으로 표시되고 있다. 전체 미커밋 스냅샷/현재 ref와 index 상태를 보존한 뒤 작업 파일을 바꾸지 않고 최신 develop 기준으로 정렬한다.
+- 롤백: 직전 호환 이미지로 복구하고 사용자 전화번호/기존 사진·기타 미커밋 작업을 유지한다. 배포 식별자/실제 인프라는 비공개 기록에 남긴다.
+
+### [DONE] 네이버 전화번호 수집 적용 및 Flutter 연동 확인
+
+- 목적: 승인된 네이버 동의 항목 변경 계획을 구현하고 Flutter 적용 필요 사항을 실제 코드로 확인한다.
+- 변경/영향: 네이버 사진 수집 제거, mobile 정규화·신규/빈 번호만 저장, 두 로그인 경로 공통 transaction을 적용했다. 기존 번호·사진/key·이름·가입 완료 정본은 보존한다. 번호 충돌409/다른 네이버 계정 덮어쓰기409/탈퇴 진행409 및 안전한 인증401/외부503/내부500·최상위 message 호환을 반영했다. 사용자·템플릿·세션은 원자적으로 저장하고 subject/email/행 잠금으로 경합을 처리한다. DB migration/env/seed·공개 규칙/도면 변경은 없다.
+- 파일: src/services/naverService.ts·src/controllers/authController.ts·src/openapi.ts·신규 src/openapi/naverAuthOpenApi.json·신규 test/naverAuth.test.cjs·신규 test/naverAuthIntegration.test.cjs·기존 test/profileCompletion.test.cjs·package.json과 OAuth/PROJECT_CONTEXT/DECISIONS(ADR-0048)/WORKLOG. 새 파일 역할/의존성/사용 예는 OAUTH_API_GUIDE에 기록했다. 기존 미커밋 변경과 작업 중 관측된 다른 Google 문서 변경은 보존했다.
+- 테스트: strict TypeScript build 성공. 네이버 단위16개 포함 관련 Google/Kakao/프로필 회귀45 pass/0 fail/1 skip(공개 checkout의 비공개 배포 SQL 미포함). 전용 임시 PostgreSQL16·실제 Express HTTP/실제 DDL 통합13 pass/0 fail: 두 경로 신규 번호/사진 null·요청 body phone 무시·누락 입력·기존 프로필 보존·중복409·동일 회원/번호 경합·프로필 편집 경합·탈퇴 진행·템플릿/세션 rollback·오류 비노출·실제 OpenAPI·validation400을 확인했다. 네이버 외부 API만 mock이며 실제 계정 인증은 수행하지 않았다. 별도 lint script/설정이 없어 build·CJS 구문·문서 diff로 확인한다.
+- Flutter 결과: SDK/Repository/DataSource/User 생성 파서/가입 화면/Provider/로그인 dialog를 직접 읽었다. 서버 phone 미리 채움·사진 null 기본 아바타·미완료 화면 분기·최상위 오류 문구가 이미 지원되어 필수 수정은 없다. 네이버 DataSource는 공통 ApiException 대신 메시지만 보존하므로 code/request_id 분기는 후속 개선이다. 앱 소스/SDK/문서를 수정하지 않았다. 기존 네이버 SDK/Repository/Provider/프로필 화면52 pass와 DataSource 기존18개+임시 서버 응답 계약2개20 pass, 합계72 pass/0 fail. 임시 probe는 /private/tmp/shiftmate_naver_flutter_contract_test.dart이며 nullable 사진/phone·requires_profile_setup·409 한국어 메시지를 실제 DataSource로 검증했다.
+- 롤백: 이번 네이버 관련 코드/문서 추가분을 되돌리고 이미 저장된 전화번호·사진은 유지한다.
+- 결과/다음: 로컬 구현·회귀·Flutter 호환 확인 완료. CJS 구문·OpenAPI JSON·git diff --check를 통과했고 이번 작업 전용 임시 PostgreSQL 컨테이너/볼륨을 제거했다. 운영/Stage DB·설정은 변경하지 않았다. 실제 네이버 동의 설정/기존 사용자 mobile 제공·재동의·실기기 인수는 서버 배포 후 필요하다. 커밋/푸시·운영 배포는 수행하지 않았다.
+
 ### [DONE] Google 로그인 커밋·푸시와 develop 병합 배포
 
 - 목적: 사용자 요청에 따라 검증한 Google 변경을 커밋/푸시하고, develop을 비공개 main에 실제 병합한 뒤 서버를 배포한다. 이후 배포도 선별 cherry-pick 대신 develop→main 병합을 기본으로 한다.

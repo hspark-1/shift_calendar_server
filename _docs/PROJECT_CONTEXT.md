@@ -1,5 +1,14 @@
 # 프로젝트 컨텍스트
 
+## 네이버 전화번호 수집 구현 (2026-11-13)
+
+- 아래 분석·계획의 후속 구현이다. `naverService.getNaverUserInfo()`는 사진을 추출하지 않고 네이버 API mobile을 기존 유틸로 하이픈 정규화한다. 미제공/공백/비문자열/지원하지 않는 형식은 null이다. 앱 body phone은 사용하지 않는다.
+- 두 controller는 `completeNaverLogin()` 공통 transaction으로 연결한다. 신규/빈 번호만 저장하고 기존 번호·이름·사진/key·profile_completed_at을 보존한다. 기존 이메일 연결은 유지하되 이미 다른 naver_id가 있으면409다. subject/email advisory lock·기존 사용자 UPDATE lock·unique 충돌409로 동시 로그인/프로필 편집을 처리하며 템플릿/JWT refresh 저장 실패도 함께 rollback한다. 탈퇴 진행 계정은 변경/발급 전에409로 거절한다.
+- **Behavior change**: 신규 네이버 사진 수집 중단·전화번호 저장, 안전한 중복409/인증401/장애503/내부500 응답. 기존 최상위 message와 성공 wrapper/JWT는 유지하며 request_id/중첩 error를 추가한다. 가입 성공 문구는 실제 신규 생성 여부로 결정한다. 번호가 있어도 가입 완료는 기존 `/auth/profile/complete`만 담당한다.
+- Flutter 소스 확인: `User.fromJson`/생성 파서는 nullable phone·사진을 지원한다. `ProfileSetupPage.initState()`가 서버 번호를 미리 채우며 사진 null은 기본 아바타로 표시한다. SDK는 access_token만 전달하고 네이버 DataSource의 최상위 message → Exception → AuthNotifier → 로그인 dialog 경로도 호환된다. 따라서 필수 앱 소스/SDK 설정 변경은 없다. 오류 코드와 request_id를 보존하는 공통 ApiException 사용은 추후 개선이다. 이번에는 Flutter 소스를 변경하지 않았다.
+- 파일 역할/의존성·사용 예·Stage 인수·롤백은 `_docs/OAUTH_API_GUIDE.md`의 '사진 동의 제거·휴대전화번호 추가'와 ADR-0048을 따른다. 새 파일은 네이버 OpenAPI·단위/격리 DB 테스트3개이며 새 패키지/DB migration/env/seed는 없다. `npm run test:naver-integration`은 전용127.0.0.1:55433 DB에서만 초기화를 허용한다. 도면의 DB/공개 관계는 변경하지 않는다.
+- 검증 결과는 WORKLOG의 '네이버 전화번호 수집 적용 및 Flutter 연동 확인'에 기록한다. 실제 네이버 계정·개발자센터 설정/재동의·실기기·운영 DB는 이번 로컬 검증 범위 밖이며 커밋/푸시/배포는 수행하지 않았다.
+
 ## Google·개인 일정1~5 develop 병합 배포 완료 (2026-11-13)
 
 Google 소스3d61f36과 기존 개인 일정1~5 변경을 포함한 origin/develop 전체를 비공개 main에 실제 merge하고 Stage/운영 배포를 완료했다. 양 환경 DB는 기존 phone/unique와 events1~5/default1이 준비되어 이번 배포에서 SQL/env/사용자 데이터를 변경하지 않았다. 전체 테스트·자동 CI·readiness/Google 계약·API/worker10개 health를 확인했다. Flutter도 독립 검증한 전화번호 소스를 develop→main 실제 merge·push했으며 앱 재빌드/실기기 인수가 필요하다. 아래 이전 작업 당시 미배포 설명보다 이 결과가 우선한다. 상세는 WORKLOG를 따른다.

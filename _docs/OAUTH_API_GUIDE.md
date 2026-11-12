@@ -23,6 +23,7 @@
       "email": "user@example.com",
       "name": "사용자 이름",
       "profile_image_url": "https://...",
+      "phone": "010-1234-5678", // nullable. 네이버 로그인도 지원
       "kakao_id": "카카오 ID (카카오 로그인 시)",
       "apple_id": "Apple 검증 subject (Apple 로그인 시)",
       "google_id": "Google 검증 subject (Google 로그인 시)",
@@ -66,6 +67,28 @@
 
 ## 네이버 OAuth 로그인
 
+### 사진 동의 제거·휴대전화번호 추가 (2026-11-13)
+
+- 서버는 `GET https://openapi.naver.com/v1/nid/me`의 `response.mobile`만 정규화해 저장한다. 사진은 반환되어도 사용하지 않는다. 신규 사용자의 사진은 null이며 기존 사진/업로드 key는 유지한다.
+- 신규 가입과 기존 `users.phone IS NULL` 계정만 번호를 저장한다. 기존 번호는 덮어쓰지 않고 전화번호를 계정 연결 기준으로 쓰지 않는다. 기존 이메일 연결은 유지하되 다른 naver_id가 이미 연결되었으면409 NAVER_ACCOUNT_CONFLICT다.
+- 저장 형식은 `010-1234-5678` 등의 기존 하이픈 형식이다. 10~11자리 숫자도 정규화하며 누락/지원하지 않는 형식·국제번호는 null로 두고 기존 가입 입력 화면을 이용한다. 네이버 전화번호 필수/선택 설정과 실제 기존 사용자 제공 여부는 개발자센터·실기기에서 확인한다.
+- `data.user.phone`은 nullable string, `data.user.profile_image_url`은 nullable string이다. `data.requires_profile_setup`은 profile_completed_at 정본을 유지하며 번호 수신만으로 false가 되지 않는다.
+- 두 URL/code·access_token 요청,200 성공 wrapper/JWT 필드를 유지한다. 전화번호 중복은409 PHONE_ALREADY_EXISTS, 탈퇴 진행은409 ACCOUNT_DELETION_IN_PROGRESS다. 명시적 인증 오류401·외부 장애503·내부 오류500에는 안전한 문구만 반환한다. 기존 앱 호환을 위해 최상위 `message`와 `error: {code,message}`, `request_id`를 함께 반환한다. route validation400에는 중첩 error와 request_id를 사용한다.
+- Flutter 확인 결과: `naver_login_service.dart`는 SDK 토큰만 전달하며 프로필 사진/번호 동의를 직접 요구하지 않는다. User는 nullable phone/사진을 파싱하고 ProfileSetupPage는 phone 미리 채움·기본 아바타·직접 입력을 지원한다. 네이버 DataSource는 최상위 message를 Exception으로 전달하고 Provider/LoginPage가 표시하므로 필수 앱 수정은 없다. 오류 code/request_id를 이용한 분기가 필요할 때 공통 `handleApiError()` 적용을 별도 검토한다. 앱 코드/SDK 설정은 이번에 변경하지 않았다.
+- 실기기 인수: 신규/기존 동의 계정, 번호 제공/미제공, 기존 번호·사진 보존, 번호 중복 안내를 Stage에서 확인한다. 기존 거부 항목의 재동의는 [네이버 개발가이드](https://developers.naver.com/docs/login/devguide/devguide.md)의 별도 인증 흐름이며 서버가 설정 변경만으로 과거 동의를 획득했다고 간주하지 않는다.
+- 파일 역할/의존성/사용 예: `src/openapi/naverAuthOpenApi.json`은 두 네이버 URL의 요청·응답/오류와 기존 OwnProfile을 참조하며 `src/openapi.ts`가 병합한다. `API_DOCS_ENABLED=true`에서 `/api-docs/openapi.json`으로 확인한다. `test/naverAuth.test.cjs`는 Axios 모의 응답으로 mobile/사진/외부 오류를 확인하며 build 후 `node --test test/naverAuth.test.cjs`로 실행한다. `test/naverAuthIntegration.test.cjs`는 최종 DDL·실제 route/Sequelize/PostgreSQL에 의존하고 외부 네이버만 모의 처리한다. 전용 DB에서만 schema reset을 허용한다.
+
+격리 DB 검증 예(운영/공유 DB에서는 실행하지 않는다):
+
+```bash
+docker run --name shiftmate-naver-test -e POSTGRES_DB=shift_calendar_naver_test -e POSTGRES_USER=naver_test -e POSTGRES_PASSWORD=naver_test_local_only -p 127.0.0.1:55433:5432 -d postgres:16-alpine
+# PostgreSQL 준비 완료 후 실행
+npm run test:naver-integration
+docker rm -f -v shiftmate-naver-test
+```
+
+- 배포 영향/롤백: 모델/DDL 기준 DB migration·추가 env·seed가 없다. 기존 서버로 복구 시 수집된 phone/기존 사진을 삭제하지 않는다. 운영 반영 전 실제 대상 DB의 기존 phone CHECK/unique를 확인하고 서버를 배포한다. 기존 사진 정리는 별도 정책 없이 일괄 수행하지 않는다.
+
 ### 1. 네이버 로그인 (WebView 방식 - Authorization Code)
 
 네이버 OAuth 인증 페이지에서 받은 authorization code를 사용하여 로그인합니다.
@@ -75,7 +98,7 @@
 1. **네이버 개발자 센터** (https://developers.naver.com) 접속
 2. 애플리케이션 등록 및 Client ID, Client Secret 발급
 3. Callback URL 등록 (예: `http://localhost:3000/test/callback.html`)
-4. 제공 정보 동의 항목 설정 (이메일, 프로필 정보 필수)
+4. 제공 정보 동의 항목 설정: 이메일 제공 필요, 프로필 사진 제외, 휴대전화번호 추가. 전화번호 필수/선택 여부는 실제 서비스 설정에 맞춰 확인한다.
 
 #### OAuth 인증 흐름
 

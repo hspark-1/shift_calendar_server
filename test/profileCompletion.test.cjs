@@ -153,7 +153,10 @@ test("OAuth 응답은 is_new_user와 별도로 requires_profile_setup을 제공�
     assert.match(readRepositoryFile(relative_path), /requires_profile_setup/);
   }
   const controller = readRepositoryFile("src/controllers/authController.ts");
-  assert.ok((controller.match(/requires_profile_setup:/g) || []).length >= 8);
+  assert.ok((controller.match(/requires_profile_setup:/g) || []).length >= 7);
+  const naver_controller = controller.slice(controller.indexOf("async function sendNaverLoginResponse"));
+  assert.match(naver_controller, /requires_profile_setup: result\.user\.profile_completed_at == null/);
+  assert.equal((naver_controller.match(/await sendNaverLoginResponse\(req, res, identity\)/g) || []).length, 2);
 });
 
 test("친구 목록과 그룹 응답 경로는 phone/workplace를 공개하지 않는다", () => {

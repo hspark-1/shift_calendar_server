@@ -1,0 +1,332 @@
+{
+  "tags": [
+    {
+      "name": "Naver Auth",
+      "description": "네이버 로그인·전화번호 수집"
+    }
+  ],
+  "paths": {
+    "/auth/naver": {
+      "post": {
+        "tags": [
+          "Naver Auth"
+        ],
+        "summary": "네이버 Authorization Code 로그인",
+        "description": "mobile 누락/지원하지 않는 형식은 null로 두며 가입 프로필 입력을 유지한다. 전화번호는 계정 병합에 사용하지 않는다.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NaverLoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "신규/기존 로그인 성공. 네이버 사진은 수집하지 않고 mobile은 하이픈 번호로 저장한다. 기존 번호/사진은 보존하고 빈 번호만 보완한다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "요청 검증 실패 또는 이메일/프로필/코드 교환 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "네이버 토큰 인증 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PHONE_ALREADY_EXISTS, NAVER_ACCOUNT_CONFLICT 또는 ACCOUNT_DELETION_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "로그인 요청 한도 초과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "내부 처리 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "네이버 API 일시 장애",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/naver/token": {
+      "post": {
+        "tags": [
+          "Naver Auth"
+        ],
+        "summary": "네이버 SDK Access Token 로그인",
+        "description": "mobile 누락/지원하지 않는 형식은 null로 두며 가입 프로필 입력을 유지한다. 전화번호는 계정 병합에 사용하지 않는다.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NaverTokenLoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "신규/기존 로그인 성공. 네이버 사진은 수집하지 않고 mobile은 하이픈 번호로 저장한다. 기존 번호/사진은 보존하고 빈 번호만 보완한다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "요청 검증 실패 또는 이메일/프로필/코드 교환 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "네이버 토큰 인증 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PHONE_ALREADY_EXISTS, NAVER_ACCOUNT_CONFLICT 또는 ACCOUNT_DELETION_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "로그인 요청 한도 초과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "내부 처리 오류",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "네이버 API 일시 장애",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NaverAuthErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "NaverLoginRequest": {
+        "type": "object",
+        "required": [
+          "code",
+          "redirect_uri"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "redirect_uri": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "NaverTokenLoginRequest": {
+        "type": "object",
+        "required": [
+          "access_token"
+        ],
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "NaverLoginResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "user",
+              "access_token",
+              "refresh_token",
+              "expires_at",
+              "requires_profile_setup"
+            ],
+            "properties": {
+              "user": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OwnProfile"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "naver_id": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              },
+              "access_token": {
+                "type": "string"
+              },
+              "refresh_token": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Unix milliseconds"
+              },
+              "requires_profile_setup": {
+                "type": "boolean",
+                "description": "profile_completed_at이 null이면 true. 전화번호 수신만으로 가입을 완료하지 않는다."
+              }
+            }
+          }
+        }
+      },
+      "NaverAuthErrorResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "error",
+          "request_id"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
