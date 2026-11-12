@@ -323,7 +323,7 @@ CREATE TABLE events (
   start_at timestamptz NOT NULL,
   end_at timestamptz NOT NULL,
 
-  visibility_level smallint NOT NULL DEFAULT 0,
+  visibility_level smallint NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
 
@@ -335,7 +335,7 @@ CREATE TABLE events (
   CONSTRAINT fk_events_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT fk_events_deleted_by FOREIGN KEY (deleted_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
   CONSTRAINT ck_events_time CHECK (start_at < end_at),
-  CONSTRAINT ck_events_visibility CHECK (visibility_level >= 0)
+  CONSTRAINT ck_events_visibility CHECK (visibility_level BETWEEN 1 AND 5)
 );
 
 CREATE INDEX idx_events_owner_start_not_deleted

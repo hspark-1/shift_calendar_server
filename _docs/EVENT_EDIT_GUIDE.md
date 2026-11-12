@@ -1,5 +1,7 @@
 # 개인 일정 전체 수정 API
 
+최신 공개 레벨 정책(2026-11-12): 개인 일정은1~5·기본1, 친구 레벨0은 근무표만 열람한다. 아래 과거0~5 설명보다 [EVENT_VISIBILITY_GUIDE.md](EVENT_VISIBILITY_GUIDE.md)와 ADR-0046을 우선한다. 새 범위는 서버 배포와 증분 migration 적용 후 운영에 반영된다.
+
 작성일: 2026-11-12 (Asia/Seoul). 구현·검증 및 Stage/운영 배포 완료. Flutter 실기기 인수는 후속.
 
 ## 목적과 요청 흐름

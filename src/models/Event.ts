@@ -12,7 +12,7 @@ interface EventAttributes {
   all_day: boolean;
   start_at: Date; // timestamptz
   end_at: Date; // timestamptz
-  visibility_level: number; // 0 이상
+  visibility_level: number; // 개인 일정은 1~5
   is_private: boolean;
   created_at?: Date;
   updated_at?: Date;
@@ -109,9 +109,10 @@ Event.init(
     visibility_level: {
       type: DataTypes.SMALLINT,
       allowNull: false,
-      defaultValue: 0,
+      defaultValue: 1,
       validate: {
-        min: 0,
+        min: 1,
+        max: 5,
       },
     },
     is_private: {

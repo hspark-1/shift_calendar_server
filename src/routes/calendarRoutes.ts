@@ -128,7 +128,7 @@ router.post(
       })
       .withMessage("일정 시간이 올바르지 않습니다."),
     body("visibility_level")
-      .isInt({ min: 0, max: 5 })
+      .isInt({ min: 1, max: 5 })
       .withMessage("공개 레벨이 올바르지 않습니다.")
       .toInt(),
     body("is_private")
@@ -151,7 +151,7 @@ router.put(
     body("start_at").custom(isUtcIsoDateTime),
     body("end_at").custom((value, { req }) => isUtcIsoDateTime(value) &&
       isUtcIsoDateTime(req.body.start_at) && new Date(req.body.start_at) < new Date(value)),
-    body("visibility_level").custom(value => Number.isInteger(value) && value >= 0 && value <= 5),
+    body("visibility_level").custom(value => Number.isInteger(value) && value >= 1 && value <= 5),
     body("is_private").custom(value => typeof value === "boolean"),
     body("memo").custom(value => value === null || typeof value === "string"),
     body("place").custom(value => value === null || typeof value === "string"),

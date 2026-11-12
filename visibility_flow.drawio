@@ -25,7 +25,7 @@
         <mxCell id="hidden" value="해당 일정 전체 행 제외&#10;event_id/title/memo/place/start/end 없음&#10;숨겨진 개수·날짜 마커도 없음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="50" y="850" width="400" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="level" value="friend_level &gt;= visibility_level?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+        <mxCell id="level" value="friend_level &gt;= visibility_level?&#10;개인 일정: 1~5, 친구 0: 근무표만" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="570" y="850" width="400" height="140" as="geometry" />
         </mxCell>
         <mxCell id="events" value="v_visible_events_for_friend&#10;deleted_at IS NULL + is_private=false&#10;친구/ACL/레벨 + 기간 overlap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">

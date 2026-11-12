@@ -1,5 +1,7 @@
 # 개인 일정 나만 보기 서버 계약
 
+최신 공개 레벨 정책(2026-11-12): 개인 일정은1~5·기본1, 친구 레벨0은 근무표만 열람한다. 아래 과거0~5 설명보다 [EVENT_VISIBILITY_GUIDE.md](EVENT_VISIBILITY_GUIDE.md)와 ADR-0046을 우선한다. 새 범위는 서버 배포와 증분 migration 적용 후 운영에 반영된다.
+
 작성일: 2026-11-11 (Asia/Seoul). 공개 기능 `10cdc03` 반영·격리 PostgreSQL 검증·Stage/운영 서버 배포 완료. migration은 사용자 적용 완료를 확인했고 배포 전 컬럼/뷰 검사 및 배포 후 readiness·Stage OpenAPI를 확인했다. 실제 인증 사용자별 실응답·실기기 인수와 Flutter 활성화는 후속 작업이다.
 
 ## 목적과 요청 흐름

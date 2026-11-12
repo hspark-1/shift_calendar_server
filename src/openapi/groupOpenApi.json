@@ -1330,7 +1330,8 @@
                 },
                 "visibility_level": {
                   "type": "integer",
-                  "minimum": 0
+                  "minimum": 1,
+                  "maximum": 5
                 },
                 "is_private": {
                   "type": "boolean",

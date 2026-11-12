@@ -370,7 +370,7 @@ export async function createEvent(
   const visibility_level = Number(input.visibility_level);
   if (
     !Number.isInteger(visibility_level) ||
-    visibility_level < 0 ||
+    visibility_level < 1 ||
     visibility_level > max_event_visibility_level
   ) {
     throw new Error("INVALID_VISIBILITY_LEVEL");
@@ -694,7 +694,7 @@ export async function updateEvent(
   if (!title) throw new Error("INVALID_TITLE");
   if (typeof input.all_day !== "boolean") throw new Error("VALIDATION_ERROR");
   if (typeof input.is_private !== "boolean") throw new Error("INVALID_EVENT_PRIVACY");
-  if (!Number.isInteger(input.visibility_level) || input.visibility_level < 0 || input.visibility_level > 5) {
+  if (!Number.isInteger(input.visibility_level) || input.visibility_level < 1 || input.visibility_level > 5) {
     throw new Error("INVALID_VISIBILITY_LEVEL");
   }
   for (const value of [input.memo, input.place]) {

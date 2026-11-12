@@ -30,7 +30,7 @@ test('잘못된 타입·누락·시간은 DB 호출 전 거절하고 타인/삭�
   Event.update = async () => { calls++; return [0, []]; };
   try {
     const invalid = [{ title: '  ' }, { all_day: 'false' }, { is_private: undefined }, { is_private: 'true' },
-      { memo: undefined }, { place: 0 }, { visibility_level: '3' }, { visibility_level: 6 },
+      { memo: undefined }, { place: 0 }, { visibility_level: '3' }, { visibility_level: 6 }, { visibility_level: 0 }, { visibility_level: -1 },
       { start_at: '2026-02-30T00:00:00.000Z' }, { end_at: input.start_at }, { start_at: '2026-11-12T09:00:00+09:00' }];
     for (const patch of invalid) await assert.rejects(updateEvent(owner_id, event_id, { ...input, ...patch }));
     await assert.rejects(updateEvent(owner_id, 'bad-id', input), /INVALID_EVENT_ID/);
@@ -57,7 +57,7 @@ test('실제 HTTP route의 인증·필수 필드·엄격 타입·null 삭제·�
     assert.equal((await put(input, event_id, '')).status, 401);
     assert.equal((await put(input, 'bad-id')).body.error.code, 'INVALID_EVENT_ID');
     for (const field of Object.keys(input)) { const body = {...input}; delete body[field]; assert.equal((await put(body)).status,400,field); }
-    for (const patch of [{all_day:'false'},{is_private:'true'},{visibility_level:'3'},{memo:[]},{place:{}},{end_at:input.start_at}]) assert.equal((await put({...input,...patch})).status,400);
+    for (const patch of [{all_day:'false'},{is_private:'true'},{visibility_level:'3'},{visibility_level:0},{visibility_level:6},{memo:[]},{place:{}},{end_at:input.start_at}]) assert.equal((await put({...input,...patch})).status,400);
     assert.equal(calls,0);
     const success=await put({...input, memo:'', place:null});
     assert.equal(success.status,200); assert.equal(success.body.data.memo,null); assert.equal(success.body.data.place,null); assert.equal(success.body.data.is_private,true);
@@ -66,4 +66,19 @@ test('실제 HTTP route의 인증·필수 필드·엄격 타입·null 삭제·�
     assert.deepEqual(new Set(spec.components.schemas.UpdateEventInput.required),new Set(Object.keys(input)));
     for (const status of ['200','400','401','404','500']) assert.ok(spec.paths['/events/{event_id}'].put.responses[status]);
   } finally { await new Promise(resolve => server.close(resolve)); User.findByPk=original_find; Event.update=original_update; }
+});
+
+test('수정 레벨1/5는 공개 및 private 모두 허용하고0은 DB 변경 전에 거절한다', async () => {
+  const original=Event.update;let calls=0;
+  Event.update=async values=>{calls++;return [1,[row(values)]];};
+  try {
+    for(const is_private of [false,true]) {
+      for(const visibility_level of [1,5]) {
+        const result=await updateEvent(owner_id,event_id,{...input,is_private,visibility_level});
+        assert.equal(result.visibility_level,visibility_level);assert.equal(result.is_private,is_private);
+      }
+      await assert.rejects(updateEvent(owner_id,event_id,{...input,is_private,visibility_level:0}),/INVALID_VISIBILITY_LEVEL/);
+    }
+    assert.equal(calls,4);
+  } finally {Event.update=original;}
 });

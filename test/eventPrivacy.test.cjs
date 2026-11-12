@@ -12,7 +12,7 @@ const other_id = "00000000-0000-4000-8000-000000000002";
 const valid_input = {
   title: "  개인 일정  ", all_day: false,
   start_at: "2026-11-11T00:00:00.000Z", end_at: "2026-11-11T01:00:00.000Z",
-  visibility_level: 0, memo: "  메모  ", place: "  ",
+  visibility_level: 1, memo: "  메모  ", place: "  ",
 };
 const invalid_privacies = [null, "true", "false", "", 0, 1, [], [true], {}, { value: true }];
 
@@ -42,7 +42,7 @@ test("서비스는 생략=false와 boolean을 보존하고 소유자 위조·텍
       assert.equal(result.title, "개인 일정");
       assert.equal(result.memo, "메모");
       assert.equal(result.place, null);
-      assert.equal(result.visibility_level, 0);
+      assert.equal(result.visibility_level, 1);
     }
     assert.ok(stored.every(row => row.owner_user_id === owner_id && row.created_by_user_id === owner_id));
     assert.equal(Event.getAttributes().is_private.allowNull, false);
@@ -57,7 +57,7 @@ test("서비스 직접 호출은 잘못된 private 타입과 기존 시간·레�
     for (const is_private of invalid_privacies) {
       await assert.rejects(calendar_service.createEvent(owner_id, { ...valid_input, is_private }), /INVALID_EVENT_PRIVACY/);
     }
-    for (const visibility_level of [-1, 6, 1.5, undefined]) {
+    for (const visibility_level of [-1, 0, 6, 1.5, undefined]) {
       await assert.rejects(calendar_service.createEvent(owner_id, { ...valid_input, is_private: true, visibility_level }), /INVALID_VISIBILITY_LEVEL/);
     }
     for (const fields of [{ end_at: valid_input.start_at }, { start_at: "2026-11-11T09:00:00+09:00" }, { start_at: "2026-02-30T00:00:00Z" }]) {
@@ -94,7 +94,7 @@ test("실제 인증 route는 잘못된 JSON 타입을 400으로 거절하고 생
         assert.equal(result.body.message, "일정이 생성되었습니다.");
       }
       assert.ok(stored.every(row => row.owner_user_id === owner_id && row.created_by_user_id === owner_id));
-      for (const visibility_level of [undefined, -1, 6]) {
+      for (const visibility_level of [undefined, -1, 0, 6]) {
         const result = await post({ ...valid_input, is_private: true, visibility_level });
         assert.equal(result.status, 400); assert.equal(result.body.error.code, "INVALID_VISIBILITY_LEVEL");
       }
@@ -123,6 +123,10 @@ test("병합 OpenAPI HTTP는 개인/친구/그룹 공개 계약과 유효한 내
       assert.equal(input.properties.is_private.type, "boolean");
       assert.ok(!input.required.includes("is_private"));
       assert.ok(input.required.includes("visibility_level"));
+      for (const name of ["CreateEventInput", "UpdateEventInput", "EventApiModel", "FriendCalendarEvent"]) {
+        assert.equal(spec.components.schemas[name].properties.visibility_level.minimum, 1);
+        assert.equal(spec.components.schemas[name].properties.visibility_level.maximum, 5);
+      }
       assert.ok(spec.components.schemas.EventApiModel.required.includes("is_private"));
       assert.deepEqual(spec.components.schemas.FriendCalendarEvent.properties.is_private.enum, [false]);
       assert.ok(spec.components.schemas.GroupCalendarRange.properties.events.items.required.includes("is_private"));
@@ -141,4 +145,19 @@ test("병합 OpenAPI HTTP는 개인/친구/그룹 공개 계약과 유효한 내
       assert.equal(docs.status, 200); assert.match(await docs.text(), /swagger-ui/);
     });
   } finally { if (previous_docs === undefined) delete process.env.API_DOCS_ENABLED; else process.env.API_DOCS_ENABLED = previous_docs; }
+});
+
+test("생성 레벨1/5와 모델 기본1·최대5를 고정하고 근무 레벨0 모델은 보존한다",async()=>{
+  const original=Event.create;
+  Event.create=async values=>eventResult(values);
+  try {
+    for(const is_private of [false,true]) for(const visibility_level of [1,5]) {
+      const result=await calendar_service.createEvent(owner_id,{...valid_input,is_private,visibility_level});
+      assert.equal(result.visibility_level,visibility_level);
+    }
+    const attribute=Event.getAttributes().visibility_level;
+    assert.equal(attribute.defaultValue,1);assert.equal(attribute.validate.min,1);assert.equal(attribute.validate.max,5);
+    const {WorkShift}=require("../dist/models/index.js");
+    assert.equal(WorkShift.getAttributes().visibility_level.defaultValue,0);
+  } finally {Event.create=original;}
 });

@@ -34,6 +34,7 @@ if (process.env.RUN_EVENT_PRIVACY_INTEGRATION !== "true") {
   let owner;
   let high_friend;
   let low_friend;
+  let zero_friend;
   let denied_friend;
   let non_friend;
   let group;
@@ -116,6 +117,30 @@ if (process.env.RUN_EVENT_PRIVACY_INTEGRATION !== "true") {
     assert.equal((await client.query("SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='events' AND column_name='is_private'")).rows[0].data_type,"text");
   });
 
+  test("개인 일정 레벨 migration은0→1만 보정하고 재실행·제약·private/소유권/시각을 보존한다", async () => {
+    await client.query(legacy_schema);
+    await applyMigration();
+    const id=(await client.query("INSERT INTO users(email,name) VALUES ('level-owner@test.test','level') RETURNING user_id")).rows[0].user_id;
+    await client.query("INSERT INTO events(owner_user_id,created_by_user_id,title,memo,start_at,end_at,visibility_level,is_private) VALUES ($1,$1,'legacy-public','memo','2026-11-11T00:00:00Z','2026-11-11T01:00:00Z',0,false),($1,$1,'legacy-private','memo','2026-11-11T00:00:00Z','2026-11-11T01:00:00Z',0,true),($1,$1,'existing-five',NULL,'2026-11-11T00:00:00Z','2026-11-11T01:00:00Z',5,false)",[id]);
+    const before=(await client.query("SELECT * FROM events ORDER BY title")).rows;
+    const definition=(await client.query("SELECT pg_get_viewdef('public.v_visible_events_for_friend'::regclass,true) AS definition")).rows[0].definition;
+    const sql=fs.readFileSync(path.join(root,"migrations/restrict_event_visibility_levels.sql"),"utf8");
+    // 예상 밖 레벨은 transaction 전체를 거절하고 기존0/기본값을 남긴다.
+    await client.query("INSERT INTO events(owner_user_id,created_by_user_id,title,start_at,end_at,visibility_level) VALUES ($1,$1,'invalid-six','2026-11-11T00:00:00Z','2026-11-11T01:00:00Z',6)",[id]);
+    await assert.rejects(client.query(sql),/preflight/);await client.query("ROLLBACK");
+    assert.equal((await client.query("SELECT visibility_level FROM events WHERE title='legacy-public'")).rows[0].visibility_level,0);
+    await client.query("DELETE FROM events WHERE title='invalid-six'");
+    await client.query(sql);await client.query(sql);
+    const after=(await client.query("SELECT * FROM events ORDER BY title")).rows;
+    assert.deepEqual(after,before.map(row=>({...row,visibility_level:Math.max(1,row.visibility_level)})));
+    assert.equal((await client.query("SELECT pg_get_viewdef('public.v_visible_events_for_friend'::regclass,true) AS definition")).rows[0].definition,definition);
+    const column=(await client.query("SELECT column_default FROM information_schema.columns WHERE table_schema='public' AND table_name='events' AND column_name='visibility_level'")).rows[0];
+    assert.equal(column.column_default,'1');
+    const inserted=await client.query("INSERT INTO events(owner_user_id,created_by_user_id,title,start_at,end_at) VALUES ($1,$1,'default-one','2026-11-11T00:00:00Z','2026-11-11T01:00:00Z') RETURNING visibility_level",[id]);
+    assert.equal(inserted.rows[0].visibility_level,1);
+    for(const level of [0,-1,6]) await assert.rejects(client.query("UPDATE events SET visibility_level=$1",[level]),/ck_events_visibility/);
+  });
+
   test("신규 설치 DDL에 migration과 같은 view 컬럼·boolean 기본값을 제공한다", async () => {
     await client.query(final_schema);
     assert.equal((await client.query("SELECT pg_get_viewdef('public.v_visible_events_for_friend'::regclass, true) AS definition")).rows[0].definition, migrated_view_definition);
@@ -127,15 +152,17 @@ if (process.env.RUN_EVENT_PRIVACY_INTEGRATION !== "true") {
     owner = await createUser("owner");
     high_friend = await createUser("high-friend");
     low_friend = await createUser("low-friend");
+    zero_friend = await createUser("zero-friend");
     denied_friend = await createUser("denied-friend");
     non_friend = await createUser("non-friend");
     await addFriend(high_friend,true,5);
     await addFriend(low_friend,true,2);
+    await addFriend(zero_friend,true,0);
     await addFriend(denied_friend,false,5);
     // A stale permission without a friendship cannot bypass the EXISTS condition.
     await FriendLevelSetting.create({ owner_user_id: owner.user_id, friend_user_id: non_friend.user_id, can_view: true, friend_level: 5 });
     group = await Group.create({ name: "private-test", timezone: "UTC", created_by_user_id: owner.user_id });
-    for (const user of [owner,high_friend,low_friend,denied_friend,non_friend]) {
+    for (const user of [owner,high_friend,low_friend,zero_friend,denied_friend,non_friend]) {
       await GroupMember.create({ group_id: group.group_id, user_id: user.user_id, role: user === owner ? "OWNER" : "ADMIN", added_by_user_id: owner.user_id });
     }
     const template = await ShiftTemplate.create({ owner_user_id: owner.user_id, name: "private-test" });
@@ -146,12 +173,12 @@ if (process.env.RUN_EVENT_PRIVACY_INTEGRATION !== "true") {
     const app=express(); app.use(express.json()); app.use("/api/v1",calendar_routes); app.use("/api/v1",friend_routes); app.use("/api/v1",group_routes);
     server = await new Promise((resolve,reject) => { const listener=app.listen(0,"127.0.0.1",()=>resolve(listener)); listener.once("error",reject); });
     base_url=`http://127.0.0.1:${server.address().port}`;
-    const legacy = await request(owner,"/events",{method:"POST",body:{title:"legacy-api",all_day:false,start_at:"2026-11-11T02:00:00.000Z",end_at:"2026-11-11T03:00:00.000Z",visibility_level:0,owner_user_id:high_friend.user_id,created_by_user_id:high_friend.user_id}});
+    const legacy = await request(owner,"/events",{method:"POST",body:{title:"legacy-api",all_day:false,start_at:"2026-11-11T02:00:00.000Z",end_at:"2026-11-11T03:00:00.000Z",visibility_level:1,owner_user_id:high_friend.user_id,created_by_user_id:high_friend.user_id}});
     assert.equal(legacy.status,201); assert.equal(legacy.body.data.is_private,false);
     const saved=await Event.findByPk(legacy.body.data.event_id);
     assert.equal(saved.owner_user_id,owner.user_id); assert.equal(saved.created_by_user_id,owner.user_id);
     events.push(saved);
-    for (const is_private of [false,true]) for (const visibility_level of [0,2,3,5]) for (const kind of ["timed","all-day","multi-day"]) {
+    for (const is_private of [false,true]) for (const visibility_level of [1,2,3,5]) for (const kind of ["timed","all-day","multi-day"]) {
       const result=await request(owner,"/events",{method:"POST",body:{title:`${is_private ? "private-secret" : "public"}-${visibility_level}-${kind}`,memo:is_private ? "private-memo-secret" : null,place:is_private ? "private-place-secret" : null,all_day:kind === "all-day",start_at:kind === "multi-day" ? "2026-11-10T23:00:00.000Z" : "2026-11-11T00:00:00.000Z",end_at:kind === "timed" ? "2026-11-11T01:00:00.000Z" : "2026-11-12T00:00:00.000Z",visibility_level,is_private}});
       assert.equal(result.status,201); assert.equal(result.body.data.is_private,is_private); assert.equal(result.body.data.visibility_level,visibility_level);
       events.push(await Event.findByPk(result.body.data.event_id));
@@ -177,8 +204,8 @@ if (process.env.RUN_EVENT_PRIVACY_INTEGRATION !== "true") {
     assert.equal(day.body.data.work_shifts.length,1);
   });
 
-  test("친구 레벨 5/2에서도 private 전체 행을 친구·그룹 응답에서 제외한다",async()=>{
-    for (const [viewer,level] of [[high_friend,5],[low_friend,2]]) {
+  test("친구 레벨0은 근무표만 보고 레벨5/2도 private를 우회하지 못한다",async()=>{
+    for (const [viewer,level] of [[high_friend,5],[low_friend,2],[zero_friend,0]]) {
       const expected=events.filter(event=>!event.is_private && event.visibility_level<=level);
       for (const route of [`/friends/${owner.user_id}/calendar/range?${range_query}`,`/groups/${group.group_id}/calendar/range?${range_query}`]) {
         const result=await request(viewer,route); assert.equal(result.status,200);

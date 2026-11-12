@@ -1,5 +1,12 @@
 # 프로젝트 컨텍스트
 
+## 개인 일정 공개 레벨1~5 (2026-11-12)
+
+- 사용자 기획: 친구 레벨0은 근무표만 본다. 개인 일정은1~5·기본1이며 private에도 같은 저장 범위를 적용한다. 근무표0/친구0~5·private/ACL은 유지한다. 아래 과거 개인 일정0~5 설명보다 이 정책을 우선한다.
+- 흐름/변경: route → controller 기존400 매핑 → service 생성/수정 → Event 모델 min1/max5/default1 → DB CHECK/default. 새 증분 restrict_event_visibility_levels.sql은 기존0만1로 바꾸며 나머지 행 메타데이터/공개 view를 보존한다. 신규 final_schema·OpenAPI·정본 도면과 로컬 AGENTS DDL도 정합성을 맞췄다. 기본 로컬 checkout은 기존 codex/private-events이며 커밋/브랜치/배포는 변경하지 않았다.
+- 파일 역할·의존성·사용 예·배포 순서/구형 앱 호환·테스트/안전 롤백은 [EVENT_VISIBILITY_GUIDE.md](EVENT_VISIBILITY_GUIDE.md)를 따른다. 새 SQL은 transaction/lock_timeout/preflight와 재실행을 지원한다. 새 가이드는 사용자 기획과 실제 route/service/model/DDL·테스트에 근거한 운영 적용 안내이며 기존 EVENT_EDIT_GUIDE/PRIVACY_GUIDE보다 레벨 범위에 우선한다.
+- 로컬 검증: strict build·서비스/인증 HTTP12 pass·실제 전용 PostgreSQL/HTTP9 pass. 전체93 pass/기존17 fail/13 skip으로 변경 전 실패 이름과 동일하며 신규 실패0개다. 기존0→1과 DB 제약·레벨0 친구/그룹 근무만 조회를 확인했다. 전용 컨테이너/네트워크는 제거했다. Stage/운영 배포·운영 DB 적용/실기기는 수행하지 않았다. 롤백에서도 보정된1과 private/ACL을 보존한다.
+
 ## 개인 일정 전체 수정 (2026-11-12)
 
 - PUT /api/v1/events/{event_id}는 title·memo/place·all_day·start/end·visibility_level·is_private 전체8개 필드를 받는다. 선택정보 null 삭제·엄격 boolean/정수/UTC 시간 검증을 route와 서비스에 적용한다.

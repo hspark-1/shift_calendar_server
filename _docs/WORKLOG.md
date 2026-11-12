@@ -4,6 +4,23 @@
 
 ## 2026-11-12
 
+### [IN_PROGRESS] 개인 일정 공개 레벨 변경 커밋·푸시
+
+- 목적: 사용자 요청에 따라 개인 일정 공개 레벨1~5 변경을 공개 origin/develop에 반영한다.
+- 변경/영향: 현재 관련 소스·증분 SQL·OpenAPI·도면·테스트·문서만 커밋한다. develop은 다른 worktree에서 사용 중이므로 현재 codex/private-events에서 커밋하고 origin/develop으로 명시적으로 push한다.
+- 테스트: 이번 커밋 전 TypeScript build·개인 일정 서비스/HTTP9개(0 fail)·OpenAPI JSON/도면 XML 파싱을 통과했다. HTTP 리스닝의 sandbox EPERM은 localhost 허용 환경 재실행으로 해소했다. fetch 후 HEAD와 origin/develop 이력 차이는0이다. diff 검사도 수행한다. 전체/격리 DB 검증은 아래 구현 작업 기록을 참조하며 이번에는 재실행하지 않았다.
+- 롤백:1~5·private/ACL을 유지하는 호환 수정 커밋으로 복구하며 보정된 데이터를0으로 되돌리지 않는다.
+- 결과/다음: 검증·커밋·푸시 진행 중. Stage/Center 서버 배포와 DB SQL 실행은 이번 요청에 포함하지 않는다.
+
+### [DONE] 개인 일정 공개 레벨1~5 및 레벨0 근무 전용 정책
+
+- 목적: 개인 일정0을 금지하고 레벨0 친구에게 근무표만 노출한다.
+- 변경/영향: 생성/수정 route·service 범위1~5, Event 모델 min1/max5/default1·OpenAPI의 개인 일정 범위·신규 DDL/정본 도면을 맞췄다. 기존0→1/default/DB 제약 증분 SQL과 명시적 gitignore 예외를 추가했다. private/소유자/시각/근무표0·친구0~5/ACL·공개 view는 보존한다. 구형0 요청400과 운영 배포/migration 필요성을 문서화했다.
+- 신규 파일 역할/의존성/사용 예: migrations/restrict_event_visibility_levels.sql은 PostgreSQL events의0만1로 보정하고 기본값/ck_events_visibility를 고정한다. transaction·5초 lock_timeout·예상 밖 범위 preflight/재실행을 제공한다. _docs/EVENT_VISIBILITY_GUIDE.md는 적용 예/배포 순서·역호환·검증·안전 롤백을 제공하며 PROJECT_CONTEXT·ADR-0046·기존 수정/비공개 가이드에 연결했다. SQL/가이드에는 실제 비밀/사용자 데이터가 없다.
+- 테스트: strict build·서비스/인증 HTTP12 pass, 실제 격리 PostgreSQL/HTTP9 pass.0/-1/6 전송/DB 거절·1/5/private 허용·원본값 보존·0 보정/기본1/재실행·이상값 preflight 원자 거절·친구/그룹 레벨0에서 근무만 조회와 기존 수정/삭제 경합을 확인했다. 전체93 pass/17 fail/13 skip, 변경 전91 pass/17 fail/13 skip과 실패 이름이 같아 신규 실패0개다. 기존 비공개 배포 파일 누락/Apple 계약 실패는 범위 밖이다. JSON/drawio 파싱·diff 검사를 확인한다.
+- 결과/한계: 로컬 구현/검증 완료. 이번 전용 event-level-audit-20261112 PostgreSQL 컨테이너/네트워크는 정리했다. 기존 컨테이너/원격 DB는 변경하지 않았다. Stage/운영 배포·운영 데이터 migration·실기기 인수/커밋/푸시는 수행하지 않았다. 현재 codex/private-events checkout을 유지했다.
+- 롤백:1~5·private/ACL을 유지하는 호환 소스로 복구하며 보정된1을0으로 되돌려 개인정보를 다시 노출하지 않는다.
+
 ### [DONE] 개인 일정 전체 편집 API 커밋·배포
 
 - 목적: 사용자 요청에 따라 검증된 수정 API를 공개 develop과 비공개 배포 main에 반영한다.

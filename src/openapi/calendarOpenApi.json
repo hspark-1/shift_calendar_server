@@ -210,7 +210,7 @@
           "Calendar"
         ],
         "summary": "개인 일정 생성",
-        "description": "JWT 사용자를 소유자/생성자로 저장한다. is_private 생략은 false. 실제 JSON boolean만 허용하며 null·문자열·숫자·배열·객체는 INVALID_EVENT_PRIVACY(400). private여도 visibility_level 필수 0~5를 유지한다. place/memo는 trim 후 빈 값을 null로 저장한다.",
+        "description": "JWT 사용자를 소유자/생성자로 저장한다. is_private 생략은 false. 실제 JSON boolean만 허용하며 null·문자열·숫자·배열·객체는 INVALID_EVENT_PRIVACY(400). private여도 visibility_level 필수 1~5를 유지한다. place/memo는 trim 후 빈 값을 null로 저장한다.",
         "security": [
           {
             "bearerAuth": []
@@ -228,7 +228,7 @@
                 "all_day": false,
                 "start_at": "2026-11-11T00:00:00.000Z",
                 "end_at": "2026-11-11T01:00:00.000Z",
-                "visibility_level": 0,
+                "visibility_level": 1,
                 "is_private": true
               }
             }
@@ -896,7 +896,7 @@
           },
           "visibility_level": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": 1,
             "maximum": 5
           },
           "is_private": {
@@ -955,7 +955,7 @@
           },
           "visibility_level": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": 1,
             "maximum": 5
           },
           "is_private": {
@@ -1004,7 +1004,7 @@
           },
           "visibility_level": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": 1,
             "maximum": 5
           },
           "is_private": {
@@ -1164,7 +1164,7 @@
           },
           "visibility_level": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": 1,
             "maximum": 5
           },
           "is_private": {
