@@ -444,15 +444,15 @@ GET /groups/{group_id}/calendar/range?start_date=2026-07-01&end_date=2026-09-30
 | `calendar_access` | 의미 | UI 처리 |
 | --- | --- | --- |
 | `SELF` | 조회자 본인 | 본인 근무·일정 전체 표시 |
-| `VISIBLE` | 친구 관계와 소유자→조회자 `can_view=true` | 서버가 공개한 row만 표시 |
-| `DENIED` | 친구가 아니거나 `can_view=false` | `공개 안 함`/잠금 상태 표시 |
+| `VISIBLE` | 활성 그룹 멤버이며 소유자→조회자 명시적 차단 없음. 비친구/설정 없음도 근무표 열람 가능 | 서버가 공개한 row만 표시 |
+| `DENIED` | 소유자→조회자 `can_view=false` | `공개 안 함`/잠금 상태 표시 |
 
 중요 규칙:
 
 - `DENIED` 멤버도 `members` 배열에 남습니다.
 - 해당 사용자의 row와 숨겨진 개수는 `work_shifts`, `events`에 포함되지 않습니다.
 - `DENIED`를 근무 없음/일정 없음으로 표시하지 않습니다.
-- `VISIBLE`이어도 visibility level이 높은 이벤트는 서버에서 제거됩니다. 앱에서 추가 ACL 필터링을 하지 않습니다.
+- **Behavior change (2026-11-12)**: 비친구/설정 없는 멤버도 레벨0처럼 근무표를 받으며 `VISIBLE`입니다. 개인 일정은 기존 친구 관계·can_view=true·공개 레벨·private 조건으로만 반환합니다. `VISIBLE`이어도 개인 일정이 없을 수 있습니다. 앱에서 친구 여부로 요청/row를 생략하거나 추가 ACL 필터링을 하지 않습니다.
 - 모든 근무와 이벤트는 `owner_user_id`로 멤버와 연결합니다.
 - 기존 1인용 `CalendarRangeState`로 변환하면서 `owner_user_id`를 버리면 안 됩니다.
 - 이벤트 `start_at`/`end_at`은 UTC timestamp이므로 날짜·시간 배치는 기기 timezone이 아니라 응답 `group.timezone`으로 변환합니다. `work_date`는 변환하지 않습니다.
@@ -951,7 +951,8 @@ abstract interface class GroupRemoteDataSource {
 - [ ] 친구 대상 bulk 초대 생성과 받은 초대함 노출
 - [ ] 초대 수락 후 MEMBER로 그룹 목록에 진입
 - [ ] 같은 초대 두 번 응답 시 첫 요청만 성공하고 두 번째 409 처리
-- [ ] 그룹 캘린더에서 본인 `SELF`, 공개 친구 `VISIBLE`, 비공개/친구 아님 `DENIED` 구분
+- [ ] 그룹 캘린더에서 본인 `SELF`, 비친구 포함 차단 없는 활성 멤버 `VISIBLE`, 명시적 차단 `DENIED` 구분
+- [ ] 비친구/설정 없음은 근무표만 표시하고 친구 레벨1~5의 개인 일정 공개는 기존대로 유지
 - [ ] `DENIED` 소유자의 shift/event가 배열에 없음
 - [ ] 이벤트 UTC/group timezone 경계와 end-exclusive 표시
 - [ ] `work_date`가 서버 문자열 그대로 같은 날짜에 표시

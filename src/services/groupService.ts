@@ -1194,14 +1194,8 @@ export async function getGroupCalendarRange(
         gm.joined_at,
         CASE
           WHEN gm.user_id = :actor_user_id THEN 'SELF'
-          WHEN fls.can_view = true
-           AND EXISTS (
-             SELECT 1
-             FROM friendships f
-             WHERE f.user_id_a = LEAST(gm.user_id, :actor_user_id::uuid)
-               AND f.user_id_b = GREATEST(gm.user_id, :actor_user_id::uuid)
-           ) THEN 'VISIBLE'
-          ELSE 'DENIED'
+          WHEN fls.can_view = false THEN 'DENIED'
+          ELSE 'VISIBLE'
         END AS calendar_access
       FROM groups g
       JOIN group_members actor
@@ -1237,56 +1231,43 @@ export async function getGroupCalendarRange(
   const [work_shift_rows, event_rows] = await Promise.all([
     sequelize.query<CalendarWorkShiftRow>(
       `
-        WITH visible_work_shifts AS (
-          SELECT
-            ws.owner_user_id,
-            ws.work_shift_id,
-            ws.work_date,
-            ws.schedule_id,
-            ws.note,
-            ws.created_at,
-            ws.updated_at
-          FROM work_shifts ws
-          WHERE ws.owner_user_id = :actor_user_id
-            AND ws.work_date BETWEEN CAST(:start_date AS date) AND CAST(:end_date AS date)
-            AND ws.deleted_at IS NULL
-
-          UNION ALL
-
-          SELECT
-            ws.owner_user_id,
-            ws.work_shift_id,
-            ws.work_date,
-            ws.schedule_id,
-            ws.note,
-            ws.created_at,
-            ws.updated_at
-          FROM v_visible_work_shifts_for_friend ws
-          WHERE ws.viewer_user_id = :actor_user_id
-            AND ws.owner_user_id IN (:member_user_ids)
-            AND ws.work_date BETWEEN CAST(:start_date AS date) AND CAST(:end_date AS date)
-        )
         SELECT
-          visible.owner_user_id,
-          visible.work_shift_id,
-          visible.work_date,
+          ws.owner_user_id,
+          ws.work_shift_id,
+          ws.work_date,
           st.code AS shift_type_code,
           st.name AS shift_type_name,
           st.color AS shift_type_color,
           sts.start_time,
           sts.end_time,
-          visible.note,
-          visible.created_at,
-          visible.updated_at
-        FROM visible_work_shifts visible
-        JOIN shift_type_schedules sts ON sts.schedule_id = visible.schedule_id
+          ws.note,
+          ws.created_at,
+          ws.updated_at
+        FROM groups g
+        JOIN group_members actor
+          ON actor.group_id = g.group_id
+         AND actor.user_id = :actor_user_id
+         AND actor.removed_at IS NULL
+        JOIN group_members gm
+          ON gm.group_id = g.group_id
+         AND gm.removed_at IS NULL
+        JOIN work_shifts ws ON ws.owner_user_id = gm.user_id
+        LEFT JOIN friend_level_settings fls
+          ON fls.owner_user_id = gm.user_id
+         AND fls.friend_user_id = :actor_user_id
+        JOIN shift_type_schedules sts ON sts.schedule_id = ws.schedule_id
         JOIN shift_types st ON st.shift_type_id = sts.shift_type_id
-        ORDER BY visible.work_date ASC, visible.owner_user_id ASC
+        WHERE g.group_id = :group_id
+          AND g.deleted_at IS NULL
+          AND (gm.user_id = :actor_user_id OR fls.can_view IS DISTINCT FROM false)
+          AND ws.work_date BETWEEN CAST(:start_date AS date) AND CAST(:end_date AS date)
+          AND ws.deleted_at IS NULL
+        ORDER BY ws.work_date ASC, ws.owner_user_id ASC
       `,
       {
         replacements: {
           actor_user_id,
-          member_user_ids,
+          group_id,
           start_date,
           end_date,
         },

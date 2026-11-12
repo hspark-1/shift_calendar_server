@@ -1,4 +1,4 @@
-<mxfile host="app.diagrams.net" modified="2026-11-11T00:00:00.000Z" agent="Codex" version="24.7.17">
+<mxfile host="app.diagrams.net" modified="2026-11-12T00:00:00.000Z" agent="Codex" version="24.7.17">
   <diagram id="event-visibility" name="개인 일정·근무표 공개 판정">
     <mxGraphModel dx="1900" dy="1500" grid="1" gridSize="10" page="1" pageWidth="1900" pageHeight="1500">
       <root>
@@ -16,7 +16,7 @@
         <mxCell id="acl" value="친구 관계 EXISTS&#10;owner → viewer can_view=true?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="650" y="360" width="400" height="150" as="geometry" />
         </mxCell>
-        <mxCell id="denied" value="친구 API: 404(친구 아님) / 403(열람 차단)&#10;그룹 API: DENIED 멤버만, 일정·근무 row 없음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+        <mxCell id="denied" value="친구 API: 404(친구 아님) / 403(열람 차단)&#10;그룹: 타인 개인 일정 없음&#10;can_view=false면 DENIED + 근무도 없음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="1240" y="380" width="460" height="130" as="geometry" />
         </mxCell>
         <mxCell id="private" value="개인 일정 is_private = false?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
@@ -31,11 +31,20 @@
         <mxCell id="events" value="v_visible_events_for_friend&#10;deleted_at IS NULL + is_private=false&#10;친구/ACL/레벨 + 기간 overlap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="570" y="1090" width="400" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="shifts" value="v_visible_work_shifts_for_friend&#10;visibility_level=0 고정&#10;기존 soft delete·날짜 범위&#10;is_private 정책 적용 대상 아님" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+        <mxCell id="shifts" value="친구 API: v_visible_work_shifts_for_friend&#10;visibility_level=0 고정&#10;기존 soft delete·날짜 범위&#10;is_private 정책 적용 대상 아님" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="1180" y="640" width="430" height="150" as="geometry" />
         </mxCell>
         <mxCell id="result" value="필터된 events + work_shifts 응답&#10;그룹: 본인 events UNION ALL 타인 공개 view&#10;개인 일정은 캐시하지 않음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="1100" y="1100" width="490" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="group-shifts" value="그룹 근무표: 활성 그룹 + 조회자/소유자 활성 멤버십&#10;본인 또는 owner → viewer can_view가 false 아님&#10;친구/설정 없어도 VISIBLE, 레벨0처럼 근무만&#10;work_shifts + soft delete·날짜 범위&#10;개인 일정은 기존 친구/ACL/private/레벨 조건" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="130" width="550" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="그룹 근무표" edge="1" parent="1" source="start" target="group-shifts" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="" edge="1" parent="1" source="group-shifts" target="result" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e1" value="" edge="1" parent="1" source="start" target="self" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
           <mxGeometry relative="1" as="geometry" />
@@ -43,7 +52,7 @@
         <mxCell id="e2" value="예" edge="1" parent="1" source="self" target="own" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e3" value="아니오" edge="1" parent="1" source="self" target="acl" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
+        <mxCell id="e3" value="아니오: 개인 일정 / 친구 API" edge="1" parent="1" source="self" target="acl" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e4" value="아니오" edge="1" parent="1" source="acl" target="denied" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;">

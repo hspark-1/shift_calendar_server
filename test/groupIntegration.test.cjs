@@ -162,6 +162,11 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
     assert.equal(tables_after_rollback[0].count, 0);
     await applyMigration();
 
+    // Migration 검증 후 API fixture는 현재 모델의 Google/Push 의존성까지 준비한다.
+    await sequelize.query(fs.readFileSync(
+      path.join(root, "migrations", "final_schema.sql"), "utf8",
+    ).replace(/^\\set .*$/gm, ""));
+
     owner = await createUser("Owner");
     viewer = await createUser("Viewer");
     visible = await createUser("Visible");
@@ -523,6 +528,21 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
       created_by_user_id: denied.user_id,
     });
     await WorkShift.create({
+      owner_user_id: non_friend.user_id,
+      work_date: "2026-07-29",
+      schedule_id: schedule.schedule_id,
+      created_by_user_id: non_friend.user_id,
+    });
+    await Event.create({
+      owner_user_id: non_friend.user_id,
+      created_by_user_id: non_friend.user_id,
+      title: "Non-friend personal event",
+      all_day: false,
+      start_at: new Date("2026-07-28T15:00:00.000Z"),
+      end_at: new Date("2026-07-28T16:00:00.000Z"),
+      visibility_level: 1,
+    });
+    await WorkShift.create({
       owner_user_id: visible.user_id,
       work_date: "2026-07-30",
       schedule_id: schedule.schedule_id,
@@ -546,7 +566,7 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
       all_day: false,
       start_at: new Date("2026-07-28T15:00:00.000Z"),
       end_at: new Date("2026-07-28T16:00:00.000Z"),
-      visibility_level: 0,
+      visibility_level: 1,
     });
     await Event.create({
       owner_user_id: visible.user_id,
@@ -555,7 +575,7 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
       all_day: false,
       start_at: new Date("2026-05-31T14:00:00.000Z"),
       end_at: new Date("2026-05-31T15:00:00.000Z"),
-      visibility_level: 0,
+      visibility_level: 1,
     });
     await Event.create({
       owner_user_id: visible.user_id,
@@ -564,7 +584,7 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
       all_day: false,
       start_at: new Date("2026-09-08T15:00:00.000Z"),
       end_at: new Date("2026-09-08T16:00:00.000Z"),
-      visibility_level: 0,
+      visibility_level: 1,
     });
     await Event.create({
       owner_user_id: visible.user_id,
@@ -573,7 +593,7 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
       all_day: false,
       start_at: new Date("2026-07-28T15:00:00.000Z"),
       end_at: new Date("2026-07-28T16:00:00.000Z"),
-      visibility_level: 0,
+      visibility_level: 1,
       deleted_at: new Date("2026-07-28T17:00:00.000Z"),
       deleted_by_user_id: visible.user_id,
     });
@@ -612,11 +632,11 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
     assert.equal(
       result.members.find((member) => member.user_id === non_friend.user_id)
         .calendar_access,
-      "DENIED",
+      "VISIBLE",
     );
     assert.deepEqual(
-      result.work_shifts.map((shift) => shift.owner_user_id),
-      [visible.user_id],
+      result.work_shifts.map((shift) => shift.owner_user_id).sort(),
+      [visible.user_id, non_friend.user_id].sort(),
     );
     assert.deepEqual(
       result.events.map((event) => event.title),

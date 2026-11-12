@@ -171,11 +171,11 @@
 ### 접근 상태
 
 - [ ] 조회자 본인은 `SELF`
-- [ ] 다른 멤버가 friendship 존재 + 소유자→조회자 `can_view=true`이면 `VISIBLE`
-- [ ] `can_view=false`, friendship 없음, 설정 없음은 `DENIED`
+- [ ] 다른 활성 멤버는 친구/설정이 없어도 `VISIBLE`로 근무표만 조회
+- [ ] 소유자→조회자 `can_view=false`는 친구 여부와 관계없이 `DENIED`; 역방향 차단은 독립
 - [ ] `DENIED` 멤버는 members에 유지되며 해당 owner row와 숨겨진 개수는 미반환
-- [ ] `VISIBLE` event는 `friend_level >= visibility_level`만 반환
-- [ ] `VISIBLE` work shift는 기존 visibility view의 레벨 0 규칙 적용
+- [ ] `VISIBLE` event는 친구 관계·can_view=true·is_private=false·`friend_level >= visibility_level`일 때만 반환
+- [ ] `VISIBLE` work shift는 활성 그룹·조회자/소유자 멤버십과 명시적 차단·날짜·soft delete 조건 적용
 - [ ] 그룹 가입/탈퇴가 friendship·friend_level_settings를 생성·변경하지 않음
 
 ### 범위와 반환 계약

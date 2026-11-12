@@ -4,6 +4,25 @@
 
 ## 2026-11-12
 
+### [IN_PROGRESS] 그룹 레벨0 근무표 변경 커밋·푸시
+
+- 목적: 사용자 요청에 따라 검증된 그룹 비친구 근무표 공개 변경을 origin/develop에 반영한다.
+- 변경/영향: 관련 소스·OpenAPI·테스트·도면·문서만 커밋한다. develop은 다른 worktree에서 사용 중이므로 현재 origin/develop 기반 codex/private-events에서 커밋하고 HEAD:develop으로 명시적으로 push한다.
+- 테스트: 커밋 전 strict build·CJS 구문·OpenAPI JSON/도면 XML·diff 검사를 통과했다. fetch 후 HEAD와 origin/develop 이력 차이는0이다. 기존 구현의 관련37개 통과·전체 기존17개 실패 동일 결과를 유지하며 이번에는 DB/전체 테스트를 재실행하지 않았다.
+- 롤백: 해당 기능 커밋의 그룹 조회/계약 변경을 복구한다. DB 데이터와 개인 일정 보호는 유지한다.
+- 다음: 커밋·푸시 후 원격 HEAD 및 작업 트리 상태 확인. Stage/운영 배포는 이번 요청에 포함하지 않는다.
+
+### [DONE] 그룹 비친구 멤버의 레벨0 근무표 열람
+
+- 목적: 같은 그룹의 활성 멤버가 친구 관계 없이도 레벨0에 해당하는 근무표를 조회하게 한다.
+- 변경/영향: 그룹 기간 캘린더의 멤버 접근 상태·근무 조회만 변경하고 개인 일정은 기존 친구/ACL/레벨/private 규칙을 유지한다. 사용자 답변에 따라 소유자→조회자 명시적 can_view=false 차단을 친구 여부와 관계없이 유지한다.
+- 파일: src/services/groupService.ts·src/openapi/groupOpenApi.json·test/eventPrivacyIntegration.test.cjs·test/groupIntegration.test.cjs·schema/visibility_flow.drawio·그룹 API/프론트/실행검증 가이드·PROJECT_CONTEXT/DECISIONS(ADR-0047)/WORKLOG. 새 영구 파일은 없다.
+- 변경 상세: 비친구/설정 없는 활성 멤버는 VISIBLE, 명시적 차단은 DENIED로 유지한다. 근무 SQL에서 활성 그룹·조회자/소유자 멤버십을 재확인하고 날짜/soft delete를 유지한다. 개인 일정 view·친구 API·Redis는 보존한다. 기존 그룹 통합 테스트는 migration/rollback 검증 후 현재 final_schema로 Google/Push 의존성을 준비하고 이벤트 fixture의 과거0을1로 맞췄다. 제품 schema 변경은 없다.
+- 테스트: strict build·관련 서비스/인증 HTTP18 pass·격리 PostgreSQL/실제 HTTP11 pass·그룹20명/100일 통합8 pass. 비친구의 잔존 고레벨/설정 없음·차단 방향/비친구 명시적 차단·친구 삭제 후 근무만·개인 일정/private 비노출·탈퇴/제거/삭제 그룹/기간/soft delete·집계3 query를 확인했다. 초기 localhost EPERM은 허용 환경 재실행으로 해소했고 HTTP 전체 query6에는 각 router 인증3회가 포함되어 서비스 집계3회와 분리 검증했다. DebugMCP 세션이 중단점에 도달하지 못해 실제 route/auth 코드로 원인을 확인했으며 임시 진입점/중단점을 정리했다. JSON/XML·CJS 구문·diff 검사 통과. 별도 lint 명령/설정은 없다.
+- 전체 회귀: 현재123개93 pass/17 fail/13 skip, 변경 전 HEAD 별도 사본도93/17/13이며 실패 이름17개가 동일해 신규 실패0개다. 기존 실패는 Apple 계약과 비공개 배포 파일 누락 관련으로 목표 밖 파일은 수정하지 않았다.
+- 롤백: 그룹 조회 변경을 되돌린다. 친구 관계/설정·DB schema·개인 일정 공개 view는 변경하지 않는다.
+- 결과/다음: 로컬 구현/검증·문서 갱신 완료. DB migration/env/seed는 없다. origin/develop과 동일한 HEAD에서 시작한 기존 codex/private-events checkout을 유지했다. 커밋/푸시·Stage/운영 배포·실기기 인수는 수행하지 않았다. 이번 작업 전용 DB 컨테이너/네트워크와 baseline 소스 사본은 정리 완료했다.
+
 ### [DONE] 개인 일정 공개 레벨 변경 커밋·푸시
 
 - 목적: 사용자 요청에 따라 개인 일정 공개 레벨1~5 변경을 공개 origin/develop에 반영한다.

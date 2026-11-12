@@ -2,7 +2,7 @@
 
 ## 목적과 범위
 
-Flutter 그룹 목록·상세·캘린더 미리보기의 서버 계약입니다. 그룹은 멤버십과 초대만 소유하며 그룹 일정, 그룹 근무, 그룹별 캘린더 ACL은 만들지 않습니다. 개인 캘린더 공개는 기존 friendship과 `friend_level_settings`가 계속 결정합니다.
+Flutter 그룹 목록·상세·캘린더 미리보기의 서버 계약입니다. 그룹은 멤버십과 초대만 소유하며 그룹 일정, 그룹 근무, 그룹별 캘린더 ACL은 만들지 않습니다. 개인 일정 공개는 기존 friendship과 `friend_level_settings`가 계속 결정합니다. 그룹 근무표는 아래 레벨0 기본 열람 정책을 적용합니다.
 
 프론트팀이 실제 앱에 연결할 때 필요한 화면별 호출 순서, DTO/nullability, 캘린더 상태 모델링, 오류 UX와 Stage 인수 체크리스트는 `_docs/GROUP_FRONTEND_API_GUIDE.md`를 사용합니다. 이 문서는 서버 설계·migration·운영 계약을 다룹니다.
 
@@ -73,7 +73,7 @@ Local/Stage만 `API_DOCS_ENABLED=true`를 명시하고 Center는 기본 비활�
 ## 캘린더 공개와 정렬
 
 1. Query 1은 활성 그룹·actor membership·모든 활성 멤버와 `SELF/VISIBLE/DENIED`를 계산합니다.
-2. Query 2는 본인 `work_shifts`와 다른 멤버의 `v_visible_work_shifts_for_friend`를 union하고 schedule/type을 조인합니다.
+2. Query 2는 활성 그룹과 조회자/소유자의 활성 멤버십을 확인하고 `work_shifts`에 schedule/type을 조인합니다. 친구 여부와 관계없이 본인 또는 소유자→조회자 `can_view IS DISTINCT FROM false`인 근무만 조회하며 soft delete·날짜 범위를 유지합니다.
 3. Query 3은 본인 `events`(private 포함)와 `v_visible_events_for_friend`(is_private=false만)를 union하고 그룹 timezone overlap을 적용합니다. 모든 이벤트에 is_private를 반환합니다. 그룹 OWNER/ADMIN도 타인 private 행을 조회할 수 없습니다. 상세 계약은 [EVENT_PRIVACY_GUIDE.md](EVENT_PRIVACY_GUIDE.md)를 따릅니다.
 
 이벤트 조건은 `start_at < 종료일 다음 날 00:00`과 `end_at > 시작일 00:00`이며 end-exclusive입니다. `work_date`는 사용자 날짜 문자열을 변환하지 않습니다. 모든 shift/event에는 `owner_user_id`가 있습니다.
@@ -82,6 +82,23 @@ Local/Stage만 `API_DOCS_ENABLED=true`를 명시하고 Center는 기본 비활�
 - work_shifts: work_date → owner_user_id
 - events: start_at → event_id
 - `DENIED` 멤버는 members에 남지만 해당 owner의 row나 숨겨진 개수는 없습니다.
+
+### 그룹 레벨0 기본 열람 (2026-11-12, Behavior change)
+
+| 대상 | calendar_access | 근무표 | 개인 일정 |
+| --- | --- | --- | --- |
+| 본인 | SELF | 전체 활성 근무 | private 포함 본인 일정 |
+| 비친구 또는 친구 공개 설정 없음 (명시적 차단 없음) | VISIBLE | 공개 | 미공개 |
+| 친구 + can_view=true + 레벨0 | VISIBLE | 공개 | 미공개 |
+| 친구 + can_view=true + 레벨1~5 | VISIBLE | 공개 | 기존 레벨 이하·private=false만 |
+| 소유자→조회자 can_view=false | DENIED | 미공개 | 미공개 |
+
+명시적 차단은 친구 여부와 관계없이 우선하며 역방향 설정은 열람을 차단하지 않습니다. `VISIBLE`은 근무표를 볼 수 있다는 뜻이며 개인 일정 공개를 보장하지 않습니다. 그룹 가입/탈퇴나 조회는 friendship·friend_level_settings를 만들거나 변경하지 않습니다. 비멤버/제거된 조회자·삭제 그룹은 기존 `404 GROUP_NOT_FOUND`이며 제거된 소유자의 근무도 반환하지 않습니다. 친구 전용 API와 공개 view의 기존 권한은 그대로입니다.
+
+- 영향 파일: `src/services/groupService.ts`의 멤버 상태/근무 SQL, `src/openapi/groupOpenApi.json`과 그룹 가이드/공개 흐름 도면.
+- 검증: 기존 `test/eventPrivacyIntegration.test.cjs`는 전용 PostgreSQL·실제 JWT HTTP에서 설정 없는/잔존 설정 비친구, 차단 방향, 친구 삭제, 개인 일정/private 비노출, 활성 멤버십/삭제/기간, 집계 SQL 3회를 확인합니다. 기존 `test/groupIntegration.test.cjs`는 20명·100일 비친구 근무와 명시적 차단을 확인합니다. 과거 최소 schema의 migration/rollback 검증 후 `migrations/final_schema.sql`로 현재 API의 Google/Push 모델 의존성을 준비하며, 이벤트 fixture는 현재 범위1~5를 사용합니다.
+- 배포: DB migration/env/seed 없이 서버 재빌드·배포로 적용합니다. 요청/응답 구조와 enum은 유지하므로 기존 프론트는 비친구 `VISIBLE`에 포함된 근무를 표시합니다. Stage/운영 적용 및 실기기 인수는 별도 확인이 필요합니다.
+- 롤백: 그룹 멤버 접근/근무 SQL과 계약 문서를 이전 버전으로 되돌려 서버를 재배포합니다. DB 데이터나 개인 일정 필터를 변경하지 않습니다.
 
 ## 초대와 알림
 

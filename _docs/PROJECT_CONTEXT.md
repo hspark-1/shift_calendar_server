@@ -1,5 +1,13 @@
 # 프로젝트 컨텍스트
 
+## 그룹 비친구 멤버의 근무표 공개 (2026-11-12)
+
+- **Behavior change**: `GET /api/v1/groups/{group_id}/calendar/range`는 같은 활성 그룹의 비친구·공개 설정 없는 멤버도 레벨0처럼 근무표를 제공한다. 본인은 `SELF`, 소유자→조회자 `can_view=false`는 `DENIED`, 나머지는 `VISIBLE`이다. 사용자 확인에 따라 명시적 차단은 친구 여부와 관계없이 유지한다.
+- 개인 일정은 기존 `is_private=false AND 친구 관계 AND can_view=true AND friend_level>=visibility_level`을 유지한다. 그룹 가입으로 친구 관계/공개 설정을 생성하거나 레벨을 저장하지 않는다. 친구 전용 캘린더 API와 DB 공개 view는 변경하지 않는다.
+- 흐름: groupRoutes 인증/기간 검증 → groupController → groupService 멤버 상태 → 활성 그룹·조회자/소유자 멤버십·차단 확인 후 work_shifts → 기존 개인 일정 view. 그룹 집계는 기존 3개 set-based query, Redis 미사용이다. 근무 쿼리도 활성 멤버십·그룹 삭제 여부를 직접 재확인한다.
+- 계약·검증/배포·롤백은 [GROUP_API_GUIDE.md](GROUP_API_GUIDE.md), 프론트 상태 해석은 [GROUP_FRONTEND_API_GUIDE.md](GROUP_FRONTEND_API_GUIDE.md), 결정은 ADR-0047을 따른다. 신규 DB migration/env/seed와 응답 enum 추가는 없다. 아래 과거 그룹 근무표 친구 필수 설명보다 이 정책이 우선한다.
+- 로컬 검증: strict build·관련 서비스/HTTP18개·실제 격리 PostgreSQL/HTTP11개·그룹20명/100일 통합8개 통과. 전체123개는93 pass/기존17 fail/13 skip이며 별도 변경 전 HEAD 사본과 실패 목록이 같아 신규 실패0개다. JSON/XML·diff 검사도 통과했다. Stage/운영 배포·실기기 인수·커밋/푸시는 수행하지 않았다.
+
 ## 개인 일정 공개 레벨1~5 (2026-11-12)
 
 - 사용자 기획: 친구 레벨0은 근무표만 본다. 개인 일정은1~5·기본1이며 private에도 같은 저장 범위를 적용한다. 근무표0/친구0~5·private/ACL은 유지한다. 아래 과거 개인 일정0~5 설명보다 이 정책을 우선한다.
@@ -1624,8 +1632,8 @@ P0/P1 그룹 요청
 
 - 그룹은 별도 캘린더·일정·근무를 소유하지 않습니다. `group_members`는 구성과 역할만 나타냅니다.
 - 그룹 가입은 친구 관계나 `friend_level_settings`를 만들거나 변경하지 않습니다.
-- 본인 캘린더는 `SELF`, 다른 활성 멤버는 friendship과 소유자→조회자 `can_view=true`일 때 `VISIBLE`, 그 외 `DENIED`입니다.
-- `VISIBLE` 이벤트는 `is_private=false AND friend_level >= visibility_level`, 근무는 `visibility_level=0` 규칙을 그대로 사용합니다.
+- 본인 캘린더는 `SELF`, 다른 활성 멤버는 소유자→조회자 `can_view=false`일 때만 `DENIED`, 나머지는 `VISIBLE`입니다. 친구 관계/설정이 없어도 그룹 근무표를 열람합니다.
+- `VISIBLE` 타인 이벤트는 기존 친구 관계·`can_view=true AND is_private=false AND friend_level >= visibility_level`, 근무는 활성 멤버십과 명시적 차단 조건으로 조회합니다.
 - `DENIED` 멤버는 응답에 남지만 그 멤버의 row와 숨겨진 개수는 반환하지 않습니다.
 - 그룹 캘린더는 멤버/접근 상태, visible work shifts, visible events를 최대 3개 set-based query로 조회합니다.
 - owner별 월 Redis v1은 그룹 aggregate에서 사용하지 않습니다. Stage 측정으로 병목이 확인될 때만 multi-owner cache를 별도 설계합니다.

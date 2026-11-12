@@ -219,18 +219,104 @@ if (process.env.RUN_EVENT_PRIVACY_INTEGRATION !== "true") {
     }
   });
 
-  test("can_view=false·친구 아님·그룹 관리자 모두 공개 범위를 우회하지 못한다",async()=>{
+  test("그룹 비친구는 근무표만 보고 명시적 차단·개인 일정 공개 규칙은 유지한다",async()=>{
     for (const [viewer,status] of [[denied_friend,403],[non_friend,404]]) {
       const friend=await request(viewer,`/friends/${owner.user_id}/calendar/range?${range_query}`); assert.equal(friend.status,status);
       const grouped=await request(viewer,`/groups/${group.group_id}/calendar/range?${range_query}`); assert.equal(grouped.status,200);
-      assert.deepEqual(grouped.body.data.events,[]); assert.deepEqual(grouped.body.data.work_shifts,[]);
-      assert.equal(grouped.body.data.members.find(member=>member.user_id===owner.user_id).calendar_access,"DENIED");
+      assert.deepEqual(grouped.body.data.events,[]);
+      assert.equal(grouped.body.data.work_shifts.length,viewer===denied_friend ? 0 : 1);
+      assert.equal(grouped.body.data.members.find(member=>member.user_id===owner.user_id).calendar_access,viewer===denied_friend ? "DENIED" : "VISIBLE");
     }
     // Revoking access takes effect on the next request; no private/event cache exists.
     const setting = await FriendLevelSetting.findOne({where:{owner_user_id:owner.user_id,friend_user_id:high_friend.user_id}});
     await setting.update({can_view:false});
     assert.equal((await request(high_friend,`/friends/${owner.user_id}/calendar/range?${range_query}`)).status,403);
     assert.deepEqual((await request(high_friend,`/groups/${group.group_id}/calendar/range?${range_query}`)).body.data.events,[]);
+  });
+
+  test("그룹 레벨0은 설정 없는 비친구·친구 삭제에도 적용하고 차단 방향과 3 query를 지킨다",async()=>{
+    const route = `/groups/${group.group_id}/calendar/range?${range_query}`;
+    await FriendLevelSetting.destroy({where:{owner_user_id:owner.user_id,friend_user_id:non_friend.user_id}});
+    // 조회자→소유자 차단은 소유자→조회자 열람 권한과 독립이다.
+    await FriendLevelSetting.create({owner_user_id:non_friend.user_id,friend_user_id:owner.user_id,can_view:false,friend_level:0});
+    const queries = [];
+    const previous_logging = sequelize.options.logging;
+    const result = await request(non_friend,route);
+    let aggregate;
+    try {
+      sequelize.options.logging = sql => queries.push(sql);
+      aggregate = await require("../dist/services/groupService.js").getGroupCalendarRange(
+        non_friend.user_id,group.group_id,"2026-11-11","2026-11-11",
+      );
+    } finally { sequelize.options.logging = previous_logging; }
+    assert.equal(result.status,200);
+    assert.equal(queries.length,3);
+    assert.equal(aggregate.query_count,3);
+    assert.deepEqual(aggregate.work_shifts,result.body.data.work_shifts);
+    assert.equal(result.body.data.work_shifts.length,1);
+    assert.deepEqual(result.body.data.events,[]);
+    assert.equal(result.body.data.members.find(member=>member.user_id===owner.user_id).calendar_access,"VISIBLE");
+    assert.doesNotMatch(JSON.stringify(result.body),/private-secret|private-memo-secret|private-place-secret|public-1|legacy-api/);
+    assert.equal(await Friendship.count({where:Friendship.sortUserIds(owner.user_id,non_friend.user_id)}),0);
+    assert.equal(await FriendLevelSetting.count({where:{owner_user_id:owner.user_id,friend_user_id:non_friend.user_id}}),0);
+
+    const blocked = await FriendLevelSetting.create({owner_user_id:owner.user_id,friend_user_id:non_friend.user_id,can_view:false,friend_level:5});
+    const denied = await request(non_friend,route);
+    assert.deepEqual(denied.body.data.work_shifts,[]);
+    assert.deepEqual(denied.body.data.events,[]);
+    assert.equal(denied.body.data.members.find(member=>member.user_id===owner.user_id).calendar_access,"DENIED");
+    await blocked.destroy();
+
+    const pair = Friendship.sortUserIds(owner.user_id,low_friend.user_id);
+    await Friendship.destroy({where:pair});
+    try {
+      const former_friend = await request(low_friend,route);
+      assert.equal(former_friend.status,200);
+      assert.equal(former_friend.body.data.work_shifts.length,1);
+      assert.deepEqual(former_friend.body.data.events,[]);
+      assert.equal((await request(low_friend,`/friends/${owner.user_id}/calendar/range?${range_query}`)).status,404);
+    } finally { await Friendship.create(pair); }
+  });
+
+  test("그룹 근무표는 활성 멤버·날짜·soft delete를 확인하고 탈퇴·제거·삭제 그룹을 차단한다",async()=>{
+    const route = `/groups/${group.group_id}/calendar/range?${range_query}`;
+    const shift = await WorkShift.findOne({where:{owner_user_id:owner.user_id}});
+    const outsider = await createUser("outside-group");
+    await WorkShift.create({owner_user_id:outsider.user_id,created_by_user_id:outsider.user_id,work_date:"2026-11-11",schedule_id:shift.schedule_id,note:"outside-group-secret"});
+    const extra_shifts = [];
+    for (const [work_date,deleted_at] of [["2026-11-10",null],["2026-11-12",null],["2026-11-11",new Date()]]) {
+      extra_shifts.push(await WorkShift.create({owner_user_id:non_friend.user_id,created_by_user_id:non_friend.user_id,work_date,schedule_id:shift.schedule_id,deleted_at,deleted_by_user_id:deleted_at ? non_friend.user_id : null}));
+    }
+    try {
+      const result = await request(non_friend,route);
+      assert.equal(result.status,200);
+      assert.deepEqual(result.body.data.work_shifts.map(row=>row.work_shift_id),[shift.work_shift_id]);
+      assert.doesNotMatch(JSON.stringify(result.body),/outside-group-secret/);
+      const outsider_result = await request(outsider,route);
+      assert.equal(outsider_result.status,404);
+      assert.equal(outsider_result.body.error.code,"GROUP_NOT_FOUND");
+
+      for (const user of [owner,non_friend]) {
+        const membership = await GroupMember.findOne({where:{group_id:group.group_id,user_id:user.user_id,removed_at:null}});
+        await membership.update({removed_at:new Date(),removed_by_user_id:owner.user_id});
+        try {
+          const removed_actor = await request(user,route);
+          assert.equal(removed_actor.status,404);
+          assert.equal(removed_actor.body.error.code,"GROUP_NOT_FOUND");
+          if (user===owner) {
+            const removed_owner = await request(non_friend,route);
+            assert.equal(removed_owner.status,200);
+            assert.deepEqual(removed_owner.body.data.work_shifts,[]);
+            assert.ok(!removed_owner.body.data.members.some(member=>member.user_id===owner.user_id));
+          }
+        } finally { await membership.update({removed_at:null,removed_by_user_id:null}); }
+      }
+      await group.update({deleted_at:new Date(),deleted_by_user_id:owner.user_id});
+      try { assert.equal((await request(non_friend,route)).status,404); }
+      finally { await group.update({deleted_at:null,deleted_by_user_id:null}); }
+    } finally {
+      for (const extra_shift of extra_shifts) await extra_shift.destroy();
+    }
   });
 
   test("private 일정 삭제는 소유자만 가능하며 삭제 후 모든 본인 조회에서 제외한다",async()=>{
