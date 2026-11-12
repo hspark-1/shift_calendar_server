@@ -4,13 +4,13 @@
 
 ## 2026-11-12
 
-### [IN_PROGRESS] 개인 일정 공개 레벨 변경 커밋·푸시
+### [DONE] 개인 일정 공개 레벨 변경 커밋·푸시
 
 - 목적: 사용자 요청에 따라 개인 일정 공개 레벨1~5 변경을 공개 origin/develop에 반영한다.
 - 변경/영향: 현재 관련 소스·증분 SQL·OpenAPI·도면·테스트·문서만 커밋한다. develop은 다른 worktree에서 사용 중이므로 현재 codex/private-events에서 커밋하고 origin/develop으로 명시적으로 push한다.
 - 테스트: 이번 커밋 전 TypeScript build·개인 일정 서비스/HTTP9개(0 fail)·OpenAPI JSON/도면 XML 파싱을 통과했다. HTTP 리스닝의 sandbox EPERM은 localhost 허용 환경 재실행으로 해소했다. fetch 후 HEAD와 origin/develop 이력 차이는0이다. diff 검사도 수행한다. 전체/격리 DB 검증은 아래 구현 작업 기록을 참조하며 이번에는 재실행하지 않았다.
 - 롤백:1~5·private/ACL을 유지하는 호환 수정 커밋으로 복구하며 보정된 데이터를0으로 되돌리지 않는다.
-- 결과/다음: 검증·커밋·푸시 진행 중. Stage/Center 서버 배포와 DB SQL 실행은 이번 요청에 포함하지 않는다.
+- 결과/다음: 기능 커밋 [796f532](https://github.com/hspark-1/shift_calendar_server/commit/796f532)을 origin/develop으로 push 완료했다(880c37e→796f532). 현재 checkout은 codex/private-events를 유지한다. Stage/Center 서버 배포와 DB SQL 실행은 수행하지 않았다. 해당 환경 적용 및 실기기 인수는 후속이다.
 
 ### [DONE] 개인 일정 공개 레벨1~5 및 레벨0 근무 전용 정책
 
