@@ -4,13 +4,18 @@
 
 ## 2026-11-13
 
-### [TODO] Google 로그인 커밋·푸시와 develop 병합 배포
+### [DONE] Google 로그인 커밋·푸시와 develop 병합 배포
 
 - 목적: 사용자 요청에 따라 검증한 Google 변경을 커밋/푸시하고, develop을 비공개 main에 실제 병합한 뒤 서버를 배포한다. 이후 배포도 선별 cherry-pick 대신 develop→main 병합을 기본으로 한다.
 - 변경/영향: Google 관련 변경과 의존 관계만 확인해 커밋하고 기존 다른 미커밋 작업은 보존한다. 공개 develop의 민감정보 제외·배포용 main의 비공개 설정을 유지한다. Flutter 변경도 관련 범위만 커밋/푸시한다.
 - 검증: 원격/병합 이력과 전체 배포 대상 차이·운영 DB 기존 제약을 읽기 전용 확인하고, 병합 결과 테스트/CI·Stage/운영 readiness·OpenAPI를 확인한다. Google 자체에는 신규 migration이 없으나 병합에 따라오는 기존 변경의 DB 영향은 별도로 확인한다.
 - 롤백: 검증된 직전 서버 이미지/배포 커밋으로 복구하며 사용자 phone/기존 사진과 기존 미커밋 작업을 보존한다.
 - 사전 확인: 원격 최신 상태·전체 병합 차이를 확인했다. Stage/운영에 읽기 전용으로 phone 컬럼/unique·events1~5 CHECK/default1·레벨0/범위 밖0건을 확인해 이번 병합에는 신규 SQL 실행이 필요 없다. Google 변경만 별도 작업 트리에 구성하고 다른 네이버/그룹 미커밋 변경은 제외했다. 검증 뒤 develop을 main에 실제 merge하며 실행 식별자/로그는 비공개 배포 기록에서 관리한다.
+
+- 완료: 서버 Google 소스3d61f36을 origin/develop에 push하고 해당 develop 전체를 비공개 main에 실제 merge했다. 병합 parent/ancestor를 확인했으며 기존 개인 일정1~5 코드도 포함했다. 비공개 배포 설정·스토리지 보완과 기존 기록을 보존했고 강제 push/cherry-pick은 하지 않았다.
+- 최종 검증: 병합 main 전체140 pass/0 fail/14 opt-in skip, 실제 격리 PostgreSQL Google16/개인 일정11 pass와 배포 정적 검사 통과. 자동 CI의 전체 통합 검사·이미지 빌드·Stage/운영 배포가 성공했다. 양 환경 readiness HTTP200·선택 access_token/phone OpenAPI·실제 access_token validation400과 API/worker10개 동일 이미지/healthy를 확인했다. 배포 자체는 SQL/env/사용자 데이터를 변경하지 않았다. 실행 식별자/이미지/환경별 기록은 비공개 WORKLOG에서 관리한다.
+- Flutter: 다른 미커밋 UI/iOS 탈퇴 변경을 제외한 독립 소스를850e45d로 origin/develop에 push한 뒤 dff95c1로 origin/main에 실제 merge했다. 원격 기준 인증105 pass/0 fail·변경 Dart7개 분석0건/포맷변경0·diff 검사 통과다. 이전117개는 다른 로컬 작업이 함께 있는 원본 작업 트리 결과이며 구분한다. 앱 스토어 업로드/설치·실계정 Google 동의/번호 수신은 수행하지 않았다.
+- 사용자 테스트: 별도 SQL 실행 없이 최신 Flutter 소스를 재빌드/설치한 뒤 Google 신규 로그인·번호 제공/미제공·동의 취소·기존 번호/사진 보존·가입 완료·로그아웃/탈퇴를 확인한다. 기존 앱 바이너리에는 새 권한 요청이 없으므로 서버 배포만으로 새 전화번호 연동이 생기지는 않는다.
 
 ### [DONE] Google 사진 수집 중단·전화번호 선택 동의 연동
 

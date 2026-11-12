@@ -1,5 +1,9 @@
 # 프로젝트 컨텍스트
 
+## Google·개인 일정1~5 develop 병합 배포 완료 (2026-11-13)
+
+Google 소스3d61f36과 기존 개인 일정1~5 변경을 포함한 origin/develop 전체를 비공개 main에 실제 merge하고 Stage/운영 배포를 완료했다. 양 환경 DB는 기존 phone/unique와 events1~5/default1이 준비되어 이번 배포에서 SQL/env/사용자 데이터를 변경하지 않았다. 전체 테스트·자동 CI·readiness/Google 계약·API/worker10개 health를 확인했다. Flutter도 독립 검증한 전화번호 소스를 develop→main 실제 merge·push했으며 앱 재빌드/실기기 인수가 필요하다. 아래 이전 작업 당시 미배포 설명보다 이 결과가 우선한다. 상세는 WORKLOG를 따른다.
+
 ## 개발/배포 통합 정책 (2026-11-13)
 
 제품 소스는 origin/develop을 정본으로 하고 deploy/main은 develop을 실제 merge로 통합한다. 선별 cherry-pick 배포를 기본으로 사용하지 않으며 비공개 배포 파일/secret은 main에만 보존한다. 병합 전체의 DB/env/호환성·충돌 해결·CI/health를 확인하고 이력은 force push로 변경하지 않는다. 상세는 DEPLOYMENT_GUIDE의 개발/배포 브랜치 병합 원칙을 따른다.
