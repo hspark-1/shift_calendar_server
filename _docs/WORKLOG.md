@@ -2,6 +2,38 @@
 
 # 작업 일지
 
+## 2026-11-13
+
+### [TODO] Google 로그인 커밋·푸시와 develop 병합 배포
+
+- 목적: 사용자 요청에 따라 검증한 Google 변경을 커밋/푸시하고, develop을 비공개 main에 실제 병합한 뒤 서버를 배포한다. 이후 배포도 선별 cherry-pick 대신 develop→main 병합을 기본으로 한다.
+- 변경/영향: Google 관련 변경과 의존 관계만 확인해 커밋하고 기존 다른 미커밋 작업은 보존한다. 공개 develop의 민감정보 제외·배포용 main의 비공개 설정을 유지한다. Flutter 변경도 관련 범위만 커밋/푸시한다.
+- 검증: 원격/병합 이력과 전체 배포 대상 차이·운영 DB 기존 제약을 읽기 전용 확인하고, 병합 결과 테스트/CI·Stage/운영 readiness·OpenAPI를 확인한다. Google 자체에는 신규 migration이 없으나 병합에 따라오는 기존 변경의 DB 영향은 별도로 확인한다.
+- 롤백: 검증된 직전 서버 이미지/배포 커밋으로 복구하며 사용자 phone/기존 사진과 기존 미커밋 작업을 보존한다.
+- 사전 확인: 원격 최신 상태·전체 병합 차이를 확인했다. Stage/운영에 읽기 전용으로 phone 컬럼/unique·events1~5 CHECK/default1·레벨0/범위 밖0건을 확인해 이번 병합에는 신규 SQL 실행이 필요 없다. Google 변경만 별도 작업 트리에 구성하고 다른 네이버/그룹 미커밋 변경은 제외했다. 검증 뒤 develop을 main에 실제 merge하며 실행 식별자/로그는 비공개 배포 기록에서 관리한다.
+
+### [DONE] Google 사진 수집 중단·전화번호 선택 동의 연동
+
+- 목적: 승인된 Google 동의 범위에 맞춰 사진을 신규 수집하지 않고 전화번호를 가입 정보에 제공한다.
+- 변경/영향: Google 로그인 API의 선택 access_token·동일 계정 검증·People API 조회·신규/빈 번호 저장과 Flutter SDK/전송/가입 미리 채움을 구현한다. 번호 미제공/동의 거부는 기존 직접 입력으로 진행한다. 기존 미커밋 작업과 기존 번호·사진·가입 완료 상태를 보존한다.
+- 변경 결과: 기존 Google endpoint의 선택 access_token·서버 userinfo.sub 대조/People API PROFILE phoneNumbers·국내01x/+82 정규화·신규/빈 번호만 원자 저장·전화번호 중복/탈퇴 진행409를 구현했다. picture는 읽지 않고 신규 사진은 null이다. 기존 번호/사진/key/프로필 완료·구형 ID Token 전용 앱을 보존하며 body phone은 무시한다. OAuth token은 저장/로그하지 않는다.
+- 파일: src/services/googleService.ts·src/routes/authRoutes.ts·src/controllers/authController.ts·src/openapi/googleAuthOpenApi.json·test/googleAuth.test.cjs·test/googleAuthIntegration.test.cjs·기존 Google fixture와 GOOGLE_SIGN_IN_SERVER_GUIDE/OAUTH_API_GUIDE/PROJECT_CONTEXT/DECISIONS(ADR-0049)/WORKLOG. 기존 controller/문서의 네이버 등 미커밋 변경은 보존했다. 신규 영구 파일/패키지/env/운영 migration은 없다.
+- 서버 검증: strict TypeScript build 통과. Google16개 포함 인증/프로필 단위·계약49 pass/0 fail/기존 비공개 배포 SQL1 skip. 새 폐기용 PostgreSQL16에서 실제 Express HTTP·신규/기존 번호·기존 이미지/key·완료 상태 보존·token 계정 불일치401·선택 token validation400·조회 실패 직접 입력·중복409·동일 번호 경합·신규/기존 갱신 rollback·탈퇴 진행409 등16 pass/0 fail. Google 외부 API만 mock이며 실제 Google 계정은 사용하지 않았다.
+- Flutter 검증: 인접 프로젝트 SDK/Repository/DataSource와 기존 관련 테스트·가입 위젯을 직접 수정했다. 선택 동의 실패 fallback·앱 JWT 저장/실패 정리·phone 파싱·가입 미리 채움/사진 null·로그아웃/탈퇴 포함 인증 전체117 pass/0 fail. Dart7개 analyze 진단0·format 변경0·범위 diff 공백 검사 통과. 문서/ADR-0081/WORKLOG도 갱신했다.
+- 검증 중 보완: 서버 확장 HTTP 테스트가 기존 인증 제한10회를 넘겨429가 된 것을 실제 rateLimit 코드와 응답으로 확인하고 테스트 프로세스만200회로 설정했다. Flutter 신규 아바타 검증은 화면 전체 같은 아이콘2개를 세던 테스트를 실제 아바타 하위로 제한해 해결했다. 운영 rate limit·제품 UI는 변경하지 않았다. 최종 OpenAPI JSON·CJS 구문·문서 diff를 확인한다.
+- 롤백: 이번 Google 코드/문서 변경만 복구하며 이미 저장한 phone과 기존 이미지는 유지한다.
+- 결과/다음: 서버와 Flutter 로컬 구현·회귀·문서화를 완료했다. 사용자의 콘솔 화면에서는 phone scope가 비민감 범위에 등록되어 있음을 확인했으며 People API 활성화/실계정 동의·번호 수신·실기기/배포는 미검증이다. 서버 선배포 후 앱 재빌드/설치와 Stage iOS/Android 인수가 필요하다. 운영 DB/사용자 데이터/설정·커밋/푸시/배포는 수행하지 않았다. 상세 사용 예·배포/롤백은 Google 서버 가이드 상단을 따른다.
+
+### [DONE] Google 소셜 로그인 수집 정보와 콘솔 확인 경로 조사
+
+- 목적: 문서·실제 코드의 Google 제공 정보와 개발자 콘솔 설정 확인 범위를 구분한다.
+- 변경/영향범위: 읽기 전용 조사 후 Google 서버 가이드와 이 작업 일지만 보완한다. 제품 코드·DB·OAuth 설정은 변경하지 않는다.
+- 확인: 서버 Google 가이드·ADR-0024·서비스와 인접 Flutter Google 가이드·SDK 호출을 대조하고 Google 공식 문서에서 Data Access 경로를 확인한다.
+- 결과: 검증된 sub/email/name/picture의 신규 저장과 email_verified 검증, 기존 프로필 자동 갱신 없음·Google 전화번호 수집 없음·앱 추가 권한 요청 없음을 코드로 확인했다. 콘솔 실제 등록 목록은 미조회이며 기본 OIDC 정책과 구분해 가이드에 명시했다.
+- 파일: `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`, `_docs/WORKLOG.md`. 기존 Google 가이드의 수집 항목·확인 경로만 보완하며 설계/정책 변경이 없어 ADR 추가는 없다.
+- 테스트: 서버 서비스/route/controller·인접 Flutter SDK 호출과 가이드·ADR-0024·schema.drawio/공개 흐름을 대조했다. Google 공식 문서의 Data Access 경로와 OIDC claim 의미를 확인했다. 문서 diff 공백 검사를 수행하며 제품 코드 변경이 없어 build/실행 테스트는 하지 않는다.
+- 롤백: 이번 조사로 추가한 문서 문단만 제거한다.
+
 ## 2026-11-12
 
 ### [DONE] 그룹 비친구 근무표 Stage/운영 배포

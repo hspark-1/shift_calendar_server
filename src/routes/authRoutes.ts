@@ -132,6 +132,14 @@ router.post(
       .customSanitizer((value: string) => value.trim())
       .isLength({ min: 1, max: 16384 })
       .withMessage("id_token은 trim 후 1~16384자여야 합니다."),
+    body("access_token")
+      .optional()
+      .isString()
+      .withMessage("access_token은 문자열이어야 합니다.")
+      .bail()
+      .customSanitizer((value: string) => value.trim())
+      .isLength({ min: 1, max: 16384 })
+      .withMessage("access_token은 trim 후 1~16384자여야 합니다."),
   ],
   validateRequestMiddleware,
   googleLoginWithToken,

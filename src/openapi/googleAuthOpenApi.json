@@ -10,7 +10,7 @@
       "post": {
         "tags": ["Google Auth"],
         "summary": "Google ID Token 검증 및 ShiftMate 로그인",
-        "description": "Web application OAuth client ID 하나를 audience로 고정해 검증하며, 검증된 sub와 이메일 claim만 계정 판단에 사용합니다.",
+        "description": "Web application OAuth client ID 하나를 audience로 고정해 검증하며, 검증된 sub와 이메일 claim만 계정 판단에 사용합니다. 선택 access_token으로 동일 계정 전화번호를 조회해 신규/빈 phone만 저장합니다. 사진 claim은 읽거나 저장하지 않습니다. 가입 완료 상태는 변경하지 않습니다.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -52,7 +52,7 @@
       "GoogleLoginRequest": {
         "type": "object",
         "required": ["id_token"],
-        "description": "추가 필드는 Google 신원 정보로 사용하지 않습니다.",
+        "description": "ID Token으로 인증합니다. 선택 access_token은 동일 Google 계정을 대조한 뒤 전화번호만 조회하며 저장하지 않습니다. 요청 body의 phone/picture는 신뢰하지 않습니다.",
         "properties": {
           "id_token": {
             "type": "string",
@@ -60,7 +60,8 @@
             "maxLength": 16384,
             "writeOnly": true,
             "description": "Google SDK가 발급한 ID Token"
-          }
+          },
+          "access_token": {"type": "string", "minLength": 1, "maxLength": 16384, "writeOnly": true, "description": "선택. user.phonenumbers.read 권한을 받은 Google access token. 미전달/조회 불가 시 기존 직접 입력을 유지합니다. ID Token과 다른 계정이면 401입니다."}
         }
       },
       "GoogleUser": {
@@ -70,7 +71,8 @@
           "user_id": { "type": "string", "format": "uuid" },
           "email": { "type": "string", "format": "email" },
           "name": { "type": "string" },
-          "profile_image_url": { "type": "string", "format": "uri", "nullable": true },
+          "profile_image_url": {"type": "string", "format": "uri", "nullable": true, "description": "신규 Google 사진은 수집하지 않습니다. 기존 또는 사용자가 업로드한 사진은 유지합니다."},
+          "phone": {"type": "string", "nullable": true, "description": "국내 하이픈 형식. 신규/기존 빈 번호만 Google 제공 번호로 보완합니다."},
           "timezone": { "type": "string", "nullable": true },
           "google_id": { "type": "string" }
         },
@@ -118,7 +120,9 @@
                   "ACCOUNT_LINK_REQUIRED",
                   "AUTH_RATE_LIMIT_EXCEEDED",
                   "GOOGLE_UPSTREAM_UNAVAILABLE",
-                  "INTERNAL_SERVER_ERROR"
+                  "INTERNAL_SERVER_ERROR",
+                  "PHONE_ALREADY_EXISTS",
+                  "ACCOUNT_DELETION_IN_PROGRESS"
                 ]
               },
               "message": { "type": "string" }
@@ -146,7 +150,7 @@
         }
       },
       "GoogleAccountLinkRequired": {
-        "description": "검증 이메일과 기존 계정 충돌. 자동 연결하지 않습니다.",
+        "description": "검증 이메일 충돌(ACCOUNT_LINK_REQUIRED), 전화번호 중복(PHONE_ALREADY_EXISTS), 탈퇴 진행(ACCOUNT_DELETION_IN_PROGRESS). 자동 계정 연결은 하지 않습니다.",
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/GoogleErrorResponse" }

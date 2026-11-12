@@ -28,6 +28,7 @@ if (process.env.RUN_GOOGLE_AUTH_INTEGRATION !== "true") {
   });
 } else {
   process.env.NODE_ENV = "test";
+  process.env.AUTH_RATE_LIMIT_MAX = "200";
   process.env.GOOGLE_SERVER_CLIENT_ID =
     "123456789-integration.apps.googleusercontent.com";
   process.env.JWT_SECRET = "google-integration-access-secret";
@@ -53,6 +54,7 @@ if (process.env.RUN_GOOGLE_AUTH_INTEGRATION !== "true") {
 
   const repository_root = path.resolve(__dirname, "..");
   let current_payload;
+  const phone_responses = new Map();
   let last_verification_options;
   let api_server;
   let api_base_url;
@@ -60,10 +62,31 @@ if (process.env.RUN_GOOGLE_AUTH_INTEGRATION !== "true") {
   const fake_oauth_client = {
     async verifyIdToken(options) {
       last_verification_options = options;
-      return { getPayload: () => ({ ...current_payload }) };
+      const payload = { ...current_payload };
+      return { getPayload: () => payload };
     },
   };
-  const service = new GoogleService({ oauth_client: fake_oauth_client });
+  const fake_http_client = {
+    async get(url, options) {
+      const token = options.headers.Authorization.slice('Bearer '.length);
+      const entry = phone_responses.get(token);
+      assert.ok(entry, '실제 Google API를 호출하지 않는다');
+      if (entry.error) throw entry.error;
+      return { data: url.includes('/userinfo') ? { sub: entry.subject } : { phoneNumbers: entry.phones } };
+    },
+  };
+  const service = new GoogleService({ oauth_client: fake_oauth_client, http_client: fake_http_client });
+
+  function setPhone(token, subject, phones) {
+    phone_responses.set(token, { subject, phones });
+  }
+
+  async function postLogin(body) {
+    const response = await fetch(`${api_base_url}/api/v1/auth/google/token`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json() };
+  }
 
   function setIdentity(subject, email, overrides = {}) {
     current_payload = {
@@ -95,6 +118,7 @@ if (process.env.RUN_GOOGLE_AUTH_INTEGRATION !== "true") {
     await sequelize.query(base_schema);
     await applyGoogleMigration();
     googleService.oauth_client = fake_oauth_client;
+    googleService.http_client = fake_http_client;
 
     await new Promise((resolve) => {
       api_server = app.listen(0, "127.0.0.1", resolve);
@@ -178,6 +202,8 @@ if (process.env.RUN_GOOGLE_AUTH_INTEGRATION !== "true") {
     assert.equal(body.data.is_new_user, true);
     assert.equal(body.data.user.email, "http.new@example.com");
     assert.equal(body.data.user.google_id, "google-http-new");
+    assert.equal(body.data.user.profile_image_url, null);
+    assert.equal(body.data.user.phone, null);
     assert.equal(Number.isInteger(body.data.expires_at), true);
     assert.ok(body.data.expires_at > Date.now());
     assert.equal(last_verification_options.idToken, "google-http-id-token");
@@ -308,5 +334,135 @@ if (process.env.RUN_GOOGLE_AUTH_INTEGRATION !== "true") {
         DROP CONSTRAINT ck_google_test_refresh_failure
       `);
     }
+  });
+
+  test('HTTP 선택 access token으로 신규 전화번호를 저장하고 사진/body phone은 무시한다', async () => {
+    setIdentity('google-phone-new', 'phone-new@example.com');
+    setPhone('phone-new-access', 'google-phone-new', [{ canonicalForm: '+821012345678' }]);
+    const { status, body } = await postLogin({ id_token: 'id-token', access_token: '  phone-new-access  ', phone: '010-9999-9999', profile_image_url: 'https://untrusted.example/photo.png' });
+    assert.equal(status, 201);
+    assert.equal(body.data.user.phone, '010-1234-5678');
+    assert.equal(body.data.user.profile_image_url, null);
+    assert.equal(body.data.requires_profile_setup, true);
+    const user = await User.findByPk(body.data.user.user_id);
+    assert.equal(user.phone, '010-1234-5678');
+    assert.equal(user.profile_completed_at, null);
+  });
+
+  test('기존 빈 번호만 채우고 이름·사진/key·완료 시각·기존 번호는 보존한다', async () => {
+    const completed_at = new Date('2026-01-01T00:00:00Z');
+    const user = await User.create({ email: 'phone-existing@example.com', name: '저장 이름', google_id: 'phone-existing', profile_image_url: 'https://existing.example/photo.png', profile_image_key: 'existing-image-key', profile_completed_at: completed_at });
+    setIdentity('phone-existing', 'changed-phone-email@example.com');
+    setPhone('existing-access', 'phone-existing', [{ value: '010-2222-3333' }]);
+    let result = await service.completeLogin({ id_token: 'id-token', access_token: 'existing-access' });
+    assert.equal(result.user.phone, '010-2222-3333');
+    await user.reload();
+    assert.equal(user.email, 'phone-existing@example.com');
+    assert.equal(user.name, '저장 이름');
+    assert.equal(user.profile_image_url, 'https://existing.example/photo.png');
+    assert.equal(user.profile_image_key, 'existing-image-key');
+    assert.equal(user.profile_completed_at.toISOString(), completed_at.toISOString());
+    setPhone('existing-access', 'phone-existing', [{ value: '010-4444-5555' }]);
+    result = await service.completeLogin({ id_token: 'id-token', access_token: 'existing-access' });
+    assert.equal(result.user.phone, '010-2222-3333');
+  });
+
+  test('선택 권한 거부·만료·장애와 미제공은 로그인/직접 입력을 유지한다', async () => {
+    const { AxiosError } = require('axios');
+    for (const [index, status] of [401, 403, 503].entries()) {
+      const subject = `phone-fallback-${index}`;
+      setIdentity(subject, `${subject}@example.com`);
+      phone_responses.set(subject, { error: new AxiosError('private-google-token', undefined, undefined, undefined, { status }) });
+      const result = await postLogin({ id_token: 'valid-id', access_token: subject });
+      assert.equal(result.status, 201);
+      assert.equal(result.body.data.user.phone, null);
+      assert.equal(result.body.data.requires_profile_setup, true);
+      assert.doesNotMatch(JSON.stringify(result.body), /private-google-token/);
+    }
+    setIdentity('phone-empty', 'phone-empty@example.com');
+    setPhone('phone-empty', 'phone-empty', []);
+    const result = await postLogin({ id_token: 'valid-id', access_token: 'phone-empty' });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.data.user.phone, null);
+  });
+
+  test('토큰 계정 불일치는 HTTP401이며 사용자·세션을 저장하지 않는다', async () => {
+    setIdentity('phone-mismatch', 'phone-mismatch@example.com');
+    setPhone('phone-mismatch-access', 'another-account', [{ value: '01012345678' }]);
+    const result = await postLogin({ id_token: 'id-token', access_token: 'phone-mismatch-access' });
+    assert.equal(result.status, 401);
+    assert.equal(result.body.error.code, 'GOOGLE_INVALID_TOKEN');
+    assert.equal(await User.count({ where: { google_id: 'phone-mismatch' } }), 0);
+  });
+
+  test('선택 access token validation은 null/숫자/배열/공백/너무 긴 문자열을 거절한다', async () => {
+    for (const access_token of [null, 1, [], {}, '  ', 'x'.repeat(16385)]) {
+      const result = await postLogin({ id_token: 'id-token', access_token });
+      assert.equal(result.status, 400);
+      assert.equal(result.body.error.code, 'VALIDATION_ERROR');
+      assert.doesNotMatch(JSON.stringify(result.body), /phone-new-access/);
+    }
+  });
+
+  test('번호 충돌409는 신규/빈 번호 사용자와 세션의 부분 저장을 남기지 않는다', async () => {
+    await User.create({ email: 'phone-owner@example.com', name: '기존 번호 소유자', phone: '010-7777-8888' });
+    for (const existing of [false, true]) {
+      const subject = `phone-conflict-${existing}`;
+      const user = existing ? await User.create({ email: `${subject}@example.com`, name: subject, google_id: subject }) : null;
+      setIdentity(subject, `${subject}@example.com`);
+      setPhone(subject, subject, [{ value: '01077778888' }]);
+      const result = await postLogin({ id_token: 'id-token', access_token: subject });
+      assert.equal(result.status, 409);
+      assert.equal(result.body.error.code, 'PHONE_ALREADY_EXISTS');
+      if (user) {
+        await user.reload();
+        assert.equal(user.phone, null);
+        assert.equal(await RefreshToken.count({ where: { user_id: user.user_id } }), 0);
+      } else assert.equal(await User.count({ where: { google_id: subject } }), 0);
+    }
+  });
+
+  test('동일 번호 신규 동시 저장은 한 번만 성공하고 DB unique 오류도409로 매핑한다', async () => {
+    const services = [1, 2].map((index) => {
+      const subject = `phone-race-${index}`;
+      setPhone(subject, subject, [{ value: '01055556666' }]);
+      return new GoogleService({
+        oauth_client: { async verifyIdToken() { return { getPayload: () => ({ sub: subject, email: `${subject}@example.com`, email_verified: true }) }; } },
+        http_client: fake_http_client,
+      });
+    });
+    const results = await Promise.allSettled(services.map((item, index) => item.completeLogin({ id_token: 'id-token', access_token: `phone-race-${index + 1}` })));
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    const failure = results.find((result) => result.status === 'rejected').reason;
+    assert.equal(failure.code, 'PHONE_ALREADY_EXISTS');
+    assert.equal(failure.status_code, 409);
+    assert.equal(await User.count({ where: { phone: '010-5555-6666' } }), 1);
+  });
+
+  test('기존 빈 번호 갱신도 세션 저장 실패 시 rollback한다', async () => {
+    const user = await User.create({ email: 'phone-rollback@example.com', name: '기존 사용자', google_id: 'phone-rollback' });
+    setIdentity('phone-rollback', 'phone-rollback@example.com');
+    setPhone('phone-rollback-access', 'phone-rollback', [{ value: '01088889999' }]);
+    await sequelize.query(`ALTER TABLE refresh_tokens ADD CONSTRAINT ck_google_phone_refresh_failure CHECK (device_info IS DISTINCT FROM 'phone-refresh-failure')`);
+    try {
+      await assert.rejects(service.completeLogin({ id_token: 'id-token', access_token: 'phone-rollback-access', device_info: 'phone-refresh-failure' }));
+      await user.reload();
+      assert.equal(user.phone, null);
+      assert.equal(await RefreshToken.count({ where: { user_id: user.user_id } }), 0);
+    } finally {
+      await sequelize.query('ALTER TABLE refresh_tokens DROP CONSTRAINT ck_google_phone_refresh_failure');
+    }
+  });
+
+  test('탈퇴 진행 계정은 번호 변경과 새 세션 발급을 거절한다', async () => {
+    const user = await User.create({ email: 'phone-deleting@example.com', name: '탈퇴 진행', google_id: 'phone-deleting', account_status: 'DELETION_PENDING' });
+    setIdentity('phone-deleting', 'phone-deleting@example.com');
+    setPhone('phone-deleting-access', 'phone-deleting', [{ value: '01099991111' }]);
+    const result = await postLogin({ id_token: 'id-token', access_token: 'phone-deleting-access' });
+    assert.equal(result.status, 409);
+    assert.equal(result.body.error.code, 'ACCOUNT_DELETION_IN_PROGRESS');
+    await user.reload();
+    assert.equal(user.phone, null);
+    assert.equal(await RefreshToken.count({ where: { user_id: user.user_id } }), 0);
   });
 }

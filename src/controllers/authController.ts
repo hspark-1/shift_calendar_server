@@ -172,6 +172,7 @@ export async function googleLoginWithToken(
   try {
     const result = await googleService.completeLogin({
       id_token: req.body.id_token,
+      access_token: req.body.access_token,
       device_info: getDeviceInfo(req),
     });
     logGoogleAuthEvent({

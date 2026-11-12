@@ -60,6 +60,7 @@
 - 서버는 서명, issuer, audience, 만료 및 verified email을 검증하고 `sub`를 사용자 식별자로 저장합니다.
 - 검증 이메일이 기존 계정과 같아도 자동 연결하지 않고 `409 ACCOUNT_LINK_REQUIRED`를 반환합니다.
 - Google 로그인은 서버에서 항상 활성화되며 `GOOGLE_SERVER_CLIENT_ID`를 시작 전에 검증합니다.
+- **2026-11-13 Behavior change**: 사진 claim은 신규 수집하지 않습니다. 선택 `access_token`으로 같은 Google 계정을 대조하고 People API 번호를 신규/기존 빈 phone에만 저장합니다. 번호 미제공·선택 동의 거부는 직접 입력으로 진행합니다. 기존 사진·번호·완료 상태는 보존하며 충돌409/계약·배포 순서는 Google 서버 가이드 상단을 따릅니다.
 
 ---
 

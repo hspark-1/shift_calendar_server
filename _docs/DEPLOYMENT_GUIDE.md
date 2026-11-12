@@ -2,6 +2,13 @@
 
 이 문서는 공개 저장소에서 공유할 수 있는 애플리케이션 배포 경계만 정의합니다. 환경별 인프라 구성, 호스트 경로, runner, proxy, registry, 실제 도메인과 secret 위치는 별도 비공개 문서에서 관리합니다.
 
+## 개발/배포 브랜치 병합 원칙 (2026-11-13)
+
+- 일반 제품 변경은 공개 `origin/develop`에 커밋·푸시하고 비공개 `deploy/main`은 해당 develop을 실제 merge commit으로 병합해 배포한다. 제품 변경을 cherry-pick하거나 파일만 선별 복사한 상태로 배포하지 않는다.
+- 병합 결과에 공개 develop 커밋이 ancestor로 포함되는지 확인하고 merge 양쪽 parent를 기록한다. 원격 이력 force push/rebase는 하지 않는다.
+- 충돌은 제품 코드/계약의 최신 정책과 비공개 배포 설정을 함께 보존하도록 파일별로 해결한다. 비공개 workflow/secret/운영 파일을 공개 develop으로 역병합하지 않는다.
+- 병합되는 전체 제품 변경의 DB/env/구형 앱 호환을 확인하고, 사전 검증·CI·Stage/운영 health를 통과한 뒤 완료로 기록한다. SQL은 필요한 증분 migration만 별도 확인하며 배포 과정에서 final_schema.sql을 실행하지 않는다.
+
 ## 배포 전 검증
 
 ```bash

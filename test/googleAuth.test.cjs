@@ -75,11 +75,10 @@ test("verifyIdToken은 원문 ID Token과 고정 server audience를 전달하고
     subject: "google-subject-1",
     email: "user@example.com",
     name: "Google 사용자",
-    profile_image_url: "https://lh3.googleusercontent.com/profile.png",
   });
 });
 
-test("이름과 사진 claim은 신규 사용자 초기값 규칙에 맞게 제한한다", async () => {
+test("이름 초기값을 제한하고 사진 claim은 사용하지 않는다", async () => {
   const service = new GoogleService({
     oauth_client: createVerifier({
       sub: "google-subject-2",
@@ -93,7 +92,6 @@ test("이름과 사진 claim은 신규 사용자 초기값 규칙에 맞게 제�
     subject: "google-subject-2",
     email: "fallback-name@example.com",
     name: "fallback-name",
-    profile_image_url: null,
   });
 });
 
@@ -231,4 +229,85 @@ test("User 모델·정본 DDL·schema.drawio는 google_id를 함께 반영한다
   }
   const package_json = JSON.parse(readRepositoryFile("package.json"));
   assert.ok(package_json.dependencies["google-auth-library"]);
+});
+
+function createPhoneService({ subject = 'google-phone-subject', phones, fail_at, status = 403 } = {}) {
+  const calls = [];
+  const service = new GoogleService({
+    http_client: {
+      async get(url, options) {
+        calls.push({ url, options });
+        if (calls.length === fail_at) {
+          const { AxiosError } = require('axios');
+          throw new AxiosError('private-google-token-and-phone', undefined, undefined, undefined, { status });
+        }
+        return { data: calls.length === 1 ? { sub: subject } : { phoneNumbers: phones } };
+      },
+    },
+  });
+  return { service, calls };
+}
+
+test('선택 access token이 없으면 외부 전화번호 API를 호출하지 않는다', async () => {
+  const { service, calls } = createPhoneService();
+  assert.equal(await service.getPhoneForIdentity(undefined, 'google-phone-subject'), null);
+  assert.equal(calls.length, 0);
+});
+
+test('서로 다른 Google 계정의 토큰은 번호 조회 전에 거절한다', async () => {
+  const { service, calls } = createPhoneService({ subject: 'another-subject' });
+  await assert.rejects(service.getPhoneForIdentity('access-token', 'google-phone-subject'),
+    (error) => error.code === 'GOOGLE_INVALID_TOKEN' && error.status_code === 401);
+  assert.equal(calls.length, 1);
+});
+
+test('국내/+82 번호만 정규화하고 사진 없이 profile 전화번호 필드만 조회한다', async () => {
+  for (const value of ['01012345678', '010-1234-5678', '+82 10-1234-5678', '+821012345678']) {
+    const { service, calls } = createPhoneService({ phones: [{ value }] });
+    assert.equal(await service.getPhoneForIdentity('access-token', 'google-phone-subject'), '010-1234-5678');
+    assert.equal(calls[0].url, 'https://openidconnect.googleapis.com/v1/userinfo');
+    assert.equal(calls[1].url, 'https://people.googleapis.com/v1/people/me');
+    assert.deepEqual(calls[1].options.params, { personFields: 'phoneNumbers', sources: 'READ_SOURCE_TYPE_PROFILE' });
+    assert.equal(calls[1].options.headers.Authorization, 'Bearer access-token');
+    assert.equal(calls[1].options.maxRedirects, 0);
+    assert.equal(calls[1].options.timeout, 5000);
+  }
+});
+
+test('미제공/외국/잘못된 값/모호한 여러 번호는 직접 입력으로 남긴다', async () => {
+  for (const phones of [undefined, null, 'invalid', [], [null], [{ value: '+12025550123' }],
+    [{ value: 1012345678 }], [{ value: 'garbage01012345678' }], [{ value: '02-1234-5678' }],
+    [{ value: '01012345678' }, { value: '01098765432' }]]) {
+    const { service } = createPhoneService({ phones });
+    assert.equal(await service.getPhoneForIdentity('token', 'google-phone-subject'), null);
+  }
+});
+
+test('canonicalForm 우선·동일 번호 중복 제거·명확한 primary 선택을 지원한다', async () => {
+  for (const phones of [
+    [{ canonicalForm: '+821012345678', value: 'invalid' }],
+    [{ value: '01012345678' }, { value: '+821012345678' }],
+    [{ value: '01098765432' }, { value: '01012345678', metadata: { primary: true } }],
+  ]) {
+    const { service } = createPhoneService({ phones });
+    assert.equal(await service.getPhoneForIdentity('token', 'google-phone-subject'), '010-1234-5678');
+  }
+});
+
+test('선택 정보의 권한 거부/만료/장애는 Google 로그인 대신 직접 입력으로 복귀한다', async () => {
+  for (const fail_at of [1, 2]) {
+    for (const status of [401, 403, 429, 500]) {
+      const { service } = createPhoneService({ fail_at, status });
+      assert.equal(await service.getPhoneForIdentity('token', 'google-phone-subject'), null);
+    }
+  }
+});
+
+test('ID Token에 사진 claim이 있어도 사진 값을 읽지 않는다', async () => {
+  const payload = { sub: 'no-photo', email: 'no-photo@example.com', email_verified: true };
+  Object.defineProperty(payload, 'picture', { get() { throw new Error('사진을 읽으면 안 됩니다.'); } });
+  const service = new GoogleService({ oauth_client: createVerifier(payload) });
+  assert.deepEqual(await service.verifyIdentityToken('id-token'), {
+    subject: 'no-photo', email: 'no-photo@example.com', name: 'no-photo',
+  });
 });

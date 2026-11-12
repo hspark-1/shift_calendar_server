@@ -1,5 +1,16 @@
 # 프로젝트 컨텍스트
 
+## 개발/배포 통합 정책 (2026-11-13)
+
+제품 소스는 origin/develop을 정본으로 하고 deploy/main은 develop을 실제 merge로 통합한다. 선별 cherry-pick 배포를 기본으로 사용하지 않으며 비공개 배포 파일/secret은 main에만 보존한다. 병합 전체의 DB/env/호환성·충돌 해결·CI/health를 확인하고 이력은 force push로 변경하지 않는다. 상세는 DEPLOYMENT_GUIDE의 개발/배포 브랜치 병합 원칙을 따른다.
+
+## Google 사진 수집 중단·선택 전화번호 (2026-11-13)
+
+- **Behavior change / ADR-0049**: Google picture를 추출·신규 저장하지 않고 기존 사진/key·이메일·이름·번호·프로필 완료 상태는 보존한다. 아래 과거 Google 기본 프로필 전용 설명보다 이 절이 우선한다.
+- Flutter 로그인 → 계정별 전화번호 선택 동의 → 기존 POST /auth/google/token의 id_token과 access_token? → ID Token 검증 → OIDC userinfo.sub 대조 → People API PROFILE phoneNumbers → 신규/빈 번호만 row lock/transaction 저장 → 기존 User.phone/가입 화면 미리 채움이다. 미제공·선택 권한 거부/취소·외부 조회 장애는 직접 입력, 다른 계정 token401·번호 충돌/탈퇴 진행409다.
+- 전역 phone/DB/공개 규칙·가입 완료 정본은 유지하며 Google 제공 번호에만 국내01x/+82 변환을 적용한다. body phone을 신뢰하지 않고 OAuth token/원문 응답은 저장/로그에 남기지 않는다. 새 migration/env/패키지/파일은 없다.
+- 파일 역할·의존성·사용 예·계약·서버 선배포/앱 재빌드·Stage 인수·롤백은 [GOOGLE_SIGN_IN_SERVER_GUIDE.md](GOOGLE_SIGN_IN_SERVER_GUIDE.md) 상단이다. 로컬 검증 결과와 실계정 미검증 한계는 WORKLOG를 따른다. 사용자 콘솔 캡처의 전화번호 범위는 비민감으로 표시되어 있다.
+
 ## 그룹 비친구 멤버의 근무표 공개 (2026-11-12)
 
 - **Behavior change**: `GET /api/v1/groups/{group_id}/calendar/range`는 같은 활성 그룹의 비친구·공개 설정 없는 멤버도 레벨0처럼 근무표를 제공한다. 본인은 `SELF`, 소유자→조회자 `can_view=false`는 `DENIED`, 나머지는 `VISIBLE`이다. 사용자 확인에 따라 명시적 차단은 친구 여부와 관계없이 유지한다.

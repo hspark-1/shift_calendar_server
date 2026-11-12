@@ -25,6 +25,10 @@ CREATE TABLE users (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
+ALTER TABLE users ADD CONSTRAINT ck_users_phone_format
+CHECK (phone IS NULL OR phone ~ '^[0-9]{3}-[0-9]{3,4}-[0-9]{4}$');
+
 CREATE TABLE shift_templates (
   template_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_user_id uuid NOT NULL REFERENCES users(user_id),
