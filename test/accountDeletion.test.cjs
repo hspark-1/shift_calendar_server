@@ -39,7 +39,8 @@ test("JWT auth_time과 DELETION_PENDING 즉시 차단 계약을 고정한다", (
   const auth_service = readRepositoryFile("src/services/authService.ts");
   const auth_middleware = readRepositoryFile("src/middlewares/auth.ts");
   assert.match(auth_service, /auth_time/);
-  assert.match(auth_service, /ACCOUNT_DELETION_IN_PROGRESS/);
+  assert.match(auth_service, /assertLoginAllowed\(user\)/);
+  assert.match(readRepositoryFile("src/services/socialLoginError.ts"), /ACCOUNT_DELETION_IN_PROGRESS/);
   assert.match(auth_middleware, /user\.account_status !== "ACTIVE"/);
   assert.match(auth_middleware, /user\.account_status !== "DELETION_PENDING"/);
   assert.match(auth_middleware, /accountDeletionStatusAuthMiddleware/);

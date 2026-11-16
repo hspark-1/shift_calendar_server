@@ -19,6 +19,7 @@ import { User } from "../models";
 import { normalizePhoneNumber } from "../utils/phone";
 import { generateTokens } from "./authService";
 import { ensureDefaultTemplate } from "./shiftTemplateService";
+import { assertLoginAllowed } from "./socialLoginError";
 
 export type GoogleAuthErrorCode =
   | "GOOGLE_INVALID_TOKEN"
@@ -301,6 +302,7 @@ export class GoogleService {
         const conflicting_email_user = await User.findOne({
           where: where(fn("lower", col("email")), identity.email),
         });
+        assertLoginAllowed(conflicting_email_user);
         if (conflicting_email_user) {
           throw new GoogleAuthError(
             "ACCOUNT_LINK_REQUIRED",
@@ -328,17 +330,14 @@ export class GoogleService {
       });
       let is_new_user = false;
 
-      if (user && user.account_status !== "ACTIVE") {
-        throw new GoogleAuthError(
-          "ACCOUNT_DELETION_IN_PROGRESS", 409, "회원 탈퇴가 진행 중인 계정입니다.",
-        );
-      }
+      assertLoginAllowed(user);
 
       if (phone && (!user || user.phone == null)) {
         const phone_owner = await User.findOne({
-          where: { phone }, attributes: ["user_id"], transaction,
+          where: { phone }, attributes: ["user_id", "account_status"], transaction,
         });
         if (phone_owner && phone_owner.user_id !== user?.user_id) {
+          assertLoginAllowed(phone_owner);
           throw phoneAlreadyExists();
         }
       }
@@ -348,6 +347,7 @@ export class GoogleService {
           where: where(fn("lower", col("email")), identity.email),
           transaction,
         });
+        assertLoginAllowed(existing_email_user);
         if (existing_email_user) {
           throw new GoogleAuthError(
             "ACCOUNT_LINK_REQUIRED",

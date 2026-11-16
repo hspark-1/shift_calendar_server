@@ -4,6 +4,23 @@
 
 이 문서는 카카오, 네이버, Apple 및 Google 소셜 로그인 기능의 백엔드 API 사용 가이드입니다. Apple·Google 서버 검증 계약은 각각 `_docs/APPLE_SIGN_IN_SERVER_GUIDE.md`, `_docs/GOOGLE_SIGN_IN_SERVER_GUIDE.md`를 따릅니다.
 
+### 탈퇴 직후 재가입·기존 계정 오류 (2026-11-16)
+
+네 공급자의 로그인은 다음409 코드를 구분한다. 네이버·카카오의 code/token 진입점은 같은 정책이다.
+
+| 코드 | 조건 | 앱 안내/처리 |
+| --- | --- | --- |
+| `ACCOUNT_DELETION_IN_PROGRESS` | 기존 subject·이메일·수집 번호의 계정이 탈퇴 진행 중 | `error.message`의 탈퇴 완료 후 재가입 안내 표시. 신규 가입/계정 연결/토큰 발급은 하지 않음 |
+| `ACCOUNT_LINK_REQUIRED` | Google/Apple에서 같은 이메일의 활성 기존 계정 존재 | 기존 로그인 방식 사용 안내. 자동 연결하지 않음 |
+| `KAKAO_ACCOUNT_CONFLICT` / `NAVER_ACCOUNT_CONFLICT` | 다른 공급자 subject가 이미 연결되었거나 사용자 unique 경합 | 기존 계정으로 로그인 안내. 기존 연결을 덮어쓰지 않음 |
+| `PHONE_ALREADY_EXISTS` | Google/Naver 수집 번호를 다른 활성 계정이 사용 | 기존 전화번호 중복 안내 |
+
+탈퇴 상태를 일반 계정 중복보다 먼저 판단한다. 동일 활성 subject는 기존 회원으로 정상 로그인하고, 사용자 행이 물리 삭제된 뒤에는 신규 가입으로 처리한다. 실패는 `success:false`, `error:{code,message}`, `request_id`이며 네이버는 기존 앱용 최상위 `message`도 유지한다. 응답·구조화 로그에 token/subject/email/전화번호/DB 오류 원문을 추가하지 않는다. 원인 추적은 공급자 context·error_code·request_id로 한다.
+
+새 파일의 역할·의존성·사용 예는 PROJECT_CONTEXT의 같은 날짜 절을 따른다. `npm run build && node --test test/socialLoginConflict.test.cjs`가 경계 대체 회귀이고, `test:{apple,google,kakao,naver}-integration`은 각각 고정된 폐기용 PostgreSQL에서 실제 저장·rollback을 검증한다. DB migration·새 env 키는 없으며 롤백은 서버 코드와 계약만 이전 버전으로 복구한다.
+
+로컬 `npm run dev:stage`는 API 프로세스만 시작한다. 로컬 API에서 `ACCOUNT_DELETION_ENABLED=true`로 접수한 요청은 같은 DB를 사용하는 Stage 탈퇴 worker가 처리한다. 로컬 worker는 `ACCOUNT_DELETION_WORKER_ENABLED=false`로 두고 실행하지 않는다. `202`는 삭제 완료 응답이 아니며 Stage worker의 현재 기본 유휴 폴링은10분이다. 재시작한 프로세스에 로컬 env가 적용됐는지 확인한다. 로컬 설정값은 Git 제외 env에만 보관한다.
+
 ### 기본 정보
 
 - **Base URL**: `/api/v1/auth`

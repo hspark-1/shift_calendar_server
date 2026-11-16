@@ -163,6 +163,26 @@ if (process.env.RUN_KAKAO_AUTH_INTEGRATION !== "true") {
     );
   });
 
+  test("탈퇴 직후 subject·이메일 로그인은 HTTP409이며 연결·세션·템플릿을 저장하지 않는다", async () => {
+    for (const has_subject of [true, false]) {
+      const id = has_subject ? "2001" : "2002";
+      const user = await User.create({ email: `deleting-${id}@example.com`, name: "탈퇴", kakao_id: has_subject ? id : null, account_status: "DELETION_PENDING" });
+      setIdentity(Number(id), user.email);
+      const response = await fetch(`${api_base_url}/api/v1/auth/kakao/token`, {
+        method: "POST", headers: { "content-type": "application/json", "X-Request-ID": `deletion-${id}` },
+        body: JSON.stringify({ access_token: "pending-token" }),
+      });
+      assert.equal(response.status, 409);
+      const body = await response.json();
+      assert.equal(body.error.code, "ACCOUNT_DELETION_IN_PROGRESS");
+      assert.equal(body.request_id, `deletion-${id}`);
+      await user.reload();
+      assert.equal(user.kakao_id, has_subject ? id : null);
+      assert.equal(await RefreshToken.count({ where: { user_id: user.user_id } }), 0);
+      assert.equal(await ShiftTemplate.count({ where: { owner_user_id: user.user_id } }), 0);
+    }
+  });
+
   test("Refresh Token 저장 실패는 사용자와 기본 템플릿까지 rollback한다", async () => {
     await sequelize.query(`
       ALTER TABLE refresh_tokens

@@ -6,6 +6,7 @@ import { getRequiredEnvironmentVariable } from "../config/environment";
 import { User } from "../models";
 import { generateTokens } from "./authService";
 import { ensureDefaultTemplate } from "./shiftTemplateService";
+import { assertLoginAllowed, isUserUniqueConstraint } from "./socialLoginError";
 
 interface KakaoTokenResponse {
   access_token: string;
@@ -252,11 +253,14 @@ export class KakaoService {
       );
     } catch (error) {
       if (error instanceof KakaoAuthError) throw error;
-      if (error instanceof UniqueConstraintError) {
+      if (error instanceof UniqueConstraintError && (
+        isUserUniqueConstraint(error, "email") || isUserUniqueConstraint(error, "kakao_id")
+      )) {
         const existing_user = await User.findOne({
           where: { email: identity.email },
         });
-        if (existing_user?.kakao_id !== identity.kakao_id) {
+        assertLoginAllowed(existing_user);
+        if (existing_user && existing_user.kakao_id !== identity.kakao_id) {
           throw this.accountConflict();
         }
       }
@@ -284,6 +288,7 @@ export class KakaoService {
       lock: transaction.LOCK.UPDATE,
     });
     let is_new_user = false;
+    assertLoginAllowed(user);
 
     if (!user) {
       const existing_email_user = await User.findOne({
@@ -291,6 +296,7 @@ export class KakaoService {
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
+      assertLoginAllowed(existing_email_user);
       if (existing_email_user) {
         if (
           existing_email_user.kakao_id &&

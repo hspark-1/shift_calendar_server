@@ -41,6 +41,7 @@ import {
 } from "../services/accountDeletionService";
 import { ProfileError } from "../services/profileService";
 import { mutateProfile } from "../services/profileMutationService";
+import { SocialLoginError } from "../services/socialLoginError";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -60,7 +61,7 @@ function sendAppleAuthError(
   error: unknown,
   context: string,
 ): void {
-  if (error instanceof AppleAuthError) {
+  if (error instanceof AppleAuthError || error instanceof SocialLoginError) {
     res.status(error.status_code).json({
       success: false,
       error: { code: error.code, message: error.message },
@@ -85,7 +86,7 @@ function sendGoogleAuthError(
   res: Response,
   error: unknown,
 ): void {
-  if (error instanceof GoogleAuthError) {
+  if (error instanceof GoogleAuthError || error instanceof SocialLoginError) {
     res.status(error.status_code).json({
       success: false,
       error: { code: error.code, message: error.message },
@@ -111,7 +112,7 @@ function sendKakaoAuthError(
   error: unknown,
   started_at: number,
 ): void {
-  if (error instanceof KakaoAuthError) {
+  if (error instanceof KakaoAuthError || error instanceof SocialLoginError) {
     logKakaoAuthEvent({
       request_id: req.request_id,
       action: "token_login",
@@ -201,7 +202,7 @@ export async function googleLoginWithToken(
     });
   } catch (error) {
     const error_code =
-      error instanceof GoogleAuthError
+      error instanceof GoogleAuthError || error instanceof SocialLoginError
         ? error.code
         : "INTERNAL_SERVER_ERROR";
     logGoogleAuthEvent({
@@ -318,9 +319,9 @@ export async function appleLogin(req: Request, res: Response): Promise<void> {
       request_id: req.request_id,
       platform,
       action: "login",
-      result: error instanceof AppleAuthError ? "denied" : "error",
+      result: error instanceof AppleAuthError || error instanceof SocialLoginError ? "denied" : "error",
       error_code:
-        error instanceof AppleAuthError ? error.code : "INTERNAL_SERVER_ERROR",
+        error instanceof AppleAuthError || error instanceof SocialLoginError ? error.code : "INTERNAL_SERVER_ERROR",
       duration_ms: Date.now() - started_at,
     });
     sendAppleAuthError(req, res, error, "auth_apple_login_failed");
@@ -764,7 +765,7 @@ export async function kakaoLoginWithToken(
 
 function sendNaverAuthError(req: Request, res: Response, error: unknown): void {
   logError("auth_naver_login_failed", error, req.request_id);
-  const known_error = error instanceof NaverAuthError;
+  const known_error = error instanceof NaverAuthError || error instanceof SocialLoginError;
   const message = known_error ? error.message : "네이버 로그인 처리 중 오류가 발생했습니다.";
   res.status(known_error ? error.status_code : 500).json({
     success: false,

@@ -4,6 +4,7 @@ import { Op, Transaction } from "sequelize";
 import { User, RefreshToken } from "../models";
 import { sequelize } from "../config/database";
 import { getRequiredEnvironmentVariable } from "../config/environment";
+import { assertLoginAllowed } from "./socialLoginError";
 import {
   unbindAllUserDevices,
   unbindDeviceForLogout,
@@ -38,9 +39,7 @@ export async function generateTokens(
   user: User,
   options?: GenerateTokensOptions
 ): Promise<AuthTokens> {
-  if (user.account_status !== "ACTIVE") {
-    throw new Error("ACCOUNT_DELETION_IN_PROGRESS");
-  }
+  assertLoginAllowed(user);
   const jwt_secret = getRequiredEnvironmentVariable("JWT_SECRET");
   const jwt_refresh_secret =
     getRequiredEnvironmentVariable("JWT_REFRESH_SECRET");

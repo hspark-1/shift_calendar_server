@@ -2,6 +2,7 @@ import axios from "axios";
 import qs from "qs";
 import { logError } from "../utils/logger";
 import { QueryTypes, UniqueConstraintError } from "sequelize";
+import { assertLoginAllowed, isUserUniqueConstraint } from "./socialLoginError";
 import { sequelize } from "../config/database";
 import { User } from "../models";
 import { normalizePhoneNumber } from "../utils/phone";
@@ -209,22 +210,22 @@ export async function completeNaverLogin(
       let user = await User.findOne({
         where: { naver_id: identity.naver_id }, transaction, lock: transaction.LOCK.UPDATE,
       });
+      assertLoginAllowed(user);
       let is_new_user = false;
       if (!user) {
         user = await User.findOne({
           where: { email: identity.email }, transaction, lock: transaction.LOCK.UPDATE,
         });
+        assertLoginAllowed(user);
         if (user?.naver_id && user.naver_id !== identity.naver_id) {
           throw new NaverAuthError("NAVER_ACCOUNT_CONFLICT", 409, "이미 다른 네이버 계정이 연결되어 있습니다.");
         }
-      }
-      if (user && user.account_status !== "ACTIVE") {
-        throw new NaverAuthError("ACCOUNT_DELETION_IN_PROGRESS", 409, "회원 탈퇴가 진행 중입니다.");
       }
       const should_store_phone = identity.phone !== null && (!user || user.phone == null);
       if (should_store_phone) {
         const phone_owner = await User.findOne({ where: { phone: identity.phone! }, transaction });
         if (phone_owner && phone_owner.user_id !== user?.user_id) {
+          assertLoginAllowed(phone_owner);
           throw new NaverAuthError("PHONE_ALREADY_EXISTS", 409, "이미 사용 중인 전화번호입니다.");
         }
       }
@@ -244,10 +245,21 @@ export async function completeNaverLogin(
       return { user, tokens, is_new_user };
     });
   } catch (error) {
-    if (error instanceof UniqueConstraintError && error.errors.some(
-      (item) => item.path === "phone" || item.path === "idx_users_phone",
-    )) {
+    if (error instanceof UniqueConstraintError && isUserUniqueConstraint(error, "phone")) {
+      const phone_owner = identity.phone
+        ? await User.findOne({ where: { phone: identity.phone } })
+        : null;
+      assertLoginAllowed(phone_owner);
       throw new NaverAuthError("PHONE_ALREADY_EXISTS", 409, "이미 사용 중인 전화번호입니다.");
+    }
+    if (error instanceof UniqueConstraintError && (
+      isUserUniqueConstraint(error, "email") || isUserUniqueConstraint(error, "naver_id")
+    )) {
+      const subject_user = await User.findOne({ where: { naver_id: identity.naver_id } });
+      assertLoginAllowed(subject_user);
+      const email_user = await User.findOne({ where: { email: identity.email } });
+      assertLoginAllowed(email_user);
+      throw new NaverAuthError("NAVER_ACCOUNT_CONFLICT", 409, "이미 가입된 계정 정보와 충돌합니다. 기존 로그인 방식으로 로그인해주세요.");
     }
     throw error;
   }

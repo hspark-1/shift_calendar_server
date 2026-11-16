@@ -126,6 +126,7 @@
                   "KAKAO_TOKEN_SUBJECT_MISMATCH",
                   "KAKAO_EMAIL_UNAVAILABLE",
                   "KAKAO_ACCOUNT_CONFLICT",
+                  "ACCOUNT_DELETION_IN_PROGRESS",
                   "KAKAO_INVALID_UPSTREAM_RESPONSE",
                   "AUTH_RATE_LIMIT_EXCEEDED",
                   "KAKAO_UPSTREAM_UNAVAILABLE",
@@ -149,7 +150,7 @@
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
       },
       "KakaoConflict": {
-        "description": "이메일에 다른 카카오 계정이 연결됨",
+        "description": "다른 카카오 계정 충돌(KAKAO_ACCOUNT_CONFLICT) 또는 탈퇴 진행(ACCOUNT_DELETION_IN_PROGRESS). 탈퇴 완료 후 다시 가입합니다.",
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KakaoErrorResponse" } } }
       },
       "KakaoRateLimited": {

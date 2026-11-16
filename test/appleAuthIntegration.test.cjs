@@ -196,6 +196,8 @@ if (process.env.RUN_APPLE_AUTH_INTEGRATION !== "true") {
       "utf8",
     );
     await sequelize.query(base_schema);
+    // 공용 기반 fixture에는 Google 컬럼이 없지만 현재 User 모델은 이를 조회한다.
+    await sequelize.query("ALTER TABLE users ADD COLUMN google_id text UNIQUE");
     await sequelize.query(`
       CREATE TABLE refresh_tokens (
         token_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -483,6 +485,20 @@ if (process.env.RUN_APPLE_AUTH_INTEGRATION !== "true") {
       }),
       0,
     );
+  });
+
+  test("탈퇴 중 subject·이메일은 authorization·템플릿·JWT 생성 전에 409로 거절한다", async () => {
+    for (const has_subject of [true, false]) {
+      const subject = has_subject ? "apple-deleting-subject" : "apple-deleting-email";
+      const user = await User.create({ email: `${subject}@example.test`, name: "탈퇴", apple_id: has_subject ? subject : null, account_status: "DELETION_PENDING" });
+      const { input } = await issueLoginInput("ios", subject, user.email, "deleting-refresh");
+      await assert.rejects(service.completeLogin(input), (error) => error.code === "ACCOUNT_DELETION_IN_PROGRESS" && error.status_code === 409);
+      await user.reload();
+      assert.equal(user.apple_id, has_subject ? subject : null);
+      assert.equal(await OAuthAuthorization.count({ where: { user_id: user.user_id } }), 0);
+      assert.equal(await RefreshToken.count({ where: { user_id: user.user_id } }), 0);
+      assert.equal(await ShiftTemplate.count({ where: { owner_user_id: user.user_id } }), 0);
+    }
   });
 
   test("신규 authorization에 refresh token이 없으면 사용자와 JWT 생성을 rollback한다", async () => {

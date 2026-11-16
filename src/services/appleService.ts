@@ -26,6 +26,7 @@ import {
 import { generateTokens } from "./authService";
 import { ensureDefaultTemplate } from "./shiftTemplateService";
 import { logError } from "../utils/logger";
+import { assertLoginAllowed } from "./socialLoginError";
 
 const apple_issuer = "https://appleid.apple.com";
 const apple_token_url = `${apple_issuer}/auth/token`;
@@ -329,7 +330,9 @@ export class AppleService {
         let user = await User.findOne({
           where: { apple_id: exchanged_identity.subject },
           transaction,
+          lock: transaction.LOCK.UPDATE,
         });
+        assertLoginAllowed(user);
         let is_new_user = false;
 
         if (!user) {
@@ -343,7 +346,9 @@ export class AppleService {
           const existing_email_user = await User.findOne({
             where: where(fn("lower", col("email")), usable_verified_email),
             transaction,
+            lock: transaction.LOCK.UPDATE,
           });
+          assertLoginAllowed(existing_email_user);
           if (existing_email_user) {
             throw new AppleAuthError(
               "ACCOUNT_LINK_REQUIRED",
@@ -389,6 +394,7 @@ export class AppleService {
           conflicting_email_user &&
           conflicting_email_user.apple_id !== exchanged_identity.subject
         ) {
+          assertLoginAllowed(conflicting_email_user);
           throw new AppleAuthError(
             "ACCOUNT_LINK_REQUIRED",
             409,

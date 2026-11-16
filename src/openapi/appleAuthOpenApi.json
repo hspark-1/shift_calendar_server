@@ -58,7 +58,7 @@
           },
           "400": { "$ref": "#/components/responses/AppleBadRequest" },
           "409": {
-            "description": "검증된 이메일과 기존 계정 충돌. 자동 연결하지 않습니다.",
+            "description": "기존 이메일 충돌(ACCOUNT_LINK_REQUIRED) 또는 탈퇴 진행(ACCOUNT_DELETION_IN_PROGRESS). 탈퇴 완료 후 재가입하며 자동 계정 연결은 하지 않습니다.",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/AppleErrorResponse" }
@@ -199,6 +199,7 @@
                   "APPLE_EMAIL_UNAVAILABLE",
                   "APPLE_REFRESH_TOKEN_UNAVAILABLE",
                   "ACCOUNT_LINK_REQUIRED",
+                  "ACCOUNT_DELETION_IN_PROGRESS",
                   "AUTH_RATE_LIMIT_EXCEEDED",
                   "APPLE_UPSTREAM_UNAVAILABLE"
                 ]

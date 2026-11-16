@@ -2,6 +2,43 @@
 
 # 작업 일지
 
+## 2026-11-16
+
+### [TODO] 서버 소셜 로그인 오류 처리 변경 정리·커밋·develop 푸시
+
+- 목적: 사용자 요청에 따라 검증한 서버 인증 변경을 문서·계약·테스트와 함께 공개 개발 브랜치에 기록한다.
+- 범위: 네 공급자의 탈퇴 진행409·중복 충돌 분류·Apple 사용자 잠금·공통 토큰 발급 방어와 관련 회귀/ADR/API 문서만 포함한다. 별도 Flutter 소스·기존 그룹/이전 조사 문서·Git 제외 env/배포 파일은 포함하지 않는다.
+- 검증: 최신 origin/develop과 fast-forward 가능 여부, 대상 diff·공개 제외 파일, TypeScript build 및 인증 회귀를 확인한다. 줄바꿈이 추가된 사용자 안내를 수용하도록 회귀의 문구 검사만 보완한다.
+- 롤백: 생성한 인증 변경 커밋을 revert한다. DB migration/데이터 변경은 없으며 민감 로컬 설정과 기존 미커밋 작업은 유지한다.
+
+### [DONE] 네이버 탈퇴 후 SDK 재가입 반복 실패 원인 수정·실계정 해결 확인
+
+- 목적/실제 증거: 사용자 탈퇴 성공 직후 재가입의 Flutter BP에서 SDK error·Access Token 없음·-1005/네이버 token endpoint를 확인했다. 이번 요청은 서버 로그인 호출 이전에 실패했다. 네이버 공식 issue6/SDK5.2.0 릴리스의 재로그인 수정과 현재 설치5.1.0을 대조했다.
+- 변경/영향: 인접 Flutter에 공식3.0.4 원본 호출 소스를 보존한 소규모 path 호환 패키지를 구성해 iOS SDK5.2.1을 고정했다. 공식 plugin4.0.0의 Flutter>=3.44 요구 때문에 현재Flutter3.38.5 전체 업그레이드를 피한 범위다. 앱은 기존iOS15를 유지한다. 앱 pub/Pod lock·출처/라이선스·역할·사용 예·롤백은 Flutter PROJECT_CONTEXT/ADR-0085/WORKLOG와 vendor README에 기록했다. 서버 코드/DB/worker/외부 연결 해제 정책은 추가 변경하지 않았다.
+- 검증/결과: 이전 lock과 공식 archive hash 일치·호출 소스21개 원본 동일, 인증125개·analyze error/warning0(기존26 naming info), 실제 Debug iOS build·포함 SDK5.2.1을 확인했다. 같은 iPhone에서 새 debug local 앱을 실행한 뒤 사용자가 “해결됐음”을 확인했다. 진단 BP0개·양쪽 세션 running을 확인했다. 다른 기기·반복 횟수/Release·스토어 배포 인수는 별도다.
+- 롤백: 앱의 기존 hosted3.0.4 및 lock/Nid5.1.0으로 복구·pub get/pod install/전체 재빌드 후 호환 폴더를 제거한다. 이전 결함이 재발할 수 있다. 사용자 데이터·기존 미커밋 작업·스토어 산출물은 보존하며 커밋/푸시/배포는 하지 않았다.
+
+### [DONE] 네이버 탈퇴 후 재가입 캡처의 SDK 오류 경계 확인·Flutter 수정
+
+- 목적/근거: 사용자 후속 캡처는 nid.naver.com/oauth2.0/token에서 NSURLErrorDomain -1005가 발생한 것으로 앞선 서버409 응답과 다른 경계다. 실제 설치 플러그인의 iOS requestLogin 실패→errorMessage→Flutter service→Provider→오류 다이얼로그 원문 전달을 확인했다. 네트워크 유실 이유·탈퇴와의 인과관계는 미확정이다.
+- 변경/영향: 인접 Flutter NaverLoginService의 로그인 SDK 오류만 ApiException으로 매핑해 네트워크/취소/토큰 미수신/일반 실패를 구분하고 진단 원문 표시를 제거했다. 기존 네이버 service/페이지 테스트와 Flutter PROJECT_CONTEXT/ADR-0084/WORKLOG를 최신화했다. 서버 코드·DB·SDK/lock·탈퇴 worker/연결 해제 정책은 추가 변경하지 않았다.
+- 검증: 수정 전 실제 서비스 원문 전달 probe1개, 새 회귀의 수정 전 실패7개 확인 후 인증 전체124개 통과, 최종 서비스/MethodChannel/로그인 다이얼로그 회귀28개 통과·변경 Dart3개 분석 진단0·format/diff 확인. 실제 네트워크 유실 해결·기기 적용/실계정 재가입 성공은 미검증이다. 상세 파일/자료 역할·사용 예와 디버거 한계는 Flutter WORKLOG를 따른다.
+- 롤백: 이번 Flutter 네이버 서비스·테스트·문서 추가분과 이 기록만 되돌린다. 기존 서버/앱 미커밋 작업·배포 산출물과 사용자 데이터는 보존한다. 커밋/배포는 하지 않았다.
+
+### [DONE] 소셜 로그인 탈퇴 직후 재가입·기존 계정 충돌 디버깅 및 오류 처리
+
+- 목적: Google/Apple/Naver/Kakao의 탈퇴 처리 중 재로그인과 기존 식별자 충돌을 추적하고 앱에서 구분 가능한 오류 응답·로그로 처리한다.
+- 변경/영향: origin/develop과 동일한 현재 개발 checkout에서 관련 인증 서비스·controller·계약·회귀 테스트만 수정한다. 기존 문서 미커밋 변경은 보존한다. 탈퇴 worker와 DB 삭제 정책은 실제 흐름 확인 후 필요 범위만 판단한다.
+- 검증: DebugMCP로 재현 경로·오류 타입·응답 매핑을 확인하고 공급자별 테스트 및 TypeScript build를 실행한다. 실계정 재현과 격리 테스트 결과는 구분하고 credential/개인정보 원문을 로그에 남기지 않는다.
+- 롤백: 이번 인증 코드·계약·문서 변경분만 되돌린다. DB 데이터·운영 설정·배포는 변경하지 않는다.
+- 원인/변경: Apple/Kakao는 비ACTIVE 사용자에 대한 최종 generateTokens의 일반 Error를 공급자 오류로 인식하지 않아500으로 응답했다. Apple은 템플릿/authorization 처리 뒤에 거절했다. 공통 SocialLoginError/활성 검사로 사용자 변경 전에409 ACCOUNT_DELETION_IN_PROGRESS와 탈퇴 완료 후 재가입 안내를 반환하고 최종 JWT 경계도 보강했다. Apple 사용자 UPDATE lock을 추가했다. 네 공급자의 subject/이메일·Google/Naver 번호 충돌에서 탈퇴 상태를 구분한다. 네이버 사용자 unique 경쟁은 안전한409로 변환하고 카카오의 사용자 외 unique 오류 오분류를 제거했다. 활성 기존 회원·공급자별 기존 충돌 코드·삭제 후 신규 가입 계약은 유지한다.
+- 파일/문서: src/services/socialLoginError.ts(신규)·authService·네 OAuth service·authController, Apple/Kakao OpenAPI, test/socialLoginConflict.test.cjs(신규)·accountDeletion·Apple/Kakao integration. PROJECT_CONTEXT/OAUTH_API_GUIDE에 역할·의존성·사용 예·Behavior change·롤백을 기록하고 DECISIONS ADR-0051을 추가했다. DB migration/새 env 키/worker 정책/공개 도면 변경은 없다. 기존 그룹 문서와 이전 Google 조사 기록은 보존했다.
+- 디버거: 별도 Node 재현 세션에서 실제 공통 guard의 account_status=DELETION_PENDING, code=ACCOUNT_DELETION_IN_PROGRESS, HTTP409를 관측했다. controller 복귀 후 HTTP409/동일 error_code/저장0건/request_id 존재를 확인했다. DebugMCP 초기 npm 부모 세션/비동기 프레임 전환 실패 후 대상 테스트 세션 상태를 다시 조회해 검사했다. 토큰/번호/이메일 원문을 검사·출력하지 않았다. 진단 BP·추가 launch 설정은 제거하고 기존 Google/응답 BP를 import로 이동한89/191행에 복원했다. 사용자 Stage 디버그 세션은 실행 상태로 유지했다.
+- 테스트: strict TypeScript build·관련 단위/경계 회귀84개 통과(새 공통31개 포함). 고정 격리 PostgreSQL16에서 Apple9/Kakao6/Google16/Naver13, 총44개 통과. Apple integration의 기존 기반 fixture에 현재 User 모델 google_id가 없어 처음 실패했으며 해당 테스트 준비에만 컬럼을 보완한 뒤9개 모두 통과했다. 공급자 외부 API는 모의이며 실제 provider 계정/실기기 탈퇴·재가입은 미수행이다. 실제 DB 저장/rollback과 HTTP 응답 검증은 수행했다.
+- 전체 회귀: 최종 npm test는147 pass/17 fail/14 skip이다. 수정 전 HEAD를 별도 임시 checkout에서 실행한 결과에도 같은17개 실패가 있었고 신규 실패0개임을 이름별 비교했다. 실패는 공개 개발 checkout의 비공개 배포 파일 누락/배포 파일 집합·Apple 운영 문서 정적 검증이며 인증 수정과 무관한 파일을 변경하지 않았다. 최초 sandbox localhost listen EPERM은 권한 있는 재실행으로 구분했다. 별도 lint script/설정은 없으며 CJS 구문 검사·OpenAPI 파싱/관련 HTTP 계약·git diff --check를 통과했다.
+- 로컬 탈퇴 활성화(추가 요청): Git 제외 .env.stage.local/.env에 ACCOUNT_DELETION_ENABLED=true, ACCOUNT_DELETION_WORKER_ENABLED=false를 설정했다. 로컬 npm run dev:stage는 API만 시작하며 요청이 같은 Stage DB에 들어가면 활성 Stage 탈퇴 worker가 처리한다. 실제 Stage worker healthy/활성·DB 및 캐시 prefix 일치, worker 실행 코드 기본 폴링600000ms와 override 없음, 실행 중 로컬 Node의 두 플래그 true/false를 읽기 전용 검사했다. 로컬 worker를 시작하지 않았다. 로컬 API health200, 로컬 OpenAPI는 현재 설정상404이며 계약은 격리 HTTP에서 확인했다. 운영/Stage 설정·DB 수동 SQL·배포는 변경하지 않았다. 삭제 접수202와 삭제 완료는 다르며 외부 작업/재시도에 따라 추가 시간이 걸린다.
+- 정리/롤백: 이번에 만든 두 격리 PostgreSQL 컨테이너와 전용 자원을 제거했다. 로컬 활성화를 되돌리려면 두 Git 제외 env에서 API 플래그를 이전 미설정(false 기본값) 상태로 되돌리고 API를 재시작한다. worker는 계속 false로 유지한다. 제품 변경은 이번 diff만 되돌리며 이미 탈퇴로 물리 삭제된 데이터는 코드 롤백으로 복원되지 않는다. 커밋/푸시/배포는 수행하지 않았다.
+
 ## 2026-11-13
 
 ### [DONE] 네이버·구글 변경을 함께 병합 배포하고 로컬 상태 정리
