@@ -1,5 +1,10 @@
 # 프로젝트 컨텍스트
 
+## 소셜 로그인 서버 변경·보존 문서 main 통합 완료 (2026-11-16)
+
+인증 수정 d834bb8과 조사 문서3개 정리3d4dcfa, Apple 테스트 초기화 호환 보완e45292f를 origin/develop에 기록하고 deploy/main에 실제 merge/push했다. main 전체187 pass/0 fail/15 opt-in skip, 공개/main fixture의 Apple PostgreSQL 각9개, 자동 CI의 전체 통합 검증·이미지 빌드·Stage/운영 배포가 성공했다. 배포 후 두 환경 readiness HTTP200/success=true를 확인했다. SQL/env/수동 데이터 변경은 없으며 아래 과거 미배포·조사 상태보다 이 완료 결과를 우선한다. 세부 실행 정보는 비공개 WORKLOG에서 관리한다. Flutter 변경은 이번 서버 커밋/배포 범위에 포함하지 않았다.
+
+
 ## 소셜 로그인 탈퇴 직후 재가입·충돌 오류 (2026-11-16)
 
 - **Behavior change / ADR-0051**: Google/Apple/Kakao/Naver의 기존 subject·이메일 또는 수집 번호에 연결된 계정이 탈퇴 진행 중이면 `409 ACCOUNT_DELETION_IN_PROGRESS`와 “회원 탈퇴가 진행 중입니다. 탈퇴 처리가 완료된 후 다시 가입해주세요.”를 반환한다. 네이버·카카오 code/token 경로 모두 적용하며 탈퇴 진행 안내 두 문장 사이에 줄바꿈을 포함한다. 기존 활성 계정의 공급자별 충돌 코드와 정상 재로그인·신규 가입 응답은 유지한다.

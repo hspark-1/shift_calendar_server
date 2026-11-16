@@ -4,21 +4,23 @@
 
 ## 2026-11-16
 
-### [TODO] Apple 통합 fixture의 Google 컬럼 중복 초기화 보완
+### [DONE] Apple 통합 fixture의 Google 컬럼 중복 초기화 보완
 
 - 목적/근거: main 병합 CI가 Apple before hook의 `column "google_id" of relation "users" already exists`로 중단되었다. 공개 기반 fixture에는 해당 컬럼이 없고 private 기반 fixture에는 이미 있어 동일 초기화 SQL이 충돌했다.
 - 변경/영향: Apple 테스트의 격리 users 컬럼 보완을 `ADD COLUMN IF NOT EXISTS`로 변경한다. 제품 인증 코드·DB migration·운영 데이터·fixture 정본은 변경하지 않는다.
 - 검증: 컬럼이 없는 공개 fixture와 있는 main fixture 각각에서 실제 PostgreSQL Apple 통합9개를 실행하고, main 전체 회귀·자동 CI를 재확인한다.
 - 공개 사전 결과: 전용 PostgreSQL16에서 Apple 통합9 pass/0 fail, CJS 구문·diff 검사 통과. main fixture/전체 CI는 다음 병합에서 확인한다. 원래 실패는 원격 CI before hook 로그와 양쪽 fixture DDL을 대조해 확인했으며 임시 제품 로그나 BP는 추가하지 않았다.
+- 완료: 공개 e45292f를 main에 실제 병합한 뒤 컬럼 없는 공개 fixture9개·컬럼 있는 main fixture9개가 모두 통과했다. main 전체187 pass/0 fail/15 opt-in skip과 자동 CI의 전체 통합 검증·배포가 성공했다. 전용 PostgreSQL/네트워크·검증용 의존성 symlink는 제거했다.
 - 롤백: 테스트의 조건부 초기화와 이 문서 추가분만 revert한다.
 
 
-### [TODO] 보존된 조사 문서 정리 및 develop→main 병합·푸시
+### [DONE] 보존된 조사 문서 정리 및 develop→main 병합·푸시
 
 - 목적: 사용자가 요청한 남은 Markdown 기록을 함께 보관하고 검증한 서버 인증 변경을 배포 main에 통합한다.
 - 변경/범위: 그룹 생성자 nullable 계약, Google 전화번호·탈퇴 조사, 네이버 구현 전 계획의 이력/현재 상태를 구분해 기존 세 문서를 정리한다. 공개 origin/develop에 기록한 뒤 비공개 deploy/main에 실제 merge하며 private 배포 파일은 보존한다.
 - 검증: 문서·코드/계약의 일치, 공개 제외 정보, 양쪽 최신 ref·병합 충돌, 병합본 build/회귀 및 자동 CI 상태를 확인한다. main push는 기존 Stage/운영 자동 배포를 시작한다.
 - 롤백: 문서 커밋을 revert하고 제품 복구가 필요하면 private main에서 병합의 첫 parent를 기준으로 revert한다. DB migration/env/수동 데이터 변경은 없다.
+- 완료: 조사 문서3개를 [3d4dcfa](https://github.com/hspark-1/shift_calendar_server/commit/3d4dcfa73146736a74413e647ed603a084b7d985)로 origin/develop에 push하고 인증 수정·CI 보완까지 비공개 main에 실제 merge/push했다. WORKLOG 충돌은 양쪽 조사/배포 이력을 모두 보존했다. 자동 CI의 검사·이미지 빌드·Stage/운영 배포가 성공했으며 두 환경 readiness HTTP200/success=true를 확인했다. 실제 실행 식별자는 비공개 WORKLOG에 기록한다.
 
 ### [DONE] 서버 소셜 로그인 오류 처리 변경 정리·커밋·develop 푸시
 
