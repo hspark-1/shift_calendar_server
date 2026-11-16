@@ -4,12 +4,13 @@
 
 ## 2026-11-16
 
-### [TODO] 서버 소셜 로그인 오류 처리 변경 정리·커밋·develop 푸시
+### [DONE] 서버 소셜 로그인 오류 처리 변경 정리·커밋·develop 푸시
 
 - 목적: 사용자 요청에 따라 검증한 서버 인증 변경을 문서·계약·테스트와 함께 공개 개발 브랜치에 기록한다.
 - 범위: 네 공급자의 탈퇴 진행409·중복 충돌 분류·Apple 사용자 잠금·공통 토큰 발급 방어와 관련 회귀/ADR/API 문서만 포함한다. 별도 Flutter 소스·기존 그룹/이전 조사 문서·Git 제외 env/배포 파일은 포함하지 않는다.
 - 검증: 최신 origin/develop과 fast-forward 가능 여부, 대상 diff·공개 제외 파일, TypeScript build 및 인증 회귀를 확인한다. 줄바꿈이 추가된 사용자 안내를 수용하도록 회귀의 문구 검사만 보완한다.
 - 롤백: 생성한 인증 변경 커밋을 revert한다. DB migration/데이터 변경은 없으며 민감 로컬 설정과 기존 미커밋 작업은 유지한다.
+- 결과: 서버 인증 변경 [d834bb8](https://github.com/hspark-1/shift_calendar_server/commit/d834bb85cae12de5102afcedd3e301b2df06823f)을 `origin/develop`에 fast-forward 푸시했다. `npm run build`와 인증 회귀 84개가 통과했다. DB migration·배포는 수행하지 않았다.
 
 ### [DONE] 네이버 탈퇴 후 SDK 재가입 반복 실패 원인 수정·실계정 해결 확인
 
