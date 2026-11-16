@@ -10,9 +10,15 @@
 - 로컬 Stage 연결 실행은 API만 시작한다. 로컬 탈퇴 API 플래그를 켜면 같은 DB의 활성 Stage 탈퇴 worker가 처리한다. 이번에 Git 제외 `.env.stage.local`/`.env`의 `ACCOUNT_DELETION_ENABLED=true`, `ACCOUNT_DELETION_WORKER_ENABLED=false`를 반영하고 실행 중 API에서도 확인했다. Stage worker 활성·정상, DB 일치·실행 기본 폴링600000ms를 읽기 전용 확인했다. 외부 공급자·이미지 단계와 재시도로 완료 시간은 길어질 수 있다.
 - DB schema/migration/env 키/worker 정책/도면·운영 배포는 변경하지 않는다. 코드·로컬 설정의 이전값으로 롤백하며 탈퇴로 물리 삭제된 데이터는 복원하지 않는다. 실제 소셜 계정의 탈퇴·재가입 인수는 자동 테스트와 별도다. 상세 검증 결과는 WORKLOG를 따른다.
 
+## Google 전화번호 미수신 실계정 조사 (2026-11-14)
+
+- 로컬 재현에서 access token 전달·OIDC 계정 일치·전화번호 scope 실제 grant를 확인했지만 People API는 HTTP200에 `phoneNumbers` 필드를 제공하지 않았다. 동일 token으로 PROFILE 지정/생략을 비교해도 번호0개였으므로 필터 제거·정규화 변경으로 해결되는 사례가 아니었다.
+- 기존 저장 번호가 있던 재현은 그대로 보존·직렬화했고, 기존 번호도 없던 재현은 응답 phone=null이었다. 동의만으로 번호 반환을 보장할 수 없어 직접 입력 경로를 유지한다. 계정에 등록된 번호가 API에 제공되지 않은 구체적인 이유와 이전 TestFlight/가입 화면 실행값은 미확정이다.
+- 제품 코드·수동 DB·콘솔 설정 변경 없는 조사다. 당시 관측·진단 BP 설정/정리 이력은 WORKLOG에 보존하며 현재 디버거 상태를 의미하지 않는다.
+
 ## 네이버·구글 함께 배포 완료 (2026-11-13)
 
-두 공급자의 전화번호 처리·사진 신규 수집 중단을 같은 서버 이미지로 Stage/운영에 배포했다. develop→main 실제 병합·전체 테스트156개와 실제 DB29개·CI/실행 코드/계약/health를 확인했으며 신규 SQL/env는 없다. 원본 checkout을 최신 develop 기준으로 정렬해 제품 코드 미커밋 변경은0개이고 별도 문서3개만 보존한다. 아래 과거 미배포 기록보다 이 결과가 우선하며 상세는 WORKLOG를 따른다.
+두 공급자의 전화번호 처리·사진 신규 수집 중단을 같은 서버 이미지로 Stage/운영에 배포했다. develop→main 실제 병합·전체 테스트156개와 실제 DB29개·CI/실행 코드/계약/health를 확인했으며 신규 SQL/env는 없다. 당시 원본 checkout을 최신 develop 기준으로 정렬하고 별도 조사 문서3개를 보존했으며, 보존 문서는 2026-11-16 후속 정리 대상에 포함했다. 아래 과거 미배포 기록보다 이 결과가 우선하며 상세는 WORKLOG를 따른다.
 
 ## 네이버 전화번호 수집 구현 (2026-11-13)
 
@@ -37,6 +43,29 @@ Google 소스3d61f36과 기존 개인 일정1~5 변경을 포함한 origin/devel
 - Flutter 로그인 → 계정별 전화번호 선택 동의 → 기존 POST /auth/google/token의 id_token과 access_token? → ID Token 검증 → OIDC userinfo.sub 대조 → People API PROFILE phoneNumbers → 신규/빈 번호만 row lock/transaction 저장 → 기존 User.phone/가입 화면 미리 채움이다. 미제공·선택 권한 거부/취소·외부 조회 장애는 직접 입력, 다른 계정 token401·번호 충돌/탈퇴 진행409다.
 - 전역 phone/DB/공개 규칙·가입 완료 정본은 유지하며 Google 제공 번호에만 국내01x/+82 변환을 적용한다. body phone을 신뢰하지 않고 OAuth token/원문 응답은 저장/로그에 남기지 않는다. 새 migration/env/패키지/파일은 없다.
 - 파일 역할·의존성·사용 예·계약·서버 선배포/앱 재빌드·Stage 인수·롤백은 [GOOGLE_SIGN_IN_SERVER_GUIDE.md](GOOGLE_SIGN_IN_SERVER_GUIDE.md) 상단이다. 로컬 검증 결과와 실계정 미검증 한계는 WORKLOG를 따른다. 사용자 콘솔 캡처의 전화번호 범위는 비민감으로 표시되어 있다.
+
+
+## 네이버 로그인 동의 항목 변경 계획 이력 (2026-11-13)
+
+- 구현 전에는 네이버 `response.mobile`을 저장하지 않고 신규 프로필 사진을 수집했다. 사진 수집 중단, 신규/빈 전화번호만 보완, 두 로그인 경로의 공통 transaction과 중복409 처리를 계획했다.
+- 후속 구현·검증·배포는 완료되었다. 현재 계약은 위 '네이버 전화번호 수집 구현', [OAUTH_API_GUIDE.md](OAUTH_API_GUIDE.md), ADR-0048을 따르고 계획 당시 조사/미검증 범위는 WORKLOG의 같은 날짜에 보존한다.
+- 소셜 로그인 탈퇴 진행 오류의 현재 공통 정책은 ADR-0051을 우선한다. 이 기록은 별도 미구현 작업 목록이 아니다.
+
+## Google 회원 탈퇴 iOS HTTP 400 보완 (2026-11-13)
+
+- 제보된 `com.google.HTTPStatus: 400`은 Flutter의 서버 DELETE 이전 Google SDK disconnect 경로에서 그대로 전파될 수 있다. 서버 route/auth/controller/service와 인접 Flutter 코드를 직접 확인했고, 보관한 수정 전 실제 서비스에 동일 PlatformException을 주입해 원문 전파를 재현했다. 캡처만으로 Google 응답 body·실제 token 만료/폐기 여부는 확정하지 않는다.
+- Flutter `google_login_service.dart`는 iOS disconnect 전 SDK lightweight authentication으로 세션 복원·필요 시 token 갱신 후 `User.google_id`와 account.id를 대조한다. 세션 부재/불일치 또는 원시 iOS400은 기존 다시 로그인 안내로 보내고 기타 SDK/예상 밖 탈퇴 오류의 원문 표시를 제거한다. 근거는 고정 google_sign_in7.2.0/google_sign_in_ios6.3.0과 설치된 GIDSignIn.m의 revoke/restore 코드다. 정책과 역할/사용 예·영향/롤백은 인접 Flutter PROJECT_CONTEXT·ADR-0080·WORKLOG에 기록했다.
+- 서버의 JWT 최근 전체 로그인·confirmation 검증,202 비동기 접수·Apple/Kakao worker·DB/Redis 삭제는 변경하지 않는다. SDK 복원은 ShiftMate auth_time을 갱신하지 않는다. Google/Naver 사전 해제 실패 시 내부 삭제 정책 차이는 기존 PRIVACY_FE_CONTRACT_PROPOSAL의 미합의 영역이며 이번에 우회 정책을 추가하지 않았다.
+- 검증: 수정 전 오류 주입 probe1개, 수정 범위4파일44개 및 인증 기능 전체111개 통과. 변경 Dart7개 분석 진단0건·format 변경0·범위 diff 검사 통과. 실계정 Google revoke·실기기/서버 탈퇴·운영 배포는 미검증이다. 서버 실행 코드 변경이 없어 서버 build/DB suite는 재실행하지 않았다.
+- 운영 로그 후속(2026-11-13, 한국 시각): 사용자가 운영 앱이며 현재 미재현이라고 확인했다.00:54 전후에는 운영 API 전체에서 탈퇴 요청이 없고01:01~01:03의4건은 모두202였다. 읽기 전용 DB 조회 시 첫1건은 접수 약2.5초 뒤COMPLETED, 나머지3건은PENDING이었다. 별도01:02 Google 로그인500 두건과01:03 신규 로그인201도 관측했다. 당시 운영 generateTokens의 비ACTIVE 일반Error→Google 컨트롤러500 경로는 확인했으나, 당시 오류 로그가Error/code=null만 남겨 두건의 실제 원인/동일 계정 여부는 미확정이다. Google SDK400은 서버로 수집하지 않으며 기기 과거 로그는root 권한 부재로 수집하지 못했다. SDK400의 token 상태/응답 body와 실제 해결 여부는 여전히 미확정이며 이번 로그 조사에서는 실행 코드/운영 설정/사용자 데이터를 변경하지 않았다. 상세 검증/롤백은WORKLOG의 Google 탈퇴 간헐 오류 로그 확인을 따른다. 원시 로그/요청ID/접속 정보는 공개 문서에 기록하지 않는다. 이후 서버의 탈퇴 진행 오류 매핑은 ADR-0051로 보완했으며, 당시 두500의 원인을 소급 확정하지 않는다.
+
+## 그룹 생성자 탈퇴 후 상세 파싱 오류 분석 (2026-11-12)
+
+이 절의 Flutter 파싱·재현 결과는 2026-11-12 조사 당시 상태이며 현재 앱 배포 상태를 뜻하지 않는다.
+
+- 최초 생성자 `groups.created_by_user_id`는 nullable 감사 값이다. 탈퇴 worker는 활성 OWNER를 다른 멤버에게 승계한 뒤 users를 삭제하며, FK `ON DELETE SET NULL`이 생성자 ID를 익명화한다(ADR-0025). 현재 OWNER는 활성 group_members.role로 판단한다.
+- 서버 상세 DTO/서비스는 null을 반환하지만 Flutter `GroupDetail.fromJson`은 `as String`을 사용한다. 실제 Flutter 모델에 생성자 ID만 null인 응답을 넣어 타입 오류(209행)를 재현했다. Notifier가 오류를 보관하고 그룹 정보 화면이 비 ApiException 기본 문구를 표시한다. 목록·캘린더 모델은 생성자 ID를 파싱하지 않는다.
+- 기존 그룹 프론트 가이드의 null 불허 표를 정정했다. 2026-11-16 인접 Flutter 소스에는 `String?`/`as String?`가 반영된 것을 읽기 전용 확인했다. 서버 OpenAPI nullable 누락은 남아 있으며 이번 문서 정리에서는 제품 코드·DB를 변경하지 않았다. 운영 응답/실기기 인수는 미수행이다. 상세 근거와 수정 계약은 [GROUP_FRONTEND_API_GUIDE.md](GROUP_FRONTEND_API_GUIDE.md) 5.4를 따른다.
 
 ## 그룹 비친구 멤버의 근무표 공개 (2026-11-12)
 

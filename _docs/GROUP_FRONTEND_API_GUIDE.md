@@ -180,7 +180,13 @@ JSON 값은 각각 대문자 `OWNER/ADMIN/MEMBER`, `PENDING/...`, `SELF/VISIBLE/
 | 필드 | 타입 | null |
 | --- | --- | --- |
 | `members` | `GroupMember[]` | N |
-| `created_by_user_id` | string(UUID) | N |
+| `created_by_user_id` | string(UUID) | Y |
+
+`created_by_user_id`는 최초 생성자 감사 값이며 현재 OWNER의 ID가 아닙니다. 생성자 회원 탈퇴 시 `ON DELETE SET NULL`로 null이 됩니다. 현재 소유자는 활성 `members`의 `role=OWNER`로 판단하고 현재 사용자의 관리 권한은 `my_role`을 사용합니다. 소유권 승계 시 생성자 필드를 새 소유자로 덮어쓰지 않습니다.
+
+2026-11-12 조사 당시 원인 분석: 서버 `GroupDetail`/상세 서비스는 이미 `string | null`이지만 Flutter `group_models.dart`의 `GroupDetail.created_by_user_id`와 `fromJson`은 각각 `String`/`as String`입니다. 실제 모델에 생성자만 null인 응답을 입력하면 209행에서 `type 'Null' is not a subtype of type 'String' in type cast`가 발생합니다. Repository 파싱 → Notifier의 error 상태 → 그룹 정보 화면의 비 ApiException 기본 문구로 이어집니다. 목록·캘린더 DTO는 이 필드를 읽지 않아 정상 조회될 수 있습니다.
+
+당시 확인한 수정 대상은 Flutter 필드 `String?`와 파싱 `as String?`이며, null 생성자·승계 OWNER 응답의 모델/화면 회귀 검증이 필요합니다. 서버 `src/openapi/groupOpenApi.json`도 현재 nullable 표시가 누락되어 있어 구현과 일치하도록 후속 보완해야 합니다. 당시 작업은 원인 분석과 문서 정정만 수행했으며 제품 코드/DB/배포를 변경하지 않았습니다. 2026-11-16 문서 정리 시 인접 Flutter 소스에는 이미 `String?`/`as String?`가 반영되어 있음을 확인했습니다. 서버 OpenAPI의 nullable 누락과 실제 운영 응답·실기기 인수는 별도로 남아 있습니다.
 
 멤버 정렬은 `OWNER → ADMIN → MEMBER`, 같은 역할은 `joined_at ASC`, 마지막 tie-breaker는 `user_id ASC`입니다.
 

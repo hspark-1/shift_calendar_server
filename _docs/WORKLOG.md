@@ -4,6 +4,13 @@
 
 ## 2026-11-16
 
+### [TODO] 보존된 조사 문서 정리 및 develop→main 병합·푸시
+
+- 목적: 사용자가 요청한 남은 Markdown 기록을 함께 보관하고 검증한 서버 인증 변경을 배포 main에 통합한다.
+- 변경/범위: 그룹 생성자 nullable 계약, Google 전화번호·탈퇴 조사, 네이버 구현 전 계획의 이력/현재 상태를 구분해 기존 세 문서를 정리한다. 공개 origin/develop에 기록한 뒤 비공개 deploy/main에 실제 merge하며 private 배포 파일은 보존한다.
+- 검증: 문서·코드/계약의 일치, 공개 제외 정보, 양쪽 최신 ref·병합 충돌, 병합본 build/회귀 및 자동 CI 상태를 확인한다. main push는 기존 Stage/운영 자동 배포를 시작한다.
+- 롤백: 문서 커밋을 revert하고 제품 복구가 필요하면 private main에서 병합의 첫 parent를 기준으로 revert한다. DB migration/env/수동 데이터 변경은 없다.
+
 ### [DONE] 서버 소셜 로그인 오류 처리 변경 정리·커밋·develop 푸시
 
 - 목적: 사용자 요청에 따라 검증한 서버 인증 변경을 문서·계약·테스트와 함께 공개 개발 브랜치에 기록한다.
@@ -39,6 +46,61 @@
 - 전체 회귀: 최종 npm test는147 pass/17 fail/14 skip이다. 수정 전 HEAD를 별도 임시 checkout에서 실행한 결과에도 같은17개 실패가 있었고 신규 실패0개임을 이름별 비교했다. 실패는 공개 개발 checkout의 비공개 배포 파일 누락/배포 파일 집합·Apple 운영 문서 정적 검증이며 인증 수정과 무관한 파일을 변경하지 않았다. 최초 sandbox localhost listen EPERM은 권한 있는 재실행으로 구분했다. 별도 lint script/설정은 없으며 CJS 구문 검사·OpenAPI 파싱/관련 HTTP 계약·git diff --check를 통과했다.
 - 로컬 탈퇴 활성화(추가 요청): Git 제외 .env.stage.local/.env에 ACCOUNT_DELETION_ENABLED=true, ACCOUNT_DELETION_WORKER_ENABLED=false를 설정했다. 로컬 npm run dev:stage는 API만 시작하며 요청이 같은 Stage DB에 들어가면 활성 Stage 탈퇴 worker가 처리한다. 실제 Stage worker healthy/활성·DB 및 캐시 prefix 일치, worker 실행 코드 기본 폴링600000ms와 override 없음, 실행 중 로컬 Node의 두 플래그 true/false를 읽기 전용 검사했다. 로컬 worker를 시작하지 않았다. 로컬 API health200, 로컬 OpenAPI는 현재 설정상404이며 계약은 격리 HTTP에서 확인했다. 운영/Stage 설정·DB 수동 SQL·배포는 변경하지 않았다. 삭제 접수202와 삭제 완료는 다르며 외부 작업/재시도에 따라 추가 시간이 걸린다.
 - 정리/롤백: 이번에 만든 두 격리 PostgreSQL 컨테이너와 전용 자원을 제거했다. 로컬 활성화를 되돌리려면 두 Git 제외 env에서 API 플래그를 이전 미설정(false 기본값) 상태로 되돌리고 API를 재시작한다. worker는 계속 false로 유지한다. 제품 변경은 이번 diff만 되돌리며 이미 탈퇴로 물리 삭제된 데이터는 코드 롤백으로 복원되지 않는다. 커밋/푸시/배포는 수행하지 않았다.
+
+## 2026-11-14
+
+아래 항목의 진행 중·미검증·중단점 상태는 각 조사 시점의 기록이다. 최종 관측 결과는 같은 날짜 상단의 완료 항목을 따르며 현재 실행 세션 상태를 뜻하지 않는다.
+
+### [DONE] 등록된 Google 번호와 PROFILE API 응답 차이 확인
+
+- 목적: 사용자가 계정 전화번호 등록을 확인했으므로, 실제 재현 token의 grant와 People API의 PROFILE 제한/기본 source 응답을 같은 요청에서 비교한다.
+- 변경/영향: 원본 응답 수신 직후 BP에서 일회성 token으로 Google 읽기 전용 조회만 수행하는 진단을 준비한다. 추가 scope를 요청하거나 제품 조회 정책/DB/콘솔 설정을 변경하지 않는다. 토큰·번호 원문은 저장/로그에 남기지 않는다.
+- 검증/진행: 현재 디버그 서버는 실행 중이며 요청 stack에 멈춰 있지 않아 이번 계정 token은 확인할 수 없다. `googleService.ts:265`에 진단 BP를 추가해 다음 로그인에서 원본 phoneNumbers 유무·실제 phone scope·source별 반환 여부를 비교한다. 사용자가 직접 설정한88행/Controller190행 BP는 보존한다. 계정에 번호가 등록되었다는 사실과 PROFILE API에 번호가 반환된다는 사실을 구분한다.
+- 롤백: 이번265행 BP와 일시적인 진단 메모리만 제거한다. 비교 결과 전에는 source 필터를 결함으로 단정하지 않는다.
+- 실계정 비교 결과: 이번 요청의 OIDC 계정 일치=true이며 PROFILE 응답은HTTP200/필드 resourceName·etag만 존재/phoneNumbers 없음이었다. 동일 token의 OAuth2Client.getTokenInfo에서 실제 user.phonenumbers.read grant=true를 확인했다. 같은 token·personFields=phoneNumbers로 sources를 생략한 별도 읽기 요청도HTTP200/필드 resourceName·etag만 존재/번호0개였다. 따라서 이번 계정에서 source 제한 제거만으로 번호를 받을 수 없으며 배열 검사/정규화가 존재하는 번호를 버린 경우가 아니다. 최종 저장 사용자/직렬화 phone도 없었다.
+- 검증/한계: 초기 비교 진단 실패 후 실제 controller 실행 scope의 HTTP client로15초 상한 요청을 재실행해 비교를 완료했다. source 생략 요청은 진단에서만 수행했고 제품의 PROFILE 정책/요청 scope를 변경하지 않았다. Google 계정에 번호가 등록되어 있다는 사용자 확인과 API가 반환하는 프로필 번호의 차이는 남아 있으며 등록 용도/프로필 반영/Google 제공 정책 중 구체적인 원인은 단정하지 않는다. 반복해서 같은 parser BP를 확인하는 대신 계정의 프로필 번호 제공 상태를 확인할 후속 단계다.
+- 정리: 이번에 추가한265행/임시183행 BP와 boolean·필드명·개수만 보관한 임시 진단 메모리를 제거했다. 사용자가 설정한 googleService88행/authController190행 BP는 유지했고 서버 실행을 재개했다. 토큰/번호 원문 출력·저장, 제품 코드/수동 SQL/콘솔 변경·배포는 없다. 추가 제품 회귀 테스트 대신 실계정 API 비교로 검증했다.
+
+### [DONE] Google 전화번호 두 번째 실계정 응답 확인
+
+- 목적: 사용자의 재확인 요청에 따라 이번 로그인에서 Google 번호·저장 번호·응답 번호 존재 여부를 구분한다.
+- 변경/영향: 기존 디버그 세션의 BP로 값 존재 여부만 확인한다. 제품 코드/수동 DB/콘솔 설정은 변경하지 않는다.
+- 검증: People 응답과 정규화 결과·transaction 완료 User/직렬화 결과를 관측하고 이번 진단 BP를 정리한다. 토큰/전화번호 원문은 출력하지 않는다.
+- 롤백: 이번 문서 기록을 되돌리고 진단 BP를 제거한다.
+- 결과: `getPhoneForIdentity:265`에서 HTTP200/계정 일치=true/phoneNumbers 필드 존재=false/번호 개수0/정규화 번호 존재=false, `completeLogin:282`에서 phone===null=true를 관측했다. `authController:183`에서는 신규 회원=false/transaction 완료 User.phone 존재=false/직렬화 phone 존재=false였다. 앞선 재현의 기존 번호 보유 결과와 구분한다. 이번에는 Google이 번호를 반환하지 않았고 기존 번호도 없어 응답이 null이다.
+- 한계/정리: 이번 token의 실제 grant는 재조회하지 않았으며 최초 재현에서 확인한 grant와 혼동하지 않는다. Flutter 응답 BP는 관측되지 않아 앱 화면의 실제 실행값은 확정하지 않는다. 이번 서버/Flutter BP를 모두 제거하고 실행 중 세션은 유지했다. 제품 수정/수동 SQL/콘솔 변경/배포·추가 회귀 테스트는 수행하지 않았다. 실제 BP/API 응답으로 재확인했다.
+
+### [DONE] Google 전화번호 재확인 BP 준비
+
+- 목적: 사용자 요청에 따라 새 로그인에서 Google 번호 반환 여부를 다시 확인한다.
+- 변경/영향: 기존 로컬 서버/Flutter 세션에 진단 BP만 설정한다. 제품 코드/DB/콘솔 설정은 변경하지 않는다.
+- 검증: Google 응답/외부 오류/선택 token 누락·저장 결과와 Flutter 응답 지점의 BP 목록 및 실행 세션을 확인한다. 실제 재확인 결과는 로그인 후 별도로 기록한다.
+- 롤백: 이번 진단 BP만 제거한다. 토큰/전화번호 원문은 문서/로그에 남기지 않는다.
+- 완료: 서버 `googleService.ts:265`(People 응답/정규화 판단), `:268`(HTTP 오류), `:235`(선택 token 누락 시에만)와 `authController.ts:183`(저장·직렬화 결과), Flutter `auth_remote_datasource.dart:109`(서버 응답)에 BP를 설정했다. 서버4개/Flutter1개 목록과 양쪽 로컬 세션 실행 상태를 확인했다. 로그인 재현은 아직이며 BP/문서 작업만 수행해 제품 테스트는 추가 실행하지 않았다.
+
+### [DONE] Google 전화번호 동의 후 화면 미반영 원인 조사
+
+- 목적: 실제 앱·토큰 전달·서버 Google API 조회/번호 저장·화면 초기화 중 누락 단계를 증거로 구분한다.
+- 변경/영향: 우선 코드·배포본·안전한 기존 로그와 로컬 디버거로 조사한다. 사용자 토큰/전화번호 원문은 기록하지 않고 기존 미커밋 작업을 보존한다. 이번 요청은 원인 파악이며 운영 코드/DB/콘솔 설정을 임의 변경하지 않는다.
+- 검증: 실제 SDK/Repository/DataSource/User 파서/가입 화면과 GoogleService의 optional 실패/정규화·저장 흐름, 기존 테스트/공식 People API 계약을 대조한다. 실제 실패 시각/환경/화면은 사용자 확인을 요청했다.
+- 롤백: 이번 조사 문서/임시 재현만 제거한다.
+- 사용자 확인: 로그인 오류가 아니라 TestFlight/스토어 앱의 가입 화면 번호 자동 채움 누락이다. 같은 Google 계정으로 디버그 앱 재현에 동의했다.
+- 중간 증거: 실제 Google 프로젝트 콘솔에서 People API 활성화, 최근30일 GetPerson 요청5건/오류0%를 확인했다. 이 집계만으로 제보 요청의 응답 내용은 확정하지 않는다. Stage/운영 실행 코드 모두 Google phone 처리 포함·API/worker10개 동일 이미지/healthy다. 보존된 최근48시간 로그에는 Stage Google 인증0건/운영 성공1건이며 해당 계정은 현재 조회되지 않았다. phone 조회 단계/성공·미제공·HTTP 오류는 현재 인증 로그에 기록되지 않는다.
+- 코드/회귀: Flutter SDK 선택 access token→Repository→DataSource body→서버 User.phone→User 생성 파서→AuthNotifier→가입 화면 controller 흐름을 직접 읽었다. 서버 Google 단위16개/Flutter 관련83개 통과. Google 외부 응답·SDK는 테스트에서 대체되므로 실계정 원인 증명과 구분한다. 선택 SDK 오류와 서버 Axios 오류는 번호 null로 계속하며 정상 응답도 미제공/지원 외 형식/여러 번호 선택 불가면 null이다.
+- 진행: Flutter 로그인 응답 지점에 한정한 중단점을 설정하고 연결된 iPhone 디버그 세션을 시작했다. 토큰/번호 원문 없이 access token 전달 여부·HTTP 응답 user.phone 존재 여부를 검사해 앱/서버 경계를 먼저 확정한다. 실제 재현 결과 전에는 원인을 단정하지 않는다.
+- 실행 준비 이력: 최초 iPhone 실행 요청은300초 timeout·앱 미실행으로 실제 로그인에 도달하지 못했고 해당 디버그 세션은 종료했다. 기기는 유선 연결/페어링/개발자 모드 활성화 상태였다. 사용자가 로컬 연결을 준비한 뒤 BP 설정을 요청했다.
+- 실계정 결과: 사용자 로컬 재현의 서버 BP에서 선택 access token 수신=true, OIDC userinfo.sub와 ID Token 계정 일치=true를 확인했다. People API는HTTP200이지만 응답에 `phoneNumbers` 필드가 없고 번호 개수0개였다. 정규화 단계에서 번호를 버린 경우와 구분된다. 같은 일회성 token을 공식 OAuth2Client.getTokenInfo로 조회한 결과 `user.phonenumbers.read` 실제 grant=true였다. 토큰/번호/계정 식별 원문은 출력·저장하지 않았다.
+- 결론/한계: 이번 재현의 신규 번호 미수신 원인은 Google PROFILE 데이터의 전화번호 미제공이다. 동의·scope grant·정상 HTTP 응답은 번호 데이터 존재를 보장하지 않는다. Google 계정이 왜 이 필드를 제공하지 않는지(계정 프로필/번호 용도 등)는 이번 응답만으로 확정하지 않는다. 테스트 계정에는 기존 저장 번호가 있어 transaction 완료 User.phone과 직렬화 phone은 존재했다. Google 수신 번호와 기존 DB 번호를 혼동하지 않는다. TestFlight 당시 요청 응답·가입 화면 미리 채움의 실제 실행값은 이번 로컬 재현과 별개이며 Flutter 응답 BP는 관측되지 않았다.
+- 정리/영향: 진단용 메모리에는 실제 권한 여부 boolean만 잠시 두고 즉시 삭제했다. 읽기 전용 localhost health 요청으로 비동기 권한 조회 완료를 확인했고HTTP200이었다. 이번에 만든 서버/Flutter BP를 모두 제거하고 사용자의 서버/앱 세션은 실행 상태로 유지했다. 제품 코드/DB 수동 SQL/콘솔 설정/배포는 변경하지 않았다. 사용자 로그인 자체의 기존 인증 transaction은 정상 진행했다. 추가 수정·테스트 대신 실제 BP/API 응답으로 원인을 확인했으며 원래 회귀 결과는 위 기록을 따른다.
+
+### [DONE] 로컬 Google 전화번호 확인용 BP 준비
+
+- 목적: 사용자 재현 시 Google 토큰 전달·People API 번호 반환·정규화·저장 응답·Flutter 수신 경계를 확인한다.
+- 변경/영향: 기존 로컬 디버그 세션에 BP만 설정한다. 제품 코드/DB/콘솔 설정을 변경하거나 앱을 다시 실행하지 않는다. 로그·문서에 토큰/번호 원문을 남기지 않는다.
+- 검증: 실제 소스 행과 BP 목록·연결된 디버그 세션을 확인한다. BP 준비 완료와 실계정 수신 검증 완료는 구분한다.
+- 롤백: 이번 Google 진단 BP만 제거하며 기존 다른 BP/세션을 보존한다.
+- 완료: 서버 `googleService.ts:235`(선택 token 유무), `:265`(People 응답), `:268`(외부 HTTP 오류), `:282`(정규화 결과)와 `authController.ts:183`(transaction 완료 사용자 phone)에 BP를 설정했다. Flutter `auth_remote_datasource.dart:109`에 서버 응답 BP를 설정하고 이전 조사에서 중복 생성한 동일 행 BP·불필요한 Repository BP를 정리했다.
+- 검증/다음: 서버 BP5개와 Flutter BP1개 목록을 확인했다. 로컬 서버 Node 디버그 세션과 iPhone `ShiftMate (debug local)` 세션 모두 실행 중이며 사용자 로그인 재현을 기다린다. 실제 token/People phone/저장·화면 반영은 아직 미검증이다. BP 설정·문서만 변경했으므로 제품 회귀 테스트를 추가 실행하지 않았다.
 
 ## 2026-11-13
 
@@ -100,7 +162,54 @@
 - 테스트: 서버 서비스/route/controller·인접 Flutter SDK 호출과 가이드·ADR-0024·schema.drawio/공개 흐름을 대조했다. Google 공식 문서의 Data Access 경로와 OIDC claim 의미를 확인했다. 문서 diff 공백 검사를 수행하며 제품 코드 변경이 없어 build/실행 테스트는 하지 않는다.
 - 롤백: 이번 조사로 추가한 문서 문단만 제거한다.
 
+### [DONE] 네이버 로그인 동의 항목 변경 분석 및 계획
+
+- 후속: 아래는 구현 전 조사 이력이다. 이후 같은 날짜의 네이버 구현·네이버/Google 병합 배포로 완료했으며 현재 계약은 ADR-0048과 OAUTH_API_GUIDE를 따른다.
+
+- 목적: 프로필 사진 동의 제거·전화번호 동의 추가에 맞춰 서버 변경 가능 여부와 구현 범위를 확인한다.
+- 변경/영향: 네이버 두 로그인 경로, 사용자 저장·프로필 완료·전화번호 제약과 공식 API 문서를 조사한다. 이번 범위는 분석/계획 및 문서 기록이며 제품 코드·DB·배포는 변경하지 않는다.
+- 파일: 기존 `_docs/WORKLOG.md`, `_docs/PROJECT_CONTEXT.md`에 결과를 기록한다. 기존 미커밋 변경은 보존한다.
+- 결과: 사진 누락은 현재도 허용되며 mobile은 타입 선언만 있고 실제 반환/저장이 없다. phone 컬럼·하이픈 정규화·unique/CHECK가 이미 있어 현재 코드 기준 migration은 불필요하다. 두 로그인 경로 공통 저장 함수, 신규/빈 번호 보완·기존 번호/사진 보존, 누락 시 프로필 입력 유지, 충돌409와 transaction 원자성, 가입 완료 정본 유지 및 Stage 인수 계획을 PROJECT_CONTEXT에 기록했다. 이는 미구현 제안이며 정책 확정 ADR은 구현 시 추가한다.
+- 테스트: 관련 서비스/controller/route·User/phone 유틸·DDL·schema/visibility 도면·인증/프로필 기존 테스트를 정적으로 대조했다. 네이버 공식 프로필 명세와 개발가이드의 mobile/선택 제공/재동의 계약을 확인했다. `git diff --check`를 통과했다. 제품 코드 변경이 없어 build·실행/회귀 테스트는 수행하지 않았다.
+- 롤백: 이번 분석 문서 추가분만 제거한다.
+- 다음: 개발자센터 실제 필수/추가 설정·기존 사용자 재동의와 실제 mobile 응답 형식을 구현 인수에서 확인한다. 운영 DB/Flutter 코드는 이번 조사에서 조회하지 않았다. 기존 사진 일괄 삭제·계정 연결 정책 변경은 별도 범위다. 현재 HEAD와 origin/develop의 이력 차이0인 기존 checkout을 유지했고 커밋/푸시/배포는 하지 않았다.
+
+### [DONE] Google 탈퇴 간헐 오류 로그 확인
+
+- 후속(2026-11-16): 서버 탈퇴 진행 오류 매핑은 d834bb8/ADR-0051로 보완했다. 당시 로그인500 두건의 실제 원인은 여전히 소급 확정하지 않는다.
+
+- 목적: 사용자가 현재 재현되지 않는다고 알려 서버 요청 도달 여부와 당시 로그로 원인을 좁힌다.
+- 변경/영향: 사용자가 운영 Release/TestFlight에서 발생했다고 확인했다. 캡처 00:54를 기준으로 운영 API 전체·탈퇴 worker의 2026-11-13 00:35~조회 시점 로그와 운영 탈퇴 요청의 상태/시각을 읽기 전용으로 조사했다. 실행 코드/운영 설정/사용자 데이터는 변경하지 않았다.
+- 결과(한국 시각): 00:54 전후 서버 탈퇴 요청은 없었다. 01:01:16·01:01:29·01:01:47·01:03:59의 DELETE /api/v1/auth/account 4건은 모두202였다. 조회 당시 첫 요청은01:01:18에 완료했고 나머지3건은PENDING/attempt0이었다. 접수202와 물리 삭제 완료는 별개다. 관측 시간대 API 로그 총량은 컨테이너별 약120줄로 tail6000 상한 미만이며 세 운영 API 로그 조회가 모두 성공했다.
+- 별도 관측: 01:02:29·01:02:50의 Google 로그인은500/INTERNAL_SERVER_ERROR,01:03:01에는 신규 로그인201이었다. 같은 request_id의 안전 오류 로그에는 Error/code=null/http_status=null만 있어 두500의 실제 원인을 확정할 수 없다. 운영 dist의 generateTokens는 비ACTIVE 사용자에 일반 Error(ACCOUNT_DELETION_IN_PROGRESS)를 던지고 Google 컨트롤러가500으로 매핑하는 경로가 있음을 직접 확인했다. 당시 두건과 그 경로의 연결/동일 사용자 여부는 미확정이다. worker가 유휴10분 대기하므로 접수 후PENDING이 관측될 수 있다.
+- 앱 로그/한계: 현재 Google SDK 실패를 서버에 전송하는 코드/과거 영속 수집기는 없으며 Dio 경로/상태와 서버 ApiException request_id만 콘솔에 출력한다. 연결 기기 목록은 확인했으나 iOS log collect는root를 요구하고 sudo -n도 암호가 필요해 수집하지 못했다. 권한 설정·앱 실행/설치·삭제 재시도는 하지 않았다. 따라서 Google400의 응답 body와 당시 token 상태·만료/폐기 원인은 여전히 확정하지 않는다. 현재 미재현은 앞선 로컬 수정의 실기기 적용/해결 증거가 아니다.
+- 검증: SSH/Docker 로그 조회exit0, 운영 코드 일부 읽기exit0, 식별자/이메일/token을 제외한 SQL SELECT를 BEGIN READ ONLY/3초timeout으로 실행해4개 시각/상태만 확인했다. sudo 없는 Docker 권한으로 읽었다. 문서diff 검사를 수행하며 코드 변경이 없어 build/회귀 테스트는 재실행하지 않았다.
+- 롤백: 이번 조사 문서 기록만 제거한다.
+- 다음: 원시 로그/요청ID·접속 정보는 공개 문서에 넣지 않고 저장소 밖 접근 제한 임시 디렉터리에 보관했다. 다음 발생 시 같은 기기/시각의 Google SDK 로그가 필요하다. Google 탈퇴와 내부 삭제의 경계·탈퇴 처리 중 재로그인500 매핑은 근거를 분리해 후속 검토한다. 이번 턴의 제품 코드·DB 변경/배포·커밋/푸시는 없다.
+
+### [DONE] Google 회원 탈퇴 iOS HTTP 400 조사 및 수정
+
+- 목적: Google SDK 연결 해제 오류로 회원 탈퇴가 중단되는 제보를 재현하고 수정한다.
+- 변경/영향: 서버 요청 이전 Google SDK 실패 전파와 UI 예외 원문 표시를 확인했다. Flutter iOS 세션 복원·필요 시 갱신/동일 계정 대조 후 해제, 세션 부재·불일치/원시 iOS400 재로그인 분기, 기타 SDK/미분류 탈퇴 오류의 사용자용 문구를 적용했다. Android 직접 해제·최근 전체 로그인·202 세션 정리·서버 실행 코드/DB/env는 보존한다. 기존 사전 해제 실패 우회 정책은 변경하지 않았다.
+- 파일: 인접 Flutter google_login_service.dart·auth_repository_impl.dart·auth_provider.dart와 기존 관련 테스트4개·PROJECT_CONTEXT/DECISIONS(ADR-0080)/WORKLOG. 서버는 이번 PROJECT_CONTEXT/WORKLOG만 추가했다. 신규 영구 파일은 없다. Flutter에는 origin/main만 있어 기존 main 기반 로컬 develop을 만들었고 서버는 origin/develop과 같은 기존 codex/private-events를 유지했다. 미커밋 작업은 보존했다.
+- 근거/재현: 설치된 google_sign_in7.2.0/google_sign_in_ios6.3.0/GIDSignIn.m의 disconnect는 현재/키체인 token을 선행 갱신 없이 revoke한다. lightweight authentication은 iOS restorePreviousSignIn으로 연결되어 token을 필요 시 갱신한다. 보관한 수정 전 실제 서비스에 동일 PlatformException을 주입해 원문 전파를 재현했다. 제보된 실제 Google 응답 body·token 상태는 미확인이므로 만료를 확정하지 않는다.
+- 테스트: 수정 전 probe1 pass, 수정 범위4파일44 pass, 인증 기능 전체111 pass/0 fail. Dart7개 분석 진단0건·format 변경0·범위 diff 검사 통과. 최초 불필요 import1건을 수정하고 재분석했다. DebugMCP는 테스트 중단점 대신 기존 release 구성을 실행해 중단점에 도달하지 못했고 즉시 stop/중단점 정리 후 no-session을 확인했다. 실제 Google 계정/실기기·서버 요청/배포 인수는 수행하지 않았다. 서버 제품 코드 변경이 없어 서버 build/DB suite는 재실행하지 않았다.
+- 롤백: 이번 Google 탈퇴 관련 변경과 문서 추가분만 되돌린다.
+- 결과/다음: 코드·문서·로컬 회귀 완료. 앱 반영에는 Flutter 재빌드/설치가 필요하며 로그인 직후/시간 경과/재실행 후 실제 탈퇴를 확인해야 한다. 커밋/푸시·Stage/운영 배포는 하지 않았다. 사본·모의 재현·테스트 로그는 /private/tmp/shiftmate_google_deletion_20261113에 보관한다.
+
 ## 2026-11-12
+
+### [DONE] 그룹 생성자 회원 탈퇴 후 그룹 정보 화면 실패 원인 분석
+
+- 후속(2026-11-16): 인접 Flutter 모델은 `String?`/`as String?`가 반영되어 있다. 이번 정리에서는 소스만 읽었으며 실기기/운영 적용은 확인하지 않았다. 서버 OpenAPI nullable 표기는 후속이다.
+
+- 목적: 소유권 자동 승계·캘린더 조회는 유지되지만 그룹 정보 화면만 실패하는 원인을 확인한다.
+- 변경/영향: 서버 탈퇴·상세 조회·DB FK와 Flutter 상세 파싱/오류 표시를 조사한다. 요청 범위는 원인 분석이며 제품 코드·DB·배포는 변경하지 않는다.
+- 파일: 결과를 WORKLOG/PROJECT_CONTEXT 및 기존 그룹 프론트 API 가이드에 기록한다.
+- 결과: 탈퇴 migration의 groups.created_by_user_id nullable/ON DELETE SET NULL, worker의 OWNER 승계 후 users 삭제, 서버 상세 null 반환과 Flutter의 non-null String 강제 변환 불일치를 확인했다. 최초 생성자와 현재 OWNER는 별도 값이다. 목록·캘린더는 생성자 ID를 파싱하지 않는다. 기존 프론트 가이드의 null=N 표를 Y로 정정했다. 새 설계 결정이 없어 ADR은 추가하지 않는다.
+- 테스트: 실제 Flutter group_models.dart를 import한 임시 Dart probe에서 문자열 생성자/OWNER 파싱 성공 → 생성자만 null로 변경하면 209행 TypeError 발생을 확인했다(exit 0). DebugMCP는 세션/중단점에 도달하지 못해 직접 Dart 실행으로 재현했으며 남은 세션/중단점 없음도 확인했다. 운영 DB/실응답·실기기 및 서버 DB 통합 테스트는 이번에 실행하지 않았다. 제품 코드 변경이 없어 build/전체 테스트는 재실행하지 않았다.
+- 롤백: 이번 조사 문서 항목만 되돌린다.
+- 다음: Flutter 필드 String?·파싱 as String? 및 null 응답/화면 회귀 검증, 서버 OpenAPI nullable 누락 보완. 이번 요청 범위인 원인 분석은 완료했으며 수정/커밋/푸시/배포는 미수행이다.
 
 ### [DONE] 그룹 비친구 근무표 Stage/운영 배포
 
@@ -187,7 +296,6 @@
 - **전체 회귀**: 최종 npm test **88 pass/17 fail/13 skip**. 별도 `origin/develop` 기준 4f452bf 원본 사본은 **82 pass/17 fail/14 skip**이며 실패 이름 17개가 동일하여 **신규 실패 0개**다. 기존 실패는 비공개 배포 파일·Apple Stage SQL 누락/가이드 문구 assertion이며 목표 밖 파일은 수정하지 않았다. skip 차이는 로컬 Git 제외 파일의 존재에 따른 기존 테스트 조건과 새 통합 opt-in 항목이다. 별도 lint 명령/설정은 없다.
 - **롤백**: private 행이 있으면 컬럼·타인 차단 view를 제거하지 않는다. 신규 private 생성만 중지하거나 private 호환 서버로 복구한다. 다운 migration은 제공하지 않는다.
 - **결과/다음**: `origin/develop`이 다른 worktree에서 사용 중이므로 이 checkout은 `codex/private-events`로 전환했다. 로컬 구현·검증 완료, commit/push·Stage/운영 DB 변경/배포·실사용자 인수·Flutter 활성화는 미수행이다. 이번 검증용 격리 테스트 컨테이너·네트워크는 제거했다. 서버 배포 시 백업/실제 view 확인 → add_event_privacy.sql → 서버 → A/B/C 권한별 인수 → 운영 인수 후 Flutter 활성화 순서로 진행한다.
-
 
 ## 2026-11-10
 
@@ -322,7 +430,6 @@
 - **롤백**: worker 정지 후 이전 코드 복구와 additive schema 유지. 삭제된 객체는 코드 롤백으로 복구되지 않음
 - **다음**: `_docs/PRIVACY_IMPLEMENTATION_REPORT.md` 전달 → 운영 담당자가 `_docs/PRIVACY_OPERATIONS_RUNBOOK.md`에 따라 Stage/Production 적용 증거와 SMTP 수신 검증. BE-05는 FE 합의 후 구현. PR·외부 전송 미수행
 
-
 ### [DONE] 고객지원·개인정보 페이지 홈서버 전달 준비
 
 - **목적**: 제공받은 HTML을 API와 분리된 Nginx 공개 경로에 배치할 수 있도록 전달 자료 준비
@@ -331,7 +438,6 @@
 - **테스트**: 두 HTML byte 단위 원본 일치, 개인정보 초안의 drafts 분리와 공개용 privacy.html 부재 확인. 실제 Nginx·HTTP/TLS·실기기 검증 미수행
 - **롤백**: 이번 전달 자료와 문서 항목 제거. 서버 적용 후에는 가이드의 백업 복구 절차 사용
 - **다음**: 실제 Nginx 설정 확인 및 운영 정책 확정 후 서버 적용
-
 
 ## 2026-08-26
 
