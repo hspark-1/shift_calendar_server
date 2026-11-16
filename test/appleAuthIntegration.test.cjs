@@ -196,8 +196,8 @@ if (process.env.RUN_APPLE_AUTH_INTEGRATION !== "true") {
       "utf8",
     );
     await sequelize.query(base_schema);
-    // 공용 기반 fixture에는 Google 컬럼이 없지만 현재 User 모델은 이를 조회한다.
-    await sequelize.query("ALTER TABLE users ADD COLUMN google_id text UNIQUE");
+    // 기반 fixture의 Google 컬럼 유무와 관계없이 현재 User 모델 조회를 지원한다.
+    await sequelize.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id text UNIQUE");
     await sequelize.query(`
       CREATE TABLE refresh_tokens (
         token_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

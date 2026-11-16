@@ -4,6 +4,15 @@
 
 ## 2026-11-16
 
+### [TODO] Apple 통합 fixture의 Google 컬럼 중복 초기화 보완
+
+- 목적/근거: main 병합 CI가 Apple before hook의 `column "google_id" of relation "users" already exists`로 중단되었다. 공개 기반 fixture에는 해당 컬럼이 없고 private 기반 fixture에는 이미 있어 동일 초기화 SQL이 충돌했다.
+- 변경/영향: Apple 테스트의 격리 users 컬럼 보완을 `ADD COLUMN IF NOT EXISTS`로 변경한다. 제품 인증 코드·DB migration·운영 데이터·fixture 정본은 변경하지 않는다.
+- 검증: 컬럼이 없는 공개 fixture와 있는 main fixture 각각에서 실제 PostgreSQL Apple 통합9개를 실행하고, main 전체 회귀·자동 CI를 재확인한다.
+- 공개 사전 결과: 전용 PostgreSQL16에서 Apple 통합9 pass/0 fail, CJS 구문·diff 검사 통과. main fixture/전체 CI는 다음 병합에서 확인한다. 원래 실패는 원격 CI before hook 로그와 양쪽 fixture DDL을 대조해 확인했으며 임시 제품 로그나 BP는 추가하지 않았다.
+- 롤백: 테스트의 조건부 초기화와 이 문서 추가분만 revert한다.
+
+
 ### [TODO] 보존된 조사 문서 정리 및 develop→main 병합·푸시
 
 - 목적: 사용자가 요청한 남은 Markdown 기록을 함께 보관하고 검증한 서버 인증 변경을 배포 main에 통합한다.
