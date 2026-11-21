@@ -12,7 +12,7 @@
           "Phone verification"
         ],
         "summary": "휴대폰 인증 challenge 생성",
-        "description": "서버 앱 세션 생성. SMS 발송은 Flutter Firebase SDK가 담당하며 서버는 발송 성공을 반환하지 않습니다. 최신 사용자 세션만 활성, 이전 증명도 취소. TTL600초.",
+        "description": "서버 앱 세션 생성. SMS 발송은 Flutter Firebase SDK가 담당하며 서버는 발송 성공을 반환하지 않습니다. 최신 사용자 세션만 활성, 이전 증명도 취소. TTL600초. 동일 key 재시도도 현재 유효한 세션만200. 취소400 PHONE_VERIFICATION_INVALID, 만료410 PHONE_CHALLENGE_EXPIRED, 소비409 PHONE_VERIFICATION_USED, proof 만료410 PHONE_VERIFICATION_EXPIRED, 현재 목적 불일치400 PHONE_VERIFICATION_PURPOSE_INVALID, 번호 점유409 PHONE_ALREADY_EXISTS를 재검사합니다. 앱은 확정 실패/잘못된 응답에서 key를 폐기하고 다음 시도에 새 key를 사용하며, 응답 유실·503·429에는 기존 key를 유지합니다. 오류 응답에서는 SDK SMS 발송을 시작하지 않습니다.",
         "security": [
           {
             "bearerAuth": []

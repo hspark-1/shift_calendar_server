@@ -69,6 +69,33 @@ else {
     const next=await challenge(current);assert.notEqual(next.challenge_id,first.challenge_id);
     await assert.rejects(service.verify(current.user_id,first.challenge_id,addToken(identity(phone)),key()),e=>e.code==='PHONE_VERIFICATION_INVALID');
   });
+  test('HTTP 응답 유실 뒤 취소/만료된 key는 거절하고 새 key는 새 세션으로 복구한다',async()=>{
+    for(const cancelled of [false,true]) {
+      const current=await user(),phone=newPhone(),request_key=key();const body={phone,purpose:'SIGNUP'};
+      const first=await request(current,'/auth/phone/challenges',body,request_key);assert.equal(first.status,200);
+      const generation=(await PhoneVerification.findByPk(first.body.data.challenge_id)).generation;
+      if(cancelled) await challenge(current,phone);
+      else await PhoneVerification.update({created_at:new Date(Date.now()-700000),expires_at:new Date(Date.now()-1000)},{where:{challenge_id:first.body.data.challenge_id}});
+      for(let attempt=0;attempt<2;attempt++) {
+        const rejected=await request(current,'/auth/phone/challenges',body,request_key);
+        assert.equal(rejected.status,cancelled?400:410);assert.equal(rejected.body.error.code,cancelled?'PHONE_VERIFICATION_INVALID':'PHONE_CHALLENGE_EXPIRED');assert.equal(rejected.body.data,undefined);
+      }
+      const replaced=await request(current,'/auth/phone/challenges',body,key());assert.equal(replaced.status,200);assert.notEqual(replaced.body.data.challenge_id,first.body.data.challenge_id);
+      assert.ok(BigInt((await PhoneVerification.findByPk(replaced.body.data.challenge_id)).generation)>BigInt(generation));
+      assert.ok((await PhoneVerification.findByPk(first.body.data.challenge_id)).cancelled_at);
+    }
+  });
+  test('challenge 재요청은 증명 소비/기한·현재 가입 목적·늦은 번호 점유를 재검사한다',async()=>{
+    const current=await user(),phone=newPhone(),request_key=key(),session=await challenge(current,phone,'SIGNUP',request_key);
+    await current.update({profile_completed_at:new Date()});await assert.rejects(challenge(current,phone,'SIGNUP',request_key),e=>e.code==='PHONE_VERIFICATION_PURPOSE_INVALID');await current.update({profile_completed_at:null});
+    const verified=await service.verify(current.user_id,session.challenge_id,addToken(identity(phone)),key());
+    await PhoneVerification.update({verified_at:new Date(Date.now()-400000),proof_expires_at:new Date(Date.now()-1000)},{where:{challenge_id:session.challenge_id}});
+    await assert.rejects(challenge(current,phone,'SIGNUP',request_key),e=>e.code==='PHONE_VERIFICATION_EXPIRED');
+    await PhoneVerification.update({verified_at:new Date(),proof_expires_at:new Date(Date.now()+300000)},{where:{challenge_id:session.challenge_id}});
+    await save(current,{phone,phone_verification_token:verified.phone_verification_token});await assert.rejects(challenge(current,phone,'SIGNUP',request_key),e=>e.code==='PHONE_VERIFICATION_USED');
+    const pending=await user(),pending_phone=newPhone(),pending_key=key();await challenge(pending,pending_phone,'SIGNUP',pending_key);await user({phone:pending_phone.replace(/^(\d{3})(\d{4})(\d{4})$/,'$1-$2-$3')});
+    await assert.rejects(challenge(pending,pending_phone,'SIGNUP',pending_key),e=>e.code==='PHONE_ALREADY_EXISTS');
+  });
   test('verify는 User를 변경하지 않고 refresh 문자열에도 동일 proof/기한을 복구한다',async()=>{
     const current=await user(),phone=newPhone(),session=await challenge(current,phone),value=identity(phone),request_key=key();
     const first=await service.verify(current.user_id,session.challenge_id,addToken(value),request_key);

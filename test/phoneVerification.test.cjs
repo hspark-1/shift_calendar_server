@@ -69,3 +69,25 @@ test('서버 secret은 용도별 HMAC을 분리하고 API emulator/잘못된 설
   assert.equal(parseIdempotencyKey(crypto.randomUUID()).length,36);
   for (const value of [null,'','bad',[]]) assert.throws(()=>parseIdempotencyKey(value));
 });
+
+test('기존 challenge key 복구는 취소·만료·소비·현재 목적·번호 중복을 재검사한다', async () => {
+  const { sequelize }=require('../dist/config/database');
+  const { User, PhoneVerification }=require('../dist/models');
+  const { PhoneVerificationService }=require('../dist/services/phoneVerificationService');
+  const original={transaction:sequelize.transaction,user:User.findByPk,owner:User.findOne,challenge:PhoneVerification.findOne};
+  const user_id=crypto.randomUUID(),request_key=crypto.randomUUID(),now=Date.now();
+  const session={challenge_id:crypto.randomUUID(),user_id,purpose:'SIGNUP',phone:'010-1234-5678',phone_e164:'+821012345678',generation:'1',created_at:new Date(now-1000),expires_at:new Date(now+600000),cancelled_at:null,verified_at:null,consumed_at:null,fingerprint_key_version:'v1',challenge_fingerprint:phoneDigest('challenge-request',['+821012345678','SIGNUP'],'v1')};
+  let current_user={user_id,account_status:'ACTIVE',profile_completed_at:null},existing=session,owner=null;
+  const transaction={LOCK:{UPDATE:'UPDATE'}};
+  sequelize.transaction=async callback=>callback(transaction);User.findByPk=async()=>current_user;User.findOne=async()=>owner;PhoneVerification.findOne=async()=>existing;
+  const service=new PhoneVerificationService({async verify(){throw new Error('Firebase must not be called');}});
+  const retry=()=>service.createChallenge(user_id,{phone:'01012345678',purpose:'SIGNUP'},request_key);
+  try {
+    const restored=await retry();assert.equal(restored.challenge_id,session.challenge_id);assert.equal(restored.expires_at,session.expires_at.toISOString());
+    for(const [patch,code,status]of [[{cancelled_at:new Date()},'PHONE_VERIFICATION_INVALID',400],[{expires_at:new Date(now-1)},'PHONE_CHALLENGE_EXPIRED',410],[{consumed_at:new Date()},'PHONE_VERIFICATION_USED',409],[{verified_at:new Date(now-1000),proof_expires_at:new Date(now-1)},'PHONE_VERIFICATION_EXPIRED',410]]) {
+      existing={...session,...patch};await assert.rejects(retry(),error=>error.code===code&&error.status_code===status);
+    }
+    existing=session;current_user={...current_user,profile_completed_at:new Date()};await assert.rejects(retry(),error=>error.code==='PHONE_VERIFICATION_PURPOSE_INVALID');
+    current_user={...current_user,profile_completed_at:null};owner={user_id:crypto.randomUUID()};await assert.rejects(retry(),error=>error.code==='PHONE_ALREADY_EXISTS');
+  } finally {sequelize.transaction=original.transaction;User.findByPk=original.user;User.findOne=original.owner;PhoneVerification.findOne=original.challenge;}
+});

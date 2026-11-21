@@ -36,7 +36,7 @@ JSON/multipart 모두 proof를 받으며 기존 `profile_image` 파일 1개/5MB�
 
 기존 프로세스별 authRateLimit도 적용한다. 신규 공통 제한은 PostgreSQL UPSERT/transaction이므로 Redis 캐시 flag/재시작과 독립이며 모든 API 인스턴스가 공유한다. 실패·재시도도 카운터에 포함하고 초과 시429 PHONE_VERIFICATION_RATE_LIMITED + Retry-After/오류 retry_after_seconds를 반환한다. 고정 구간 경계에서 순간 요청이 늘 수 있으므로 rolling window/SMS 비용 한도로 해석하지 않는다. DB 제한 처리 장애는503이며 무제한 fallback하지 않는다.
 
-challenge/verify 각각 `(user_id, operation, key)`에 대해 복구한다. challenge는 기존 ID/기한을 그대로 반환해 만료를 연장하지 않는다. verify fingerprint는 검증된 project/uid/auth_time/번호/challenge이며 token 문자열 refresh를 새 이벤트로 취급하지 않는다. 만료·취소·소비된 proof는 재발급하지 않는다.
+challenge/verify 각각 `(user_id, operation, key)`에 대해 복구한다. challenge는 **현재도 유효한 세션에만** 기존 ID/기한을 그대로 반환해 만료를 연장하지 않는다. 기존 key의 fingerprint를 확인한 뒤 동일 User→challenge 잠금 안에서 취소/만료/소비·proof 기한·현재 가입 목적·번호 점유를 재검사한다. 취소400 PHONE_VERIFICATION_INVALID, 세션 만료410 PHONE_CHALLENGE_EXPIRED, 증명 만료410 PHONE_VERIFICATION_EXPIRED, 소비409 PHONE_VERIFICATION_USED, 현재 목적 불일치400 PHONE_VERIFICATION_PURPOSE_INVALID, 번호 점유409 PHONE_ALREADY_EXISTS는200으로 복구하지 않는다. 앱은 이러한 확정 실패와 IDEMPOTENCY_KEY_REUSED/PHONE_VERIFICATION_INVALID_RESPONSE에서 요청 key를 폐기하고 다음 사용자 시도에 새 key를 발급한다. 응답 유실·일시적 네트워크/503·429 재시도는 같은 key를 유지한다. 오류 응답에서는 Firebase SDK 발송을 시작하지 않는다. verify fingerprint는 검증된 project/uid/auth_time/번호/challenge이며 token 문자열 refresh를 새 이벤트로 취급하지 않는다. 만료·취소·소비된 proof는 재발급하지 않는다.
 
 프로필 영수증은 `(user_id,key)` PK + operation + 정규화한 필드/사진 SHA-256·MIME/확장자/proof의 HMAC fingerprint를 보관한다. 같은 key에 다른 본문·작업은409 IDEMPOTENCY_KEY_REUSED다. 같은 key의 commit 결과는 재저장/재업로드 없이 **최신 본인 프로필**을 응답한다. 최소24시간 복구를 지원하며 정리 이후 복구는 보장하지 않는다. 동일 번호라도 소비된 proof가 포함된 새 key는409 PHONE_VERIFICATION_USED다. proof를 보내지 않은 동일 번호/타 필드 편집은 계속 허용한다.
 

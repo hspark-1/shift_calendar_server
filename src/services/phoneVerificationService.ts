@@ -90,9 +90,15 @@ export class PhoneVerificationService {
     return sequelize.transaction(async (transaction) => {
       const user = await User.findByPk(user_id, { transaction, lock: transaction.LOCK.UPDATE });
       assertPhoneAccount(user);
-      const existing = await PhoneVerification.findOne({ where: { user_id, challenge_key: key }, transaction });
+      const existing = await PhoneVerification.findOne({ where: { user_id, challenge_key: key }, transaction, lock: transaction.LOCK.UPDATE });
       if (existing) {
         if (!equalDigest(existing.challenge_fingerprint, phoneDigest("challenge-request", payload, existing.fingerprint_key_version))) throw new PhoneVerificationError(409, "IDEMPOTENCY_KEY_REUSED");
+        // Recover only a usable session. A prior key must never revive an old flow.
+        assertLive(existing);
+        if (existing.consumed_at) throw new PhoneVerificationError(409, "PHONE_VERIFICATION_USED");
+        if (existing.verified_at) assertLive(existing, true);
+        assertPurpose(user, existing.purpose);
+        await assertPhoneAvailable(existing.phone, user_id, transaction);
         return challengeResponse(existing);
       }
       assertPurpose(user, purpose);
