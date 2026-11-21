@@ -23,13 +23,19 @@
 - 검증: strict build·실제 SDK RSA 포함 단위6 pass, 실제 PostgreSQL/Express 통합21 pass(기존19+새 HTTP 취소/만료→오류→새 key 재시작 및 목적/소비/기한/번호 경합2개). 계약 가이드·PROJECT_CONTEXT·OpenAPI에 확정 실패/일시 실패의 앱 key 처리 계약을 추가했다. 운영 DB에 이 회귀를 실행하지 않았다.
 - 범위: 앱의 _sendFailed가 key를 유지하는 별도 문제도 코드로 확인했다. 서버의 오류 응답만으로 앱 내부 key를 폐기할 수는 없으며 사용자는 서버만 수정하고 앱 수정 사항을 전달하도록 범위를 확정했다. Flutter 제품 코드는 변경하지 않으며 계약 가이드의 앱 전달 절에 오류별 key 폐기·유지 및 회귀 요청을 정리한다.
 
-### [TODO] develop 푸시·main 병합 및 Firebase 번호 인증 배포
+### [DONE] develop 푸시·main 병합 및 Firebase 번호 인증 배포
 
 - 목적: 사용자 요청에 따라 검증한 번호 인증 구현을 공개 develop에 푸시하고 비공개 main에 실제 병합해 배포한다.
 - 변경/영향: API·기존 worker의 신규 DB schema/환경·secret mount·CI 검증을 먼저 준비한다. 실제 환경별 Firebase project/ADC 권한과 additive migration 상태를 확인하고 배포 중 기존 데이터를 보존한다.
 - 검증: 병합본 build/회귀·CI·환경별 DB 사전/사후 검사·API/worker readiness·무인증/증명 누락 거절을 확인한다. 실문자/앱 인수는 수행 여부를 구분한다.
 - 롤백: 기존 서비스/이미지 상태와 DB 백업을 확보하고 신규 데이터/영수증을 보존한 forward recovery를 우선한다. 인증 검사를 해제하지 않는다. 상세 배포 식별자·운영 정보는 비공개 main 문서에만 남긴다.
 - 다음: 원격 최신 상태·배포 topology와 설정 준비를 확인한다.
+
+- 완료: 번호 인증 구현·취소/만료 재시도 수정·앱 인계·탈퇴 사진 차단 테스트 보완을 origin/develop에 push하고 비공개 deploy/main에 실제 병합/푸시했다. 전체 CI의 단위214·캐시/공급자/프로필/탈퇴·개인정보 통합·phone PostgreSQL21·공식 Auth Emulator2·배포 preflight/monitor 검증과 이미지 빌드·Stage/운영 배포가 성공했다.
+- 배포 검증: 두 환경 API/worker10개가 동일한 새 이미지로 healthy이며, 외부 health/ready 모두200/success=true, 무인증 phone challenge/verify·profile complete는401/no-store였다. 실제 컨테이너에서 핵심 compiled 코드3개 해시·Firebase project/ADC·HMAC 환경 검증·신규 schema 준비를 확인했다. 운영 사용자를 생성하거나 실제 SMS를 보내지 않았다.
+- DB/복구: 서버 내 DB 백업을 검증하고 환경별 설정/secret 준비·additive migration을 적용했다. 기존 phone/완료 이력의 backfill·seed·destructive 초기화는 없다. 인증 정책/영수증·신규 데이터는 보존하고 수정판으로 복구한다. 실제 운영 식별자·환경·백업 위치는 비공개 WORKLOG에만 기록한다.
+- 앱/한계: 사용자 확정에 따라 Flutter 파일은 변경하지 않았다. 앱의 만료/취소 등 확정 오류 시 challenge 요청 key 폐기, 일시적503/429/응답 유실 시 유지 계약과 회귀6개를 FIREBASE_PHONE_AUTH_SERVER_GUIDE.md의 앱 전달 절에 기록했다. 실제 SMS·iOS/Android 실기기 인수·개인정보/외부 phone-only 보관 정책 인수는 자동 테스트/서버 배포 완료와 구분한다.
+- 정리: 이번 후속 로컬 검증 전용 PostgreSQL3개/Redis·S3 emulator를 종료했다. 완료 문서는 공개 develop→비공개 main에 [skip ci]로 병합해 불필요한 재배포를 생략한다. 아래 최초 구현 당시 미배포 기록보다 이 완료 결과를 우선한다.
 
 ### [DONE] Firebase Phone Auth 증명과 프로필 저장 원자성 구현
 

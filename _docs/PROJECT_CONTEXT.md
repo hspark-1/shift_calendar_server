@@ -10,7 +10,7 @@
 - API는 전용 `PHONE_AUTH_FIREBASE_PROJECT_ID`/HMAC 키 파일/ADC를 push flag와 독립 검증한다. 모든 실제 API에서 Auth Emulator 설정을 거부한다. SDK13.10.0의 cert fetch argument-error도503으로 구분한다. 기존 auth DB 조회 장애를 JWT401로 오분류하지 않는다.
 - 미완료 계정은 auth·health·앱 정책·아바타 조회·push 등록을 허용하고 calendar/schedule/friend/group 업무 API는 PROFILE_SETUP_REQUIRED로 차단한다. 일반 편집에서 미완료 phone 저장도 차단한다. 친구 검색/그룹의 전화·인증 필드 비노출은 유지한다.
 - 신규 파일별 **역할·의존성·사용 예**, API·오류·환경변수·키 회전·보관/탈퇴·정방향 migration·보호형 rollback·검증 재현과 Stage/개인정보/phone-only 계정 정리 인수는 [FIREBASE_PHONE_AUTH_SERVER_GUIDE.md](FIREBASE_PHONE_AUTH_SERVER_GUIDE.md)를 따른다. 아래 과거 프로필 완료 멱등/무증명 편집 설명보다 이 절이 우선한다.
-- 코드·문서 로컬 구현이며 실제 Stage/운영 project/console/IAM·DB 적용·배포·실문자·Flutter 변경은 별도 인수다. 인증 가능한 수정판으로 복구하며 인증 검사 해제로 rollback하지 않는다.
+- **서버 배포 완료(2026-11-21)**: develop→비공개 main 실제 병합 후 전체 CI·이미지 빌드·Stage/운영 배포를 완료했다. 환경별 project/ADC/Auth 조회·Phone provider/KR 제한/테스트 번호0개·HMAC 준비, 백업 후 additive migration을 확인했다. 양 환경 API/worker10개 healthy·readiness200·무인증 phone/가입401/no-store·실행 코드 해시 일치를 검증했다. 실제 SMS·실기기/개인정보·외부 phone-only 보관 인수는 후속이며 Flutter는 사용자 요청대로 수정하지 않았다. 앱 요청 key 처리 계약은 가이드의 앱 전달 절을 따른다. 인증 가능한 수정판으로 복구하며 인증 검사 해제로 rollback하지 않는다.
 
 ## 소셜 로그인 서버 변경·보존 문서 main 통합 완료 (2026-11-16)
 
