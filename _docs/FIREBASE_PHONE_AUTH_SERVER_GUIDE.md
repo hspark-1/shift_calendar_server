@@ -40,6 +40,24 @@ challenge/verify 각각 `(user_id, operation, key)`에 대해 복구한다. chal
 
 프로필 영수증은 `(user_id,key)` PK + operation + 정규화한 필드/사진 SHA-256·MIME/확장자/proof의 HMAC fingerprint를 보관한다. 같은 key에 다른 본문·작업은409 IDEMPOTENCY_KEY_REUSED다. 같은 key의 commit 결과는 재저장/재업로드 없이 **최신 본인 프로필**을 응답한다. 최소24시간 복구를 지원하며 정리 이후 복구는 보장하지 않는다. 동일 번호라도 소비된 proof가 포함된 새 key는409 PHONE_VERIFICATION_USED다. proof를 보내지 않은 동일 번호/타 필드 편집은 계속 허용한다.
 
+## 앱 전달: challenge 요청 key 재시작 계약 (2026-11-21)
+
+이번 후속 작업은 서버만 수정한다는 사용자 범위 확인에 따른다. Flutter 제품 코드는 변경하지 않았다. 앱 담당자는 `PhoneVerificationController.sendCode`의 `_send_key`를 아래 기준으로 처리한다.
+
+| 결과 | 요청 key | 다음 동작 |
+| --- | --- | --- |
+| 응답 유실/네트워크 timeout,503 PHONE_VERIFICATION_UNAVAILABLE | 유지 | 같은 body/key로 commit 결과 복구. SDK 발송은 아직 시작하지 않음 |
+| 429 PHONE_VERIFICATION_RATE_LIMITED / AUTH_RATE_LIMIT_EXCEEDED | 유지 | Retry-After 대기 후 동일 요청 복구 |
+| 410 PHONE_CHALLENGE_EXPIRED / PHONE_VERIFICATION_EXPIRED | 폐기 | idle/재인증 안내. 다음 사용자 시도에서 새 UUID key 생성 |
+| 400 PHONE_VERIFICATION_INVALID / PHONE_VERIFICATION_PURPOSE_INVALID | 폐기 | 취소/목적 변경 안내. 목적 불일치는 최신 프로필 상태도 확인 |
+| 409 PHONE_VERIFICATION_USED / IDEMPOTENCY_KEY_REUSED / PHONE_ALREADY_EXISTS | 폐기 | 소비/입력 충돌 안내 후 올바른 새 시도. 번호/가입 상태 오류는 먼저 해결 |
+| PHONE_VERIFICATION_INVALID_RESPONSE | 폐기 | 잘못된 DTO·지난 expires_at을 성공 세션으로 사용하지 않고 다음 시도 새 key |
+| 200 유효 challenge | 기존 로직대로 요청 key 종료 | 번호/목적/E.164·상대 TTL 검증 후에만 Firebase session/requestCode 진행 |
+
+`_sendFailed`에서 확정 실패의 `_send_key`를 null로 바꾸고, 실패한 challenge/session/기한은 정리한다. 네트워크 오류와 확정 오류를 모두 같은 방식으로 지우면 응답 유실의 정상 멱등 복구를 잃으므로 구분한다. 기존 사용자 입력/화면 상태·재발송 대기·dispose/generation 보호는 유지한다. 저장 영수증에 쓰는 profile mutation key와 challenge `_send_key`는 별개다. 이 수정 때문에 성공한 저장 요청 key를 새로 발급하면 안 된다.
+
+앱 회귀 요청: (1) challenge commit 후 응답 유실→같은 key 정상 복구, (2) 응답 유실→만료410→다음 클릭 새 key/새 ID, (3) 응답 유실→다른 세션 생성으로 취소400→SDK requestCode0회→다음 클릭 새 key, (4) 잘못된 DTO→새 key, (5)503/429→동일 key·SDK0회, (6) 정상 가입/번호 변경/사진·동일 저장 재시도 유지. 서버는 단위6개/실제 DB·HTTP21개에서 대응 계약을 확인했다. 실문자 인수는 별도다.
+
 ## Firebase와 DB 경계
 
 API 전용 named Admin app `shiftmate-phone-auth-{project}`를 ADC로 초기화한다. push worker flag와 무관하게 API 시작 시 project/키 파일/시간 설정을 검사하고 신규 DB schema도 확인한다. `getAuth(app).verifyIdToken(token,true)`로 서명/aud/iss/exp와 폐기·비활성 사용자를 확인한다. Firebase phone provider·비어 있지 않은 일치 sub/uid·번호·auth_time/iat/exp를 추가 검증하며 tenant 토큰은 지원하지 않는다. iat refresh로 auth_time freshness를 대체하지 않는다.

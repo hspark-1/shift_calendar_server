@@ -13,7 +13,7 @@
 - 다음: 수정·검증·문서 갱신 후 진행 중인 비공개 main 병합/배포에 반영한다.
 - 결과: 수정 전 회귀에서 취소된 요청이 정상 응답되어 Missing expected rejection을 확인했다. 기존 key를 찾을 때 challenge UPDATE lock을 추가하고 fingerprint 확인 뒤 활성/만료·소비·proof 기한·현재 목적·번호 점유를 재검사한다. 새 migration/키/기한 변경은 없다. 정상 ID/원래 기한과 프로필 저장 영수증 재시도는 유지한다.
 - 검증: strict build·실제 SDK RSA 포함 단위6 pass, 실제 PostgreSQL/Express 통합21 pass(기존19+새 HTTP 취소/만료→오류→새 key 재시작 및 목적/소비/기한/번호 경합2개). 계약 가이드·PROJECT_CONTEXT·OpenAPI에 확정 실패/일시 실패의 앱 key 처리 계약을 추가했다. 운영 DB에 이 회귀를 실행하지 않았다.
-- 범위: 앱의 _sendFailed가 key를 유지하는 별도 문제도 코드로 확인했다. 서버의 오류 응답만으로 앱 내부 key를 폐기할 수는 없으며 앱 동반 수정 여부를 확인 중이다. 서버 수정은 배포 병합에 우선 반영한다.
+- 범위: 앱의 _sendFailed가 key를 유지하는 별도 문제도 코드로 확인했다. 서버의 오류 응답만으로 앱 내부 key를 폐기할 수는 없으며 사용자는 서버만 수정하고 앱 수정 사항을 전달하도록 범위를 확정했다. Flutter 제품 코드는 변경하지 않으며 계약 가이드의 앱 전달 절에 오류별 key 폐기·유지 및 회귀 요청을 정리한다.
 
 ### [TODO] develop 푸시·main 병합 및 Firebase 번호 인증 배포
 
