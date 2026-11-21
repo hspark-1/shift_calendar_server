@@ -170,7 +170,7 @@
             "type": "object",
             "required": ["user", "access_token", "refresh_token", "expires_at", "is_new_user", "requires_profile_setup"],
             "properties": {
-              "user": { "type": "object", "additionalProperties": true },
+              "user": { "allOf": [{ "$ref": "#/components/schemas/OwnProfile" }], "additionalProperties": true },
               "access_token": { "type": "string", "writeOnly": true },
               "refresh_token": { "type": "string", "writeOnly": true },
               "expires_at": { "type": "integer", "format": "int64", "description": "Unix epoch milliseconds" },

@@ -1,0 +1,453 @@
+{
+  "tags": [
+    {
+      "name": "Phone verification",
+      "description": "Firebase SMS/자동 인증 결과 검증. 기존 ShiftMate JWT 유지. 서버 한도는 SMS 비용 전체를 제한하지 않습니다. PostgreSQL UTC 고정 window: 사용자/IP challenge10/30회·시간, exchange30/100회·10분. 실패 시 무제한 fallback 없음."
+    }
+  ],
+  "paths": {
+    "/auth/phone/challenges": {
+      "post": {
+        "tags": [
+          "Phone verification"
+        ],
+        "summary": "휴대폰 인증 challenge 생성",
+        "description": "서버 앱 세션 생성. SMS 발송은 Flutter Firebase SDK가 담당하며 서버는 발송 성공을 반환하지 않습니다. 최신 사용자 세션만 활성, 이전 증명도 취소. TTL600초.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "성공 (Cache-Control: private, no-store)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneChallengeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_PHONE / PHONE_VERIFICATION_PURPOSE_INVALID / PHONE_FIREBASE_TOKEN_INVALID / PHONE_VERIFICATION_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PHONE_ALREADY_EXISTS / PHONE_FIREBASE_AUTH_REUSED / IDEMPOTENCY_KEY_REUSED / ACCOUNT_DELETION_IN_PROGRESS / PHONE_VERIFICATION_USED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "PHONE_FIREBASE_AUTH_TOO_OLD / PHONE_CHALLENGE_EXPIRED / PHONE_VERIFICATION_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "PHONE_VERIFICATION_RATE_LIMITED / AUTH_RATE_LIMIT_EXCEEDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "재시도 대기 초"
+              }
+            }
+          },
+          "503": {
+            "description": "PHONE_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/phone/verify": {
+      "post": {
+        "tags": [
+          "Phone verification"
+        ],
+        "summary": "Firebase 인증을 저장용 증명으로 교환",
+        "description": "ShiftMate Bearer JWT + body Firebase ID token. Admin verifyIdToken(token,true), phone provider/project/번호/auth_time 검증. 전 사용자 project+uid+auth_time 이벤트의 HMAC을 일회성 claim. Firebase 호출 중 DB transaction 없음. 증명 TTL300초, Firebase auth freshness300초/clock skew5초. 같은 key의 token refresh는 동일 논리 이벤트로 복구하며 만료/취소/소비된 증명은 재발급하지 않습니다.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneVerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "성공 (Cache-Control: private, no-store)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneProofResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_PHONE / PHONE_VERIFICATION_PURPOSE_INVALID / PHONE_FIREBASE_TOKEN_INVALID / PHONE_VERIFICATION_INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PHONE_ALREADY_EXISTS / PHONE_FIREBASE_AUTH_REUSED / IDEMPOTENCY_KEY_REUSED / ACCOUNT_DELETION_IN_PROGRESS / PHONE_VERIFICATION_USED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "PHONE_FIREBASE_AUTH_TOO_OLD / PHONE_CHALLENGE_EXPIRED / PHONE_VERIFICATION_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "PHONE_VERIFICATION_RATE_LIMITED / AUTH_RATE_LIMIT_EXCEEDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "재시도 대기 초"
+              }
+            }
+          },
+          "503": {
+            "description": "PHONE_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PhoneChallengeRequest": {
+        "type": "object",
+        "required": [
+          "phone",
+          "purpose"
+        ],
+        "properties": {
+          "phone": {
+            "type": "string",
+            "example": "01012345678",
+            "description": "국내01[016789] 10~11자리 또는 기존 하이픈 형식. 해외/+82010 거절."
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "SIGNUP",
+              "PHONE_CHANGE"
+            ]
+          }
+        }
+      },
+      "PhoneVerifyRequest": {
+        "type": "object",
+        "required": [
+          "challenge_id",
+          "firebase_id_token"
+        ],
+        "properties": {
+          "challenge_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "firebase_id_token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true
+          }
+        }
+      },
+      "PhoneChallengeResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data",
+          "request_id"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "phone",
+              "purpose",
+              "server_now",
+              "expires_at",
+              "challenge_id",
+              "phone_e164"
+            ],
+            "properties": {
+              "phone": {
+                "type": "string",
+                "example": "01012345678"
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "SIGNUP",
+                  "PHONE_CHANGE"
+                ]
+              },
+              "server_now": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "challenge_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "phone_e164": {
+                "type": "string",
+                "example": "+821012345678"
+              }
+            }
+          },
+          "request_id": {
+            "type": "string"
+          }
+        }
+      },
+      "PhoneProofResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data",
+          "request_id"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "phone",
+              "purpose",
+              "server_now",
+              "expires_at",
+              "phone_verification_token"
+            ],
+            "properties": {
+              "phone": {
+                "type": "string",
+                "example": "01012345678"
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "SIGNUP",
+                  "PHONE_CHANGE"
+                ]
+              },
+              "server_now": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "phone_verification_token": {
+                "type": "string"
+              }
+            }
+          },
+          "request_id": {
+            "type": "string"
+          }
+        }
+      },
+      "PhoneErrorResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "error",
+          "request_id"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "INVALID_PHONE",
+                  "PHONE_VERIFICATION_PURPOSE_INVALID",
+                  "PHONE_FIREBASE_TOKEN_INVALID",
+                  "PHONE_VERIFICATION_INVALID",
+                  "UNAUTHORIZED",
+                  "PHONE_ALREADY_EXISTS",
+                  "PHONE_FIREBASE_AUTH_REUSED",
+                  "IDEMPOTENCY_KEY_REUSED",
+                  "ACCOUNT_DELETION_IN_PROGRESS",
+                  "PHONE_VERIFICATION_USED",
+                  "PHONE_FIREBASE_AUTH_TOO_OLD",
+                  "PHONE_CHALLENGE_EXPIRED",
+                  "PHONE_VERIFICATION_EXPIRED",
+                  "PHONE_VERIFICATION_RATE_LIMITED",
+                  "AUTH_RATE_LIMIT_EXCEEDED",
+                  "PHONE_VERIFICATION_UNAVAILABLE"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "retry_after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "request_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

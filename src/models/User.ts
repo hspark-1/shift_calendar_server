@@ -19,6 +19,7 @@ interface UserAttributes {
   job_type?: string | null;
   workplace?: string | null;
   profile_completed_at?: Date | null;
+  phone_verified_at?: Date | null;
   created_at?: Date;
   account_status?: "ACTIVE" | "DELETION_PENDING";
   deletion_requested_at?: Date | null;
@@ -40,6 +41,7 @@ interface UserCreationAttributes
     | "job_type"
     | "workplace"
     | "profile_completed_at"
+    | "phone_verified_at"
     | "created_at"
     | "account_status"
     | "deletion_requested_at"
@@ -64,6 +66,7 @@ class User
   declare job_type: string | null | undefined;
   declare workplace: string | null | undefined;
   declare profile_completed_at: Date | null | undefined;
+  declare phone_verified_at: Date | null | undefined;
   declare created_at: Date | undefined;
   declare account_status: "ACTIVE" | "DELETION_PENDING";
   declare deletion_requested_at: Date | null | undefined;
@@ -85,6 +88,7 @@ class User
     return {
       ...(values as Omit<UserAttributes, "password" | "profile_completed_at" | "profile_image_key">),
       requires_profile_setup: this.profile_completed_at == null,
+      phone_verified_at: this.phone_verified_at ?? null,
     };
   }
 }
@@ -169,6 +173,10 @@ User.init(
       allowNull: true,
     },
     profile_completed_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    phone_verified_at: {
       type: DataTypes.DATE,
       allowNull: true,
     },

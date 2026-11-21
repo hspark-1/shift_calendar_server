@@ -27,6 +27,7 @@ import {
 import { authRateLimitMiddleware } from "../middlewares/rateLimit";
 import { validateRequestMiddleware } from "../middlewares/validateRequest";
 import { profileImageUploadMiddleware } from "../middlewares/profileImageUpload";
+import { createPhoneChallenge, verifyPhoneChallenge } from "../controllers/phoneVerificationController";
 
 const router = Router();
 
@@ -304,6 +305,13 @@ router.post(
 );
 
 // ===== 공통 =====
+
+router.post("/phone/challenges", authRateLimitMiddleware, authMiddleware,
+  [body("phone").isString().isLength({ min: 10, max: 13 }), body("purpose").isString()],
+  validateRequestMiddleware, createPhoneChallenge);
+router.post("/phone/verify", authRateLimitMiddleware, authMiddleware,
+  [body("challenge_id").isUUID(), body("firebase_id_token").isString().isLength({ min: 1, max: 16384 })],
+  validateRequestMiddleware, verifyPhoneChallenge);
 
 // 토큰 갱신
 router.post(

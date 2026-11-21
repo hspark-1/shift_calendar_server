@@ -35,6 +35,7 @@ import {
   accountDeletionProviderService,
 } from "../services/accountDeletionProviderService";
 import { purgeDeletedUserWorkShiftCache } from "../services/workShiftMonthCacheService";
+import { cleanupPhoneVerificationData } from "../services/phoneVerificationService";
 import { logError } from "../utils/logger";
 import { processProfileImageCleanupBatch } from "../services/profileImageCleanupService";
 
@@ -317,6 +318,9 @@ async function runHealthCheck(): Promise<void> {
     await checkDatabaseConnection();
     await sequelize.query("SELECT worker_name, last_seen_at FROM privacy_worker_heartbeats LIMIT 0");
     await sequelize.query("SELECT object_key, storage_fingerprint, next_attempt_at FROM profile_image_cleanup_tasks LIMIT 0");
+    for (const table of ["phone_verifications", "profile_mutation_receipts", "phone_verification_events", "phone_verification_rate_limits"]) {
+      await sequelize.query(`SELECT 1 FROM ${table} LIMIT 0`);
+    }
     if (isAccountDeletionWorkerEnabled()) {
       await Promise.all([
         sequelize.query(
@@ -362,6 +366,7 @@ async function runWorker(): Promise<void> {
   while (!is_stopping) {
     try {
       await processProfileImageCleanupBatch();
+      await cleanupPhoneVerificationData();
       if (!isAccountDeletionWorkerEnabled()) {
         await waitForNextPoll(poll_ms);
         continue;

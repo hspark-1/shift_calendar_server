@@ -1,10 +1,12 @@
 import { Transaction } from "sequelize";
+import { createHash } from "node:crypto";
 import { User } from "../models";
 import { withAccountDataLock } from "../utils/accountDataLock";
 import { logError } from "../utils/logger";
 import { ProfileImage, createProfileImageKey, uploadProfileImage } from "./profileImageStorageService";
 import { cancelProfileImageCleanup, cleanupProfileImagesForLockedAccount, enqueueProfileImageCleanup } from "./profileImageCleanupService";
-import { completeProfile, ProfileError, updateProfileFields, UpdateProfileInput, validateProfileInput } from "./profileService";
+import { completeProfile, ProfileError, profileFingerprintFields, updateProfileFields, UpdateProfileInput, validateProfileInput } from "./profileService";
+import { assertPhoneAccount, findProfileReceipt, parseIdempotencyKey, ProfileMutationContext } from "./phoneVerificationService";
 
 // HTTP 입력은 명시된 필드만 받으며 internal key/계정 ID/완료 시각은 전달하지 않는다.
 export async function mutateProfile(
@@ -13,17 +15,19 @@ export async function mutateProfile(
   image: ProfileImage | undefined,
   complete: boolean,
   request_id?: string,
+  idempotency_key?: unknown,
 ): Promise<User> {
   const input: UpdateProfileInput = {
     name: body?.name, timezone: body?.timezone, phone: body?.phone,
     job_type: body?.job_type, workplace: body?.workplace,
+    phone_verification_token: body?.phone_verification_token,
     ...(!complete ? { profile_image_url: body?.profile_image_url } : {}),
   };
   if (image && body?.profile_image_url !== undefined) {
     throw new ProfileError(400, "VALIDATION_ERROR", "profile_image와 profile_image_url은 함께 전송할 수 없습니다.");
   }
   // 텍스트만 수정하는 기존 JSON 경로는 row lock만으로 원자성을 유지한다.
-  if (!image && input.profile_image_url === undefined) {
+  if (!image && input.profile_image_url === undefined && idempotency_key === undefined) {
     validateProfileInput(input, complete);
     return complete
       ? completeProfile(user_id, { ...input, name: input.name, phone: input.phone, timezone: input.timezone })
@@ -33,10 +37,19 @@ export async function mutateProfile(
   try {
     return await withAccountDataLock(user_id, async () => {
       const active_user = await User.findByPk(user_id);
-      if (!active_user || active_user.account_status !== "ACTIVE") {
-        throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
-      }
+      assertPhoneAccount(active_user);
       validateProfileInput(input, complete);
+      const key = parseIdempotencyKey(idempotency_key, false);
+      const mutation: ProfileMutationContext = {
+        idempotency_key: key,
+        operation: complete ? "COMPLETE" : "UPDATE",
+        payload: [profileFingerprintFields(input, complete), image ? [createHash("sha256").update(image.buffer).digest("hex"), image.content_type, image.extension] : null],
+      };
+      // Account session lock serializes image replay before any new object upload.
+      if (await findProfileReceipt(user_id, mutation)) {
+        committed_user = active_user;
+        return active_user;
+      }
       try {
         let key: string | undefined;
         if (image) {
@@ -51,6 +64,7 @@ export async function mutateProfile(
           }
         }
         const options = {
+          mutation,
           profile_image_key: key,
           on_image_change: async (previous_key: string | null, next_key: string | null, transaction: Transaction) => {
             if (next_key) await cancelProfileImageCleanup(next_key, transaction);

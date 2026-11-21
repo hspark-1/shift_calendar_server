@@ -145,6 +145,7 @@ const worker_loop_probe = `
     '../services/accountDeletionService': { cleanupCompletedAccountDeletionRequests: async () => {} },
     '../services/accountDeletionImageService': {},
     '../services/profileImageCleanupService': { processProfileImageCleanupBatch: async () => {} },
+    '../services/phoneVerificationService': { cleanupPhoneVerificationData: async () => {} },
     '../services/accountDeletionProviderService': {},
     '../services/workShiftMonthCacheService': {},
     '../utils/accountDataLock': {},

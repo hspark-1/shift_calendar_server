@@ -35,13 +35,29 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
   } = require("../dist/config/database.js");
   const { User } = require("../dist/models/index.js");
   const {
-    completeProfile,
+    completeProfile: completeProfileService,
     ProfileError,
     updateProfileFields,
+    validateProfileInput, profileFingerprintFields,
   } = require("../dist/services/profileService.js");
   const {
     setProfileImageStorageClientForTest,
   } = require("../dist/services/profileImageStorageService.js");
+  const { issuePhoneProof } = require("./phoneVerificationFixture.cjs");
+  const crypto = require("node:crypto");
+  const prepared = new Map();
+  async function completeProfile(user_id, input) {
+    validateProfileInput(input, true);
+    if (!prepared.has(user_id)) prepared.set(user_id, {
+      token: await issuePhoneProof(user_id, input.phone), key: crypto.randomUUID(),
+    });
+    const credential = prepared.get(user_id);
+    const fields = { ...input, phone_verification_token: credential.token };
+    return completeProfileService(user_id, fields, { mutation: {
+      idempotency_key: credential.key, operation: "COMPLETE",
+      payload: [profileFingerprintFields(fields, true), null],
+    } });
+  }
   const { app } = require("../dist/index.js");
 
   const repository_root = path.resolve(__dirname, "..");
@@ -72,6 +88,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     await loadSql("test/fixtures/profileCompletionMigrationBaseSchema.sql");
     await loadSql("migrations/add_profile_completion_support.sql");
     await loadSql("migrations/add_profile_edit_support.sql");
+    await loadSql("migrations/add_phone_verification.sql");
     await new Promise((resolve) => {
       api_server = app.listen(0, "127.0.0.1", resolve);
     });
@@ -169,7 +186,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     }
     await assert.rejects(
       completeProfile(user.user_id, { name: "정상", timezone: "UTC", phone: "01011112222" }),
-      (error) => error instanceof ProfileError && error.code === "PHONE_ALREADY_EXISTS" && error.status_code === 409,
+      (error) => error.code === "PHONE_ALREADY_EXISTS" && error.status_code === 409,
     );
   });
 
@@ -203,7 +220,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     mismatched_form.set("profile_image", new Blob([one_pixel_png], { type: "image/jpeg" }), "profile.jpg");
     const mismatched = await fetch(`${api_base_url}/api/v1/auth/profile/complete`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "Idempotency-Key": crypto.randomUUID() },
       body: mismatched_form,
     });
     assert.equal(mismatched.status, 400);
@@ -216,7 +233,7 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     oversized_form.set("profile_image", new Blob([Buffer.alloc(5 * 1024 * 1024 + 1)], { type: "image/png" }), "large.png");
     const oversized = await fetch(`${api_base_url}/api/v1/auth/profile/complete`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "Idempotency-Key": crypto.randomUUID() },
       body: oversized_form,
     });
     assert.equal(oversized.status, 413);
@@ -236,12 +253,13 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
       cleanup_form.set("timezone", "UTC");
       cleanup_form.set("phone", "01055556666");
       cleanup_form.set("profile_image", new Blob([one_pixel_png], { type: "image/png" }), "profile.png");
+      cleanup_form.set("phone_verification_token", await issuePhoneProof(user.user_id, "01055556666"));
       const failed = await fetch(`${api_base_url}/api/v1/auth/profile/complete`, {
         method: "POST",
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: `Bearer ${token}`, "Idempotency-Key": crypto.randomUUID() },
         body: cleanup_form,
       });
-      assert.equal(failed.status, 500);
+      assert.equal(failed.status, 503);
       assert.equal(commands.length, 2);
       assert.equal(commands[0].input.Key, commands[1].input.Key);
     } finally {
@@ -253,9 +271,10 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     success_form.set("timezone", "UTC");
     success_form.set("phone", "01055556666");
     success_form.set("profile_image", new Blob([one_pixel_png], { type: "image/png" }), "profile.png");
+    success_form.set("phone_verification_token", await issuePhoneProof(user.user_id, "01055556666"));
     const success = await fetch(`${api_base_url}/api/v1/auth/profile/complete`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "Idempotency-Key": crypto.randomUUID() },
       body: success_form,
     });
     assert.equal(success.status, 200);
@@ -274,9 +293,10 @@ if (process.env.RUN_PROFILE_INTEGRATION !== "true") {
     storage_failure_form.set("timezone", "UTC");
     storage_failure_form.set("phone", "01066667777");
     storage_failure_form.set("profile_image", new Blob([one_pixel_png], { type: "image/png" }), "profile.png");
+    storage_failure_form.set("phone_verification_token", await issuePhoneProof(storage_failure_user.user_id, "01066667777"));
     const storage_failure = await fetch(`${api_base_url}/api/v1/auth/profile/complete`, {
       method: "POST",
-      headers: { authorization: `Bearer ${accessToken(storage_failure_user)}` },
+      headers: { authorization: `Bearer ${accessToken(storage_failure_user)}`, "Idempotency-Key": crypto.randomUUID() },
       body: storage_failure_form,
     });
     assert.equal(storage_failure.status, 503);

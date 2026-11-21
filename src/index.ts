@@ -5,7 +5,7 @@ import morgan from "morgan";
 import path from "path";
 import type { Server } from "http";
 
-import { connectDatabase, disconnectDatabase } from "./config/database";
+import { connectDatabase, disconnectDatabase, sequelize } from "./config/database";
 import {
   getPositiveIntegerEnvironmentVariable,
   validateAppleAuthEnvironment,
@@ -24,6 +24,7 @@ import { appleService } from "./services/appleService";
 import { googleService } from "./services/googleService";
 import { profileImageJsonReplacer } from "./utils/profileImageLocation";
 import { validateAppVersionPolicyConfiguration } from "./services/appVersionPolicyService";
+import { firebasePhoneTokenVerifier } from "./services/firebasePhoneTokenVerifier";
 
 const app = express();
 app.set("json replacer", profileImageJsonReplacer);
@@ -102,8 +103,9 @@ const corsOptions = {
     "X-Requested-With",
     "Accept",
     "Origin",
+    "Idempotency-Key",
   ],
-  exposedHeaders: ["Authorization", "ETag"], // 클라이언트에서 읽을 수 있는 헤더
+  exposedHeaders: ["Authorization", "ETag", "Retry-After"], // 클라이언트에서 읽을 수 있는 헤더
   maxAge: 86400, // preflight 요청 캐시 시간 (24시간)
 };
 
@@ -167,7 +169,12 @@ async function startServer(): Promise<void> {
     validateAppleAuthEnvironment();
     appleService.initialize();
     googleService.initialize();
+    firebasePhoneTokenVerifier.initialize();
     await connectDatabase();
+    await sequelize.query("SELECT phone_verified_at, phone_verification_generation FROM users LIMIT 0");
+    for (const table of ["phone_verifications", "profile_mutation_receipts", "phone_verification_events", "phone_verification_rate_limits"]) {
+      await sequelize.query(`SELECT 1 FROM ${table} LIMIT 0`);
+    }
 
     http_server = app.listen(port, "0.0.0.0", () => {
       console.log(

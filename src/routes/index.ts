@@ -9,6 +9,7 @@ import profileImageRoutes from "./profileImageRoutes";
 import appVersionPolicyRoutes from "./appVersionPolicyRoutes";
 import { checkDatabaseConnection } from "../config/database";
 import { checkRedisConnection } from "../config/redis";
+import { requireProfileSetupMiddleware } from "../middlewares/profileSetup";
 
 const router = Router();
 
@@ -50,12 +51,15 @@ v1_router.get("/health/ready", async (_req, res) => {
 
 v1_router.use("/auth", authRoutes);
 v1_router.use("/", appVersionPolicyRoutes);
+// Incomplete accounts may fetch avatars and register push devices while signing up.
+// Mount deviceRoutes here, before the broad calendar router auth/setup gates.
 v1_router.use("/", profileImageRoutes);
+v1_router.use("/", deviceRoutes);
+v1_router.use(requireProfileSetupMiddleware);
 v1_router.use("/schedules", scheduleRoutes);
 v1_router.use("/", calendarRoutes);
 v1_router.use("/", friendRoutes); // 친구 관련 라우트
 v1_router.use("/", groupRoutes); // 그룹 관련 라우트
-v1_router.use("/", deviceRoutes); // 푸시 기기 등록 라우트
 
 // v1 라우터 등록
 router.use("/v1", v1_router);

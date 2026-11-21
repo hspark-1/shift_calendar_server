@@ -183,7 +183,7 @@ test("탈퇴 진행 계정의 늦은 이미지 요청은 필드 검증보다 활
     for (const complete of [false, true]) {
       await assert.rejects(
         mutateProfile("00000000-0000-4000-8000-000000000001", { name: null }, detectProfileImage(one_pixel_png), complete),
-        (error) => error.code === "UNAUTHORIZED" && error.status_code === 401,
+        (error) => error.code === "ACCOUNT_DELETION_IN_PROGRESS" && error.status_code === 409,
       );
     }
   } finally {

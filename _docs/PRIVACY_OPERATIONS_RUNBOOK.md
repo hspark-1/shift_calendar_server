@@ -1,5 +1,11 @@
 # 개인정보 삭제·보관 운영 절차
 
+## Firebase Phone Auth 기술 처리·출시 인수 (2026-11-21)
+
+번호 challenge/proof는 만료 후 최소24시간, 프로필 commit 영수증은24시간, 재사용 차단 이벤트 HMAC은 교환 후24시간 보관하며 기존 탈퇴 worker가 루프마다 각1000건까지 정리합니다. 사용자 purge는 challenge/영수증을 cascade 삭제하고 번호/UID 없는 이벤트 HMAC만 정해진 재사용 방지 기한까지 남깁니다. 원문 ID/refresh/proof token·UID는 서버 DB/로그에 저장하지 않습니다.
+
+이 기술 기한은 법적 근거/고지 승인 완료를 뜻하지 않습니다. Google 전송·수탁/국외 처리·동의/스토어 공개, 미완료 세션 및 Firebase phone-only 사용자 보관/정리 책임·기간은 출시 전 담당 검토가 필요합니다. 서버는 Firebase UID를 앱 사용자와 동일시하거나 외부 사용자를 자동 삭제하지 않습니다. 실제 콘솔/운영 정책 변경은 수행하지 않았습니다. 상세는 [서버 계약](FIREBASE_PHONE_AUTH_SERVER_GUIDE.md)을 따릅니다.
+
 기준일: 2026-10-18. 적용 대상: 이번 변경을 배포한 API, 회원 탈퇴 worker, Push Worker. 운영 적용 전에는 기존 홈서버 동작을 설명하는 문서로 사용하지 않습니다. 공개 페이지 주소는 `https://www.shiftmate.co.kr/privacy`입니다.
 
 ## 승인 정책과 실제 처리 주기

@@ -42,6 +42,9 @@ import {
 import { ProfileError } from "../services/profileService";
 import { mutateProfile } from "../services/profileMutationService";
 import { SocialLoginError } from "../services/socialLoginError";
+import { PhoneVerificationError, phoneUnavailable } from "../services/phoneVerificationError";
+import { BaseError } from "sequelize";
+import { EnvironmentValidationError } from "../config/environment";
 
 // Express Request에 user 속성 추가 타입
 interface AuthenticatedRequest extends Request {
@@ -151,7 +154,8 @@ function sendProfileError(
   error: unknown,
   context: string,
 ): void {
-  if (error instanceof ProfileError) {
+  if (error instanceof BaseError || error instanceof EnvironmentValidationError) error = phoneUnavailable();
+  if (error instanceof ProfileError || error instanceof PhoneVerificationError) {
     res.status(error.status_code).json({
       success: false,
       error: { code: error.code, message: error.message },
@@ -560,7 +564,7 @@ export async function updateProfile(
       });
       return;
     }
-    const user = await mutateProfile(req.user.user_id, req.body, req.validated_profile_image, false, req.request_id);
+    const user = await mutateProfile(req.user.user_id, req.body, req.validated_profile_image, false, req.request_id, req.headers["idempotency-key"]);
 
     res.json({
       success: true,
@@ -587,7 +591,7 @@ export async function completeProfile(
   }
 
   try {
-    const user = await mutateProfile(req.user.user_id, req.body, req.validated_profile_image, true, req.request_id);
+    const user = await mutateProfile(req.user.user_id, req.body, req.validated_profile_image, true, req.request_id, req.headers["idempotency-key"]);
     res.status(200).json({
       success: true,
       data: user.toJSON(),

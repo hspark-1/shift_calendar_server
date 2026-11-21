@@ -21,6 +21,7 @@ if (!enabled) {
     JWT_REFRESH_SECRET: "private-profile-refresh", REDIS_URL: "", AUTH_RATE_LIMIT_MAX: "200",
   });
   const { sequelize } = require("../dist/config/database");
+  const { issuePhoneProof } = require("./phoneVerificationFixture.cjs");
   const { User } = require("../dist/models");
   const { backfillProfileImages } = require("../dist/scripts/profileImageBackfill");
   const { updateProfileFields } = require("../dist/services/profileService");
@@ -56,7 +57,7 @@ if (!enabled) {
   async function edit(current_user, body) {
     const multipart = body instanceof FormData;
     const response = await fetch(`${base_url}/api/v1/auth/profile`, { method: "POST",
-      headers: { ...headers(current_user), ...(!multipart ? { "Content-Type": "application/json" } : {}) },
+      headers: { ...headers(current_user), ...(!multipart ? { "Content-Type": "application/json" } : {}), ...((multipart ? body.has("phone_verification_token") : body.phone_verification_token) ? { "Idempotency-Key": crypto.randomUUID() } : {}) },
       body: multipart ? body : JSON.stringify(body) });
     return { status: response.status, body: await response.json() };
   }
@@ -117,7 +118,8 @@ if (!enabled) {
     const form = new FormData();
     form.set("name", "이미지 사용자"); form.set("timezone", "Asia/Seoul"); form.set("phone", "01012345678");
     form.set("profile_image", new Blob([png], { type: "image/png" }), "p.png");
-    const uploaded = await fetch(`${base_url}/api/v1/auth/profile/complete`, { method: "POST", headers: headers(owner), body: form });
+    form.set("phone_verification_token", await issuePhoneProof(owner.user_id, "01012345678"));
+    const uploaded = await fetch(`${base_url}/api/v1/auth/profile/complete`, { method: "POST", headers: { ...headers(owner), "Idempotency-Key": crypto.randomUUID() }, body: form });
     assert.equal(uploaded.status, 200);
     const result = await uploaded.json();
     assert.equal(result.data.profile_image_url, `https://api.example.test/api/v1/profile-images/${owner.user_id}`);
@@ -283,7 +285,8 @@ if (!enabled) {
     const current = await user();
     const invalid = await fetch(`${base_url}/api/v1/auth/profile/complete`, { method: "POST", headers: headers(current), body: imageForm() });
     assert.equal(invalid.status, 400); assert.deepEqual(objectKeys(current), []);
-    const completed = await fetch(`${base_url}/api/v1/auth/profile/complete`, { method: "POST", headers: headers(current), body: imageForm({ name: "가입", phone: "01088886666", timezone: "Asia/Seoul", job_type: "서비스 기획자" }) });
+    const signup_proof = await issuePhoneProof(current.user_id, "01088886666");
+    const completed = await fetch(`${base_url}/api/v1/auth/profile/complete`, { method: "POST", headers: { ...headers(current), "Idempotency-Key": crypto.randomUUID() }, body: imageForm({ name: "가입", phone: "01088886666", timezone: "Asia/Seoul", job_type: "서비스 기획자", phone_verification_token: signup_proof }) });
     assert.equal(completed.status, 200); assert.equal((await completed.json()).data.requires_profile_setup, false);
     await current.reload(); const completed_at = current.profile_completed_at.toISOString();
     const edited = await edit(current, imageForm()); assert.equal(edited.body.data.requires_profile_setup, false);
@@ -315,12 +318,14 @@ if (!enabled) {
 
   test("전화 중복·DB rollback·storage 실패에서 기존 프로필/사진을 유지하고 새 파일만 정리한다", async () => {
     const current = await user(); await edit(current, imageForm()); await current.reload(); const original_key = current.profile_image_key;
+    await current.update({ profile_completed_at: new Date() });
+    const verification_token = await issuePhoneProof(current.user_id, "01077773333");
     const occupied = await user({ phone: "010-7777-3333" });
-    const conflict = await edit(current, imageForm({ phone: occupied.phone }));
+    const conflict = await edit(current, imageForm({ phone: occupied.phone, phone_verification_token: verification_token }));
     assert.equal(conflict.status, 409); assert.equal(conflict.body.error.code, "PHONE_ALREADY_EXISTS");
     await sequelize.query("ALTER TABLE users ADD CONSTRAINT ck_edit_test_failure CHECK (name <> 'EDIT_DB_FAILURE')");
     try {
-      assert.equal((await edit(current, imageForm({ name: "EDIT_DB_FAILURE" }))).status, 500);
+      assert.equal((await edit(current, imageForm({ name: "EDIT_DB_FAILURE" }))).status, 503);
     } finally { await sequelize.query("ALTER TABLE users DROP CONSTRAINT ck_edit_test_failure"); }
     fail_put = true;
     try {
@@ -350,7 +355,8 @@ if (!enabled) {
   });
 
   test("전화번호 unique 동시 경쟁은 한 요청만 성공하고 패자 새 사진을 정리한다", async () => {
-    const users = await Promise.all([user(), user()]);
+    const users = await Promise.all([user({ profile_completed_at: new Date() }), user({ profile_completed_at: new Date() })]);
+    const verification_tokens = await Promise.all(users.map((item) => issuePhoneProof(item.user_id, "01077774444")));
     const ids = new Set(users.map((item) => item.user_id));
     let arrived = 0; let release;
     const barrier = new Promise((resolve) => { release = resolve; });
@@ -360,7 +366,7 @@ if (!enabled) {
       await barrier;
     });
     try {
-      const results = await Promise.all(users.map((item) => edit(item, imageForm({ phone: "01077774444" }))));
+      const results = await Promise.all(users.map((item, index) => edit(item, imageForm({ phone: "01077774444", phone_verification_token: verification_tokens[index] }))));
       assert.deepEqual(results.map((item) => item.status).sort(), [200, 409]);
       assert.equal(results.find((item) => item.status === 409).body.error.code, "PHONE_ALREADY_EXISTS");
       assert.equal(users.reduce((count, item) => count + objectKeys(item).length, 0), 1);
@@ -371,9 +377,11 @@ if (!enabled) {
   test("DB 실패 후 새 객체 삭제도 실패하면 큐를 보존하고 설정 변경 시 오삭제를 막는다", async () => {
     const current = await user();
     await edit(current, imageForm()); await current.reload(); const previous_key = current.profile_image_key;
+    await current.update({ profile_completed_at: new Date() });
+    const verification_token = await issuePhoneProof(current.user_id, "01077775555");
     const occupied = await user({ phone: "010-7777-5555" });
     fail_delete = true;
-    try { assert.equal((await edit(current, imageForm({ phone: occupied.phone }))).status, 409); }
+    try { assert.equal((await edit(current, imageForm({ phone: occupied.phone, phone_verification_token: verification_token }))).status, 409); }
     finally { fail_delete = false; }
     const [pending] = await tasks(current);
     assert.notEqual(pending.object_key, previous_key); assert.equal(objectKeys(current).length, 2);
@@ -456,7 +464,7 @@ if (!enabled) {
       const receipt = await response.json();
       await assert.rejects(processAccountDeletionRequest(receipt.data.deletion_request_id), /ACCOUNT_DATA_BUSY/);
     } finally { release(); put_gate = undefined; process.env.ACCOUNT_DELETION_ENABLED = "false"; }
-    assert.equal((await editing).status, 401);
+    assert.equal((await editing).status, 409);
     assert.deepEqual(objectKeys(current), []); assert.deepEqual(await tasks(current), []);
     assert.equal((await edit(current, imageForm())).body.error.code, "ACCOUNT_DELETION_IN_PROGRESS");
     await current.destroy();

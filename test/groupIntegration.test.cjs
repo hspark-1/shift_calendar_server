@@ -102,6 +102,7 @@ if (process.env.RUN_GROUP_INTEGRATION !== "true") {
 
   async function createUser(name) {
     return User.create({
+      profile_completed_at: new Date(),
       email: `${name.toLowerCase().replaceAll(" ", "-")}@group.test`,
       name,
       timezone: "Asia/Seoul",

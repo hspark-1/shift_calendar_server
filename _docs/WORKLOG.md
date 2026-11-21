@@ -2,6 +2,23 @@
 
 # 작업 일지
 
+## 2026-11-21
+
+### [DONE] Firebase Phone Auth 증명과 프로필 저장 원자성 구현
+
+- 목적: 앱 JWT를 유지하며 Firebase 번호 인증 결과를 일회성 PostgreSQL 증명으로 교환하고 가입 완료/번호 변경에 적용한다.
+- 변경/영향: phone challenge/verify, Firebase Admin 검증, 분산 제한, 영수증·키 회전·만료 정리, 기존 JSON/multipart 프로필·미완료 업무 접근·본인 응답·OpenAPI를 수정한다. 캘린더 ACL/Redis 근무 캐시는 유지한다.
+- 검증: 관련 코드를 직접 확인하고 build, 단위/HTTP 회귀, 격리 PostgreSQL 통합 테스트를 실행한다. Stage 실문자/콘솔/배포는 로컬 검증과 구분한다.
+- 롤백: 신규 additive migration과 데이터를 보존하고 인증 가능한 수정판으로 복구한다. 인증 검사를 해제하거나 기존 phone/index/완료 시각을 삭제하지 않는다.
+- 구현: `/auth/phone/challenges`·`/auth/phone/verify`, API 전용 named Admin/ADC·checkRevoked·project/provider/번호/auth_time 검증, 전역 이벤트 HMAC/키 회전 alias, 재현 가능한 proof·동일 key 복구, User→challenge 잠금·소비/프로필/영수증 원자성을 구현했다. 기존 JSON/multipart·선택값/사진 정리·전화 unique409를 유지하며 가입/변경 번호에 증명·key를 강제한다. 미완료 업무 gate와 가입 중 push/아바타 허용, 본인 nullable phone_verified_at, 프로필/공통 auth DB 장애503을 반영했다.
+- DB/설정: users에 nullable 인증 시각과 내부 단조 증가 generation, 신규 세션·영수증·이벤트 hash·공통 제한4테이블/인덱스/CHECK를 additive migration으로 추가했다. 기존 번호/완료 backfill·seed는 없다. generation은 오래된 세션 정리 후에도 증가하고 외부에 노출하지 않는다. API schema 사전 검사/독립 project·secret 환경검증, worker 만료 정리/health·탈퇴 cascade를 반영했다. 키 교체·복구 기간과 보호형 rollback을 문서화했다.
+- 파일/계약: 신규 `_docs/FIREBASE_PHONE_AUTH_SERVER_GUIDE.md`에 모든 신규 파일의 역할/의존성/사용 예·확정 API/시각/한도·오류·재현/운영 인수를 기록했다. PROJECT_CONTEXT·ADR-0052·기존 가입/편집/개인정보 문서·두 drawio·OpenAPI·.env.example·기존 schema fixture를 최신화했다. 모바일 ADR-0088과 서버 ADR-0052는 서로 다른 저장소 번호다. Git ignore된 새 migration2개를 명시적으로 변경 목록에 포함했으며 private 배포 파일/실제 secret은 추가하지 않았다.
+- 검증(신규): strict TypeScript build·번호 인증 단위5 pass, 실제 PostgreSQL16/Express/S3 mock 통합19 pass, 공식 Auth Emulator(firebase-tools15.37.0)/실제 Admin+PostgreSQL2 pass. token refresh 동일 이벤트·교차 계정/세션 경합·재검사·키 회전·proof 취소/만료·번호 unique·User/영수증 rollback·commit 후 응답 복구/재업로드 없음·분산 제한/DB 장애·미완료 업무/푸시·정리/generation·보호형 migration 철회를 확인했다. 실제 SDK RSA 서명/aud/iss/exp와 cert fetch 장애503도 외부 I/O만 대체해 검증했다.
+- 검증(기존 실제 DB): 이미지21/가입8/Google16/Apple9/Kakao6/Naver13/그룹8/푸시7/근무 캐시23/탈퇴1, 총112 pass. 가입8개는 기존 private migration4개를 읽기 전용 추출한 임시 사본에서 실행했고 공개 저장소에 복사하지 않았다. Naver 동시 편집 회귀는 완료 계정의 proof 기반 변경으로 갱신했다. push/cache 공개 fixture의 기존 google_id 누락을 현행 User 모델에 맞춰 보완했고 실제 실패 SQL에서 원인을 확인했다. 탈퇴 통합은 localhost55900 빈 S3 HTTP fixture를 준비한 후 통과했다.
+- 전체 회귀: 최종 `npm test` 152 pass/17 fail/16 opt-in skip. 변경 전 HEAD를 별도 임시 사본에서 실행한145 pass/17 fail/16 skip과 실패 이름17개가 모두 같으며 신규 실패0개다. 실패는 공개 checkout의 비공개 배포 SQL/Compose/CI 파일 누락·Apple 운영 문서 정적 계약이며 이 목표와 무관한 배포 파일을 변경하지 않았다. 별도 lint script/설정은 없으며 변경 CJS 구문·OpenAPI JSON/병합 참조·drawio XML·git diff --check를 통과했다.
+- 조사/설정 경계: 설치 firebase-admin13.10.0 소스에서 cert fetch 오류가 auth/argument-error로 래핑되는 사실을 확인해, 알려진 token 오류만400이고 나머지는503으로 닫도록 보완했다. Firebase token 실패를 앱 JWT401로 반환하지 않는다. Emulator는 unsigned token/가상 번호이며 실문자·운영 cert/ADC/IAM 인수와 구분한다. 테스트 이외에 실제 Firebase/Stage/운영 DB·console·secret·배포/Flutter를 변경하지 않았다.
+- 롤백/다음: 인증 해제/SENS fallback 없이 인증 가능한 수정판으로 복구한다. 사용 이력이 있으면 신규 SQL 철회도 거절한다. Stage 실제 project/IAM·프록시/APM·iOS/Android 앱 확인·실문자·쿼터/결제·운영 테스트 번호 제거, 개인정보 고지/동의·Firebase phone-only 보관/정리 책임/기간과 대응 앱 제공→강제 서버 배포는 미수행 인수로 남긴다. 출시 전 계약 가이드의 체크리스트를 완료해야 한다. 이번에 만든 DB3개/Redis·전용 네트워크·Emulator/S3 fixture·임시 소스/CLI를 정리했다. 로컬 커밋만 생성하며 push/배포는 수행하지 않는다.
+
 ## 2026-11-16
 
 ### [DONE] Apple 통합 fixture의 Google 컬럼 중복 초기화 보완

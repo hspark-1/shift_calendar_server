@@ -77,7 +77,7 @@
           "Profile"
         ],
         "summary": "가입 프로필 최초 완료",
-        "description": "필수 프로필과 최초 완료 시각을 단일 DB transaction으로 저장합니다. 같은 값을 재전송해도 기존 완료 시각은 유지됩니다.",
+        "description": "필수 프로필과 최초 완료 시각을 단일 DB transaction으로 저장합니다. 동일 key와 본문의 재시도만 영수증으로 복구합니다. 가입 완료는 미완료 계정의 SIGNUP 증명과 Idempotency-Key 필수. 완료 계정의 새 complete 요청은409 PROFILE_ALREADY_COMPLETED이며 성공 영수증 재시도만 복구합니다.",
         "security": [
           {
             "bearerAuth": []
@@ -130,7 +130,8 @@
             "$ref": "#/components/responses/ProfileUnauthorized"
           },
           "409": {
-            "$ref": "#/components/responses/ProfilePhoneConflict"
+            "$ref": "#/components/responses/ProfilePhoneConflict",
+            "description": "PHONE_ALREADY_EXISTS / PHONE_VERIFICATION_USED / IDEMPOTENCY_KEY_REUSED / PROFILE_ALREADY_COMPLETED / ACCOUNT_DELETION_IN_PROGRESS"
           },
           "413": {
             "$ref": "#/components/responses/ProfileImageTooLarge"
@@ -139,9 +140,32 @@
             "$ref": "#/components/responses/ProfileRateLimited"
           },
           "503": {
-            "$ref": "#/components/responses/ProfileStorageUnavailable"
+            "$ref": "#/components/responses/ProfileStorageUnavailable",
+            "description": "PHONE_VERIFICATION_UNAVAILABLE 또는 PROFILE_IMAGE_STORAGE_UNAVAILABLE. 인증 우회 없음."
+          },
+          "410": {
+            "description": "PHONE_VERIFICATION_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileErrorResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "인증 필요한 저장은 필수. 동일 사용자/key/정규화 본문은 재업로드 없이 최신 프로필을 복구. 다른 본문/작업은409. 최소24시간 보관."
+          }
+        ]
       }
     },
     "/auth/profile": {
@@ -176,7 +200,7 @@
           "Profile"
         ],
         "summary": "일반 프로필 수정",
-        "description": "JSON 또는 multipart 부분 수정. 생략 필드 유지, name은 trim 후 1~50자이며 null/빈 값 거절. job_type은 trim 후 1~20자 자유 문자열(기존 코드 허용), workplace는 1~100자. 선택값은 JSON null 또는 빈 문자열/공백으로 제거하며 문자열 \"null\"은 삭제 표식이 아닙니다. 사진만 전송해도 유효하며 profile_image와 profile_image_url 동시 전송은 400 VALIDATION_ERROR. 완료 시각과 requires_profile_setup은 기존 DB 상태를 유지하고 최신 전체 본인 프로필을 반환합니다. 내부 user_id/profile_image_key/profile_completed_at은 입력으로 반영하지 않습니다.",
+        "description": "JSON 또는 multipart 부분 수정. 생략 필드 유지, name은 trim 후 1~50자이며 null/빈 값 거절. job_type은 trim 후 1~20자 자유 문자열(기존 코드 허용), workplace는 1~100자. 선택값은 JSON null 또는 빈 문자열/공백으로 제거하며 문자열 \"null\"은 삭제 표식이 아닙니다. 사진만 전송해도 유효하며 profile_image와 profile_image_url 동시 전송은 400 VALIDATION_ERROR. 완료 시각과 requires_profile_setup은 기존 DB 상태를 유지하고 최신 전체 본인 프로필을 반환합니다. 내부 user_id/profile_image_key/profile_completed_at은 입력으로 반영하지 않습니다. phone 생략/정규화 동일은 인증 없이 기존 인증 시각 유지. 다른 phone 또는 증명 포함 시 PHONE_CHANGE 증명과 Idempotency-Key 필수. 미완료 계정의 phone 저장은 PROFILE_SETUP_REQUIRED. null/빈 phone은 INVALID_PHONE. 증명/프로필/영수증을 같은 transaction으로 저장합니다.",
         "security": [
           {
             "bearerAuth": []
@@ -229,7 +253,7 @@
             "$ref": "#/components/responses/ProfileUnauthorized"
           },
           "409": {
-            "description": "PHONE_ALREADY_EXISTS 또는 인증 사용자의 ACCOUNT_DELETION_IN_PROGRESS",
+            "description": "PHONE_ALREADY_EXISTS / PHONE_VERIFICATION_USED / IDEMPOTENCY_KEY_REUSED / PROFILE_ALREADY_COMPLETED / ACCOUNT_DELETION_IN_PROGRESS",
             "content": {
               "application/json": {
                 "schema": {
@@ -245,7 +269,8 @@
             "$ref": "#/components/responses/ProfileRateLimited"
           },
           "503": {
-            "$ref": "#/components/responses/ProfileStorageUnavailable"
+            "$ref": "#/components/responses/ProfileStorageUnavailable",
+            "description": "PHONE_VERIFICATION_UNAVAILABLE 또는 PROFILE_IMAGE_STORAGE_UNAVAILABLE. 인증 우회 없음."
           },
           "500": {
             "description": "DB 등 내부 오류. commit 이전이면 새 파일 정리, commit 이후 이전 파일 정리 오류는 200을 유지합니다.",
@@ -256,8 +281,30 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "PHONE_VERIFICATION_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileErrorResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "인증 필요한 저장은 필수. 동일 사용자/key/정규화 본문은 재업로드 없이 최신 프로필을 복구. 다른 본문/작업은409. 최소24시간 보관."
+          }
+        ]
       }
     }
   },
@@ -268,7 +315,8 @@
         "required": [
           "name",
           "timezone",
-          "phone"
+          "phone",
+          "phone_verification_token"
         ],
         "properties": {
           "name": {
@@ -296,6 +344,11 @@
             "maxLength": 100,
             "nullable": true,
             "description": "trim 후 1~100자. null/빈 문자열/공백은 제거."
+          },
+          "phone_verification_token": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "서버 /auth/phone/verify가 반환한 일회성 저장 증명. 가입 SIGNUP / 번호 변경 PHONE_CHANGE."
           }
         }
       },
@@ -331,6 +384,11 @@
             "maxLength": 2048,
             "nullable": true,
             "description": "현재 값 유지 또는 null/빈 문자열로 제거. 다른 URL로 교체는 INVALID_PROFILE_IMAGE로 거절합니다."
+          },
+          "phone_verification_token": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "서버 /auth/phone/verify가 반환한 일회성 저장 증명. 가입 SIGNUP / 번호 변경 PHONE_CHANGE."
           }
         }
       },
@@ -340,7 +398,8 @@
           "user_id",
           "email",
           "name",
-          "requires_profile_setup"
+          "requires_profile_setup",
+          "phone_verified_at"
         ],
         "properties": {
           "user_id": {
@@ -380,6 +439,12 @@
           },
           "requires_profile_setup": {
             "type": "boolean"
+          },
+          "phone_verified_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "프로필 transaction에서 번호 증명을 소비한 시각. 기존/OAuth 번호는 null 가능."
           }
         },
         "additionalProperties": true
@@ -442,7 +507,15 @@
                   "PROFILE_IMAGE_STORAGE_UNAVAILABLE",
                   "PROFILE_IMAGE_NOT_FOUND",
                   "ACCOUNT_DELETION_IN_PROGRESS",
-                  "INTERNAL_SERVER_ERROR"
+                  "INTERNAL_SERVER_ERROR",
+                  "PHONE_VERIFICATION_REQUIRED",
+                  "PHONE_VERIFICATION_INVALID",
+                  "PHONE_VERIFICATION_EXPIRED",
+                  "PHONE_VERIFICATION_USED",
+                  "PHONE_VERIFICATION_UNAVAILABLE",
+                  "IDEMPOTENCY_KEY_REUSED",
+                  "PROFILE_ALREADY_COMPLETED",
+                  "PROFILE_SETUP_REQUIRED"
                 ]
               },
               "message": {

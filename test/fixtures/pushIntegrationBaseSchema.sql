@@ -6,6 +6,8 @@ GRANT ALL ON SCHEMA public TO public;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE users (
+  phone_verified_at timestamptz,
+  google_id text,
   user_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text NOT NULL UNIQUE,
   name text NOT NULL,

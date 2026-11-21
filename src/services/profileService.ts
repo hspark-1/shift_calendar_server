@@ -2,7 +2,9 @@ import { Transaction, UniqueConstraintError } from "sequelize";
 import { sequelize } from "../config/database";
 import { User } from "../models";
 import { isValidIanaTimezone } from "./groupService";
-import { normalizePhoneNumber } from "../utils/phone";
+import { normalizeKoreanMobile, normalizePhoneNumber } from "../utils/phone";
+import { assertPhoneAccount, consumePhoneProof, createProfileReceipt, findProfileReceipt, parseIdempotencyKey, ProfileMutationContext } from "./phoneVerificationService";
+import { PhoneVerificationError } from "./phoneVerificationError";
 import { isOwnedProfileImageKey, legacyProfileImageKey, profileImageApiUrl } from "../utils/profileImageLocation";
 
 export class ProfileError extends Error {
@@ -61,7 +63,7 @@ function normalizePhone(value: unknown): string {
   if (typeof value !== "string") {
     throw new ProfileError(400, "INVALID_PHONE", "유효한 휴대폰 번호가 필요합니다.");
   }
-  const normalized_phone = normalizePhoneNumber(value);
+  const normalized_phone = normalizeKoreanMobile(value)?.phone;
   if (!normalized_phone) {
     throw new ProfileError(
       400,
@@ -93,10 +95,26 @@ export function validateProfileInput(input: UpdateProfileInput, complete = false
   normalizeJobType(input.job_type);
   normalizeOptionalText(input.workplace, 100);
   if (input.profile_image_url !== undefined) normalizeOptionalText(input.profile_image_url, 2048);
+  if (input.phone_verification_token !== undefined && (typeof input.phone_verification_token !== "string" || input.phone_verification_token.length > 128 || input.phone_verification_token.length === 0)) {
+    throw new PhoneVerificationError(400, "PHONE_VERIFICATION_INVALID");
+  }
+}
+
+export function profileFingerprintFields(input: UpdateProfileInput, complete: boolean): unknown {
+  const result: Record<string, unknown> = {};
+  if (complete || input.name !== undefined) result.name = normalizeRequiredText(input.name, "name", 50);
+  if (complete || input.timezone !== undefined) result.timezone = normalizeTimezone(input.timezone);
+  if (complete || input.phone !== undefined) result.phone = normalizePhone(input.phone);
+  if (complete || input.job_type !== undefined) result.job_type = normalizeJobType(input.job_type);
+  if (complete || input.workplace !== undefined) result.workplace = normalizeOptionalText(input.workplace, 100);
+  if (input.profile_image_url !== undefined) result.profile_image_url = normalizeOptionalText(input.profile_image_url, 2048);
+  if (input.phone_verification_token !== undefined) result.phone_verification_token = input.phone_verification_token;
+  return result;
 }
 
 export interface ProfileWriteOptions {
   profile_image_key?: string;
+  mutation?: ProfileMutationContext;
   on_image_change?: (previous_key: string | null, next_key: string | null, transaction: Transaction) => Promise<void>;
 }
 
@@ -141,6 +159,7 @@ export interface CompleteProfileInput {
   name: unknown;
   timezone: unknown;
   phone: unknown;
+  phone_verification_token?: unknown;
   job_type?: unknown;
   workplace?: unknown;
   profile_image_key?: string;
@@ -165,9 +184,14 @@ export async function completeProfile(
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
-      if (!user || user.account_status !== "ACTIVE") {
-        throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
+      assertPhoneAccount(user);
+      if (await findProfileReceipt(user_id, options.mutation, transaction)) return user;
+      if (user.profile_completed_at != null) {
+        throw new PhoneVerificationError(409, "PROFILE_ALREADY_COMPLETED", "이미 가입 프로필을 완료했습니다.");
       }
+      if (input.phone_verification_token === undefined) throw new PhoneVerificationError(400, "PHONE_VERIFICATION_REQUIRED");
+      parseIdempotencyKey(options.mutation?.idempotency_key);
+      const verification_id = await consumePhoneProof(user, normalized.phone, "SIGNUP", input.phone_verification_token, transaction);
       const previous_key = managedImageKey(user);
       await assertPhoneAvailable(normalized.phone, user_id, transaction);
       user.name = normalized.name;
@@ -181,6 +205,7 @@ export async function completeProfile(
         user.profile_completed_at = new Date();
       }
       await user.save({ transaction });
+      await createProfileReceipt(user_id, options.mutation, verification_id, transaction);
       if (previous_key !== managedImageKey(user)) {
         await options.on_image_change?.(previous_key, managedImageKey(user), transaction);
       }
@@ -199,6 +224,7 @@ export interface UpdateProfileInput {
   timezone?: unknown;
   profile_image_url?: unknown;
   phone?: unknown;
+  phone_verification_token?: unknown;
   job_type?: unknown;
   workplace?: unknown;
 }
@@ -214,8 +240,17 @@ export async function updateProfileFields(
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
-      if (!user || user.account_status !== "ACTIVE") {
-        throw new ProfileError(401, "UNAUTHORIZED", "인증이 필요합니다.");
+      assertPhoneAccount(user);
+      if (await findProfileReceipt(user_id, options.mutation, transaction)) return user;
+      const next_phone = input.phone !== undefined ? normalizePhone(input.phone) : user.phone;
+      const phone_changed = input.phone !== undefined && next_phone !== (user.phone ? normalizePhoneNumber(user.phone) : null);
+      let verification_id: string | null = null;
+      if (input.phone !== undefined && user.profile_completed_at == null) throw new PhoneVerificationError(400, "PROFILE_SETUP_REQUIRED", "가입 프로필 완료 API를 이용해주세요.");
+      if (phone_changed || input.phone_verification_token !== undefined) {
+        if (input.phone_verification_token === undefined) throw new PhoneVerificationError(400, "PHONE_VERIFICATION_REQUIRED");
+        parseIdempotencyKey(options.mutation?.idempotency_key);
+        if (!next_phone) throw new PhoneVerificationError(400, "INVALID_PHONE");
+        verification_id = await consumePhoneProof(user, next_phone, "PHONE_CHANGE", input.phone_verification_token, transaction);
       }
       const previous_key = managedImageKey(user);
 
@@ -252,6 +287,7 @@ export async function updateProfileFields(
       if (options.profile_image_key !== undefined) applyImageKey(user, options.profile_image_key);
 
       await user.save({ transaction });
+      await createProfileReceipt(user_id, options.mutation, verification_id, transaction);
       if (previous_key !== managedImageKey(user)) {
         await options.on_image_change?.(previous_key, managedImageKey(user), transaction);
       }

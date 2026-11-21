@@ -20,6 +20,8 @@ export { default as WorkShiftCacheOutbox } from "./WorkShiftCacheOutbox";
 
 // 인증 관련
 export { default as RefreshToken } from "./RefreshToken";
+export { default as PhoneVerification } from "./PhoneVerification";
+export { default as ProfileMutationReceipt } from "./ProfileMutationReceipt";
 export {
   default as OAuthLoginChallenge,
   OAuthLoginPlatform,

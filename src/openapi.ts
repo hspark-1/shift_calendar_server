@@ -11,6 +11,7 @@ import profile_auth_openapi from "./openapi/profileAuthOpenApi.json";
 import calendar_openapi from "./openapi/calendarOpenApi.json";
 import app_version_policy_openapi from "./openapi/appVersionPolicyOpenApi.json";
 import naver_auth_openapi from "./openapi/naverAuthOpenApi.json";
+import phone_verification_openapi from "./openapi/phoneVerificationOpenApi.json";
 
 const openapi = {
   ...group_openapi,
@@ -19,6 +20,7 @@ const openapi = {
     title: "ShiftMate API",
   },
   tags: [
+    ...phone_verification_openapi.tags,
     ...naver_auth_openapi.tags,
     ...app_version_policy_openapi.tags,
     ...group_openapi.tags,
@@ -30,6 +32,7 @@ const openapi = {
     ...calendar_openapi.tags,
   ],
   paths: {
+    ...phone_verification_openapi.paths,
     ...naver_auth_openapi.paths,
     ...app_version_policy_openapi.paths,
     ...group_openapi.paths,
@@ -44,6 +47,7 @@ const openapi = {
   components: {
     ...group_openapi.components,
     schemas: {
+      ...phone_verification_openapi.components.schemas,
       ...naver_auth_openapi.components.schemas,
       ...app_version_policy_openapi.components.schemas,
       ...group_openapi.components.schemas,

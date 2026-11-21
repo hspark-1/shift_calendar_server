@@ -1,5 +1,14 @@
 # 아키텍처 결정 기록 (ADR)
 
+## ADR-0052: Firebase 번호 인증을 PostgreSQL 일회성 프로필 저장 권한으로 교환한다
+
+- **배경(문제)**: OAuth 번호와 기존 프로필 입력은 번호 소유를 증명하지 않는다. Firebase ID token도 ShiftMate 사용자/목적/challenge를 직접 증명하지 않으며 refresh 문자열 변경·응답 유실·동시 번호 저장을 처리해야 한다. 모바일 ADR-0088 요청을 서버 계약으로 구현한다.
+- **선택지(대안)**: SENS/서버 OTP·Redis 정본, Firebase token을 프로필에서 직접 재사용, Firebase 결과를 DB 세션·증명·영수증으로 교환.
+- **결정(무엇을 선택)**: 세 번째. API 전용 named Admin/ADC와 명시 project에서 verifyIdToken(token,true)로 검증하고 project+uid+auth_time의 전역 HMAC claim을 적용한다. 증명은 random proof_id+용도 분리 HMAC이며 digest/key version만 저장한다. 모든 지원 키 alias claim으로 교체 시 재사용을 막고 이전 키로 증명/영수증을 복구한다. User→challenge 순서 잠금·User/인증 시각/완료/소비/영수증 단일 transaction, 이미지 요청은 기존 계정 session lock부터 사용한다. 네트워크 I/O는 transaction 밖이다.
+- **근거(왜)**: token 문자열 hash만으로는 refresh 재사용을 막지 못한다. PostgreSQL 정본은 기존 캐시 flag/장애와 독립적이며 unique/row lock/transaction으로 사용자 간 경합과 commit 응답 유실을 처리한다. 실제 Admin SDK는 cert fetch 장애도 argument-error로 래핑하므로 토큰 오류만400, 그 외503으로 닫는다.
+- **결과/영향(좋은 점/트레이드오프)**: 가입/변경 번호는 proof·Idempotency-Key 필수이고 완료 계정의 새 complete는409다. 기존 완료 회원의 인증 시각은 backfill하지 않고 미변경 편집을 보존한다. 미완료 업무 API gate를 추가하며 가입 중 push·아바타는 허용한다. API 전용 project/secret·ADC와 신규 additive schema가 필요하다. 단조 증가 generation을 User 내부 DB 컬럼에 추가해24시간 세션 정리 후에도 재설정하지 않는다. 이벤트 hash는 별도 무identity 테이블에24시간 남겨 탈퇴 cascade 이후 재사용을 차단한다. 개인정보 법적 근거/외부 phone-only 사용자 정리 정책은 기술 구현이 확정하지 않는다.
+- **추후 과제(언제 다시 평가)**: Stage 실기기/실문자·project/IAM/프록시·비용·운영 테스트 번호·고지/동의·phone-only 보관/정리 인수 후 대응 앱 제공과 강제 배포 순서를 확정한다. 고정 구간 제한의 경계 burst/DB 정리 처리량이 문제가 되면 재평가한다. 정확한 계약/파일 역할/복구는 FIREBASE_PHONE_AUTH_SERVER_GUIDE.md를 따른다. SENS fallback이나 client version에 따른 인증 면제는 도입하지 않는다.
+
 ## ADR-0051: 소셜 로그인에서 탈퇴 진행을 계정 중복·내부 오류와 구분한다
 
 - 배경(문제): 비동기 탈퇴 접수 뒤 users 행이 남아 있어 재가입 요청이 들어온다. Apple/Kakao의 최종 JWT 일반 Error는500으로 매핑되고, 다른 subject의 이메일/번호 조회는 기존 계정 충돌로 먼저 처리되어 재시도 조건을 안내하지 못했다.

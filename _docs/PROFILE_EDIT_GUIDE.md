@@ -1,5 +1,7 @@
 # 일반 프로필 수정·사진 교체 계약 (2026-11-10)
 
+> 2026-11-21 개정: 아래 과거 무증명 저장/complete 재전송 설명보다 [Firebase 번호 인증 계약](FIREBASE_PHONE_AUTH_SERVER_GUIDE.md)이 우선합니다. 가입은 SIGNUP 증명·Idempotency-Key 필수, 완료 계정의 새 complete는409입니다. 일반 편집의 변경 번호는 PHONE_CHANGE 증명·key 필수이며 phone 생략/동일 번호는 기존 인증 시각을 유지합니다. 미완료 계정의 일반 phone 저장은 PROFILE_SETUP_REQUIRED입니다. JSON/multipart에 모두 적용하고 본인 응답에 nullable phone_verified_at을 추가합니다.
+
 Flutter 전달 요청을 서버 코드에 반영한 문서다. 실제 Stage/Center DB 적용·배포·실기기 연동 완료를 의미하지 않는다. 가입 완료 정본과 인증 이미지 GET은 [PROFILE_COMPLETION_GUIDE.md](PROFILE_COMPLETION_GUIDE.md), 이번 정책은 서버 ADR-0043을 따른다. 전달 요청의 ADR 번호는 Flutter 저장소 기준이며 서버의 같은 번호와 동일한 결정으로 취급하지 않는다.
 
 ## 요청·응답

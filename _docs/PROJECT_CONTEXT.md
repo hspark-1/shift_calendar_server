@@ -1,5 +1,15 @@
 # 프로젝트 컨텍스트
 
+## Firebase Phone Auth 서버 계약 (2026-11-21)
+
+- **Behavior change / ADR-0052**: 앱 JWT는 유지하며 가입 완료는 SIGNUP 증명, 완료 회원의 변경 번호 저장은 PHONE_CHANGE 증명과 UUID Idempotency-Key가 필요하다. 완료 계정의 새 complete는409, 성공 영수증만 복구한다. 기존 완료 회원은 인증 시각 null이어도 업무/미변경 편집을 허용하며 OAuth 번호를 인증으로 backfill하지 않는다.
+- 흐름: auth/validation → phone controller → PhoneVerificationService → Firebase Admin verifyIdToken(token,true) → User/challenge 잠금·전역 이벤트 claim → HMAC 저장 증명 → 기존 profile transaction의 User/소비/영수증 원자적 commit. 외부 Firebase/이미지 I/O 중 DB transaction을 열지 않는다. Redis 근무 캐시와 독립적인 PostgreSQL 공통 제한을 사용한다.
+- `phone_verified_at`은 nullable 본인 응답 전용, 내부 단조 증가 generation은 raw DB 컬럼으로 관리하고 노출하지 않는다. 신규4테이블(세션·영수증·이벤트 hash·제한)을 additive migration으로 추가한다. 기본 challenge600초/auth freshness300초/skew5초/proof300초, 사용자/IP challenge10/30회·시간·exchange30/100회·10분, 최소24시간 보관이다.
+- API는 전용 `PHONE_AUTH_FIREBASE_PROJECT_ID`/HMAC 키 파일/ADC를 push flag와 독립 검증한다. 모든 실제 API에서 Auth Emulator 설정을 거부한다. SDK13.10.0의 cert fetch argument-error도503으로 구분한다. 기존 auth DB 조회 장애를 JWT401로 오분류하지 않는다.
+- 미완료 계정은 auth·health·앱 정책·아바타 조회·push 등록을 허용하고 calendar/schedule/friend/group 업무 API는 PROFILE_SETUP_REQUIRED로 차단한다. 일반 편집에서 미완료 phone 저장도 차단한다. 친구 검색/그룹의 전화·인증 필드 비노출은 유지한다.
+- 신규 파일별 **역할·의존성·사용 예**, API·오류·환경변수·키 회전·보관/탈퇴·정방향 migration·보호형 rollback·검증 재현과 Stage/개인정보/phone-only 계정 정리 인수는 [FIREBASE_PHONE_AUTH_SERVER_GUIDE.md](FIREBASE_PHONE_AUTH_SERVER_GUIDE.md)를 따른다. 아래 과거 프로필 완료 멱등/무증명 편집 설명보다 이 절이 우선한다.
+- 코드·문서 로컬 구현이며 실제 Stage/운영 project/console/IAM·DB 적용·배포·실문자·Flutter 변경은 별도 인수다. 인증 가능한 수정판으로 복구하며 인증 검사 해제로 rollback하지 않는다.
+
 ## 소셜 로그인 서버 변경·보존 문서 main 통합 완료 (2026-11-16)
 
 인증 수정 d834bb8과 조사 문서3개 정리3d4dcfa, Apple 테스트 초기화 호환 보완e45292f를 origin/develop에 기록하고 deploy/main에 실제 merge/push했다. main 전체187 pass/0 fail/15 opt-in skip, 공개/main fixture의 Apple PostgreSQL 각9개, 자동 CI의 전체 통합 검증·이미지 빌드·Stage/운영 배포가 성공했다. 배포 후 두 환경 readiness HTTP200/success=true를 확인했다. SQL/env/수동 데이터 변경은 없으며 아래 과거 미배포·조사 상태보다 이 완료 결과를 우선한다. 세부 실행 정보는 비공개 WORKLOG에서 관리한다. Flutter 변경은 이번 서버 커밋/배포 범위에 포함하지 않았다.

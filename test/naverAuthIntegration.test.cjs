@@ -13,7 +13,9 @@ if (!enabled) {
   const { sequelize } = require('../dist/config/database');
   const { User, RefreshToken, ShiftTemplate } = require('../dist/models');
   const { completeNaverLogin } = require('../dist/services/naverService');
-  const { updateProfileFields } = require('../dist/services/profileService');
+  const { mutateProfile } = require('../dist/services/profileMutationService');
+  const { issuePhoneProof } = require('./phoneVerificationFixture.cjs');
+  const { randomUUID } = require('node:crypto');
   const { app } = require('../dist/index');
   let server;
   let base_url;
@@ -104,8 +106,9 @@ if (!enabled) {
     assert.equal(await User.count({ where: { phone: '010-1000-0007' } }), 1);
   });
   test('프로필 편집과 동시 로그인에서도 사용자 편집 번호가 보존된다', async () => {
-    const user = await User.create(identity('profile-race'));
-    await Promise.all([completeNaverLogin(identity('profile-race', { phone: '010-1000-0008' })), updateProfileFields(user.user_id, { phone: '01010000009' })]);
+    const user = await User.create(identity('profile-race', { profile_completed_at: new Date() }));
+    const phone_verification_token = await issuePhoneProof(user.user_id, '01010000009');
+    await Promise.all([completeNaverLogin(identity('profile-race', { phone: '010-1000-0008' })), mutateProfile(user.user_id, { phone: '01010000009', phone_verification_token }, undefined, false, undefined, randomUUID())]);
     await user.reload(); assert.equal(user.phone, '010-1000-0009');
   });
   test('탈퇴 진행 사용자는 번호 보완·네이버 연결·세션 발급을 하지 않는다', async () => {

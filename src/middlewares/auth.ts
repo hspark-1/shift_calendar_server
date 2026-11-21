@@ -72,11 +72,11 @@ export async function authMiddleware(
     };
     next();
   } catch (error) {
-    if (error instanceof jwt.TokenExpiredError) {
+    if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.NotBeforeError) {
       sendUnauthorizedResponse(req, res);
       return;
     }
-    sendUnauthorizedResponse(req, res);
+    res.status(503).json({ success: false, error: { code: "PHONE_VERIFICATION_UNAVAILABLE", message: "인증 정보를 확인할 수 없습니다. 잠시 후 다시 시도해주세요." }, request_id: req.request_id });
   }
 }
 
