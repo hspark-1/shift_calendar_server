@@ -4,6 +4,14 @@
 
 ## 2026-11-21
 
+### [DONE] 탈퇴 후 가입 사진 차단 회귀의 요청 fixture 갱신
+
+- 목적/근거: main 배포 CI에서 직접 호출한 completeProfile 테스트의 headers 누락이 TypeError/500을 만들었고 기대 오류도 변경 전401이었다. Express 요청의 headers와 현재 탈퇴 진행409 계약을 fixture에 반영한다.
+- 변경/영향: 개인정보 통합 테스트에 headers를 제공하고 HTTP409·ACCOUNT_DELETION_IN_PROGRESS 및 업로드 없음·가입 미완료를 검증한다. 제품 코드·운영 데이터·인증 검사는 변경하지 않는다.
+- 검증: 실제 격리 PostgreSQL16/S3 emulator(moto5.1.17)의 개인정보 통합13 pass/0 fail. 컨트롤러 직접 호출409·해당 계정 S3 객체0개·profile_completed_at null을 확인했다. CJS 구문·diff 검사 통과. main 병합 후 전체 배포 CI를 재개한다.
+- 롤백: 이 테스트/문서 변경만 revert한다.
+
+
 ### [DONE] 취소·만료 challenge의 멱등 재시도 거절 보완
 
 - 목적/근거: 앱 연동 검토에서 기존 요청 키로 취소/만료된 challenge를 재요청하면200이 반환되어 SDK 발송 또는 만료 오류 반복으로 이어지는 문제가 재현되었다.

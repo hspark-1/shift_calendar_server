@@ -224,10 +224,14 @@ if (!enabled) {
       const claimed = await claimRequests(); assert.ok(!claimed.some((row) => row.deletion_request_id === receipt.deletion_request_id));
     });
     const { completeProfile } = require('../dist/controllers/authController');
-    let response;
-    const res = { status() { return this; }, json(body) { response = body; return this; } };
-    await completeProfile({ user, body: {}, validated_profile_image: { buffer: Buffer.from('image'), content_type: 'image/png', extension: 'png' } }, res);
-    assert.equal(response.error.code, 'UNAUTHORIZED');
+    let response, status_code;
+    const res = { status(code) { status_code = code; return this; }, json(body) { response = body; return this; } };
+    await completeProfile({ user, headers: {}, body: {}, validated_profile_image: { buffer: Buffer.from('image'), content_type: 'image/png', extension: 'png' } }, res);
+    assert.equal(status_code, 409);
+    assert.equal(response.error.code, 'ACCOUNT_DELETION_IN_PROGRESS');
+    const objects = await storage.send(new sdk.ListObjectsV2Command({ Bucket: bucket, Prefix: getAccountImageScope(user.user_id).prefix }));
+    assert.equal(objects.Contents?.length ?? 0, 0);
+    assert.equal((await User.findByPk(user.user_id)).profile_completed_at, null);
     await processAccountDeletionRequest(receipt.deletion_request_id);
     assert.equal((await readRequest(receipt)).status, 'COMPLETED');
   });

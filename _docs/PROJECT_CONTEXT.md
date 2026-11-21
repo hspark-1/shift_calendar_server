@@ -4,6 +4,7 @@
 
 - **Behavior change / ADR-0052**: 앱 JWT는 유지하며 가입 완료는 SIGNUP 증명, 완료 회원의 변경 번호 저장은 PHONE_CHANGE 증명과 UUID Idempotency-Key가 필요하다. 완료 계정의 새 complete는409, 성공 영수증만 복구한다. 기존 완료 회원은 인증 시각 null이어도 업무/미변경 편집을 허용하며 OAuth 번호를 인증으로 backfill하지 않는다.
 - **2026-11-21 재시도 보완**: challenge의 동일 key 복구도 취소/만료/소비·증명 기한·현재 목적/번호 점유를 User→challenge 잠금 안에서 재검사한다. 유효한 세션만200이며 취소400/만료410 등 확정 실패에서는 앱이 key를 폐기해 다음 시도를 새 세션으로 시작해야 한다. 일시적 응답 유실·503/429는 같은 key로 복구한다. 상세 오류는 서버 계약 가이드를 따른다.
+- 개인정보 회귀의 컨트롤러 직접 호출도 Express headers를 제공하며, 탈퇴 진행 계정의 가입 사진 저장은409 ACCOUNT_DELETION_IN_PROGRESS·업로드0건·가입 미완료를 확인한다. 제품 인증 우회 없이 테스트 요청을 현행 계약에 맞춘다.
 - 흐름: auth/validation → phone controller → PhoneVerificationService → Firebase Admin verifyIdToken(token,true) → User/challenge 잠금·전역 이벤트 claim → HMAC 저장 증명 → 기존 profile transaction의 User/소비/영수증 원자적 commit. 외부 Firebase/이미지 I/O 중 DB transaction을 열지 않는다. Redis 근무 캐시와 독립적인 PostgreSQL 공통 제한을 사용한다.
 - `phone_verified_at`은 nullable 본인 응답 전용, 내부 단조 증가 generation은 raw DB 컬럼으로 관리하고 노출하지 않는다. 신규4테이블(세션·영수증·이벤트 hash·제한)을 additive migration으로 추가한다. 기본 challenge600초/auth freshness300초/skew5초/proof300초, 사용자/IP challenge10/30회·시간·exchange30/100회·10분, 최소24시간 보관이다.
 - API는 전용 `PHONE_AUTH_FIREBASE_PROJECT_ID`/HMAC 키 파일/ADC를 push flag와 독립 검증한다. 모든 실제 API에서 Auth Emulator 설정을 거부한다. SDK13.10.0의 cert fetch argument-error도503으로 구분한다. 기존 auth DB 조회 장애를 JWT401로 오분류하지 않는다.
