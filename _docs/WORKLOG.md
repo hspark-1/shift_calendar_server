@@ -4,6 +4,14 @@
 
 ## 2026-11-21
 
+### [TODO] develop 푸시·main 병합 및 Firebase 번호 인증 배포
+
+- 목적: 사용자 요청에 따라 검증한 번호 인증 구현을 공개 develop에 푸시하고 비공개 main에 실제 병합해 배포한다.
+- 변경/영향: API·기존 worker의 신규 DB schema/환경·secret mount·CI 검증을 먼저 준비한다. 실제 환경별 Firebase project/ADC 권한과 additive migration 상태를 확인하고 배포 중 기존 데이터를 보존한다.
+- 검증: 병합본 build/회귀·CI·환경별 DB 사전/사후 검사·API/worker readiness·무인증/증명 누락 거절을 확인한다. 실문자/앱 인수는 수행 여부를 구분한다.
+- 롤백: 기존 서비스/이미지 상태와 DB 백업을 확보하고 신규 데이터/영수증을 보존한 forward recovery를 우선한다. 인증 검사를 해제하지 않는다. 상세 배포 식별자·운영 정보는 비공개 main 문서에만 남긴다.
+- 다음: 원격 최신 상태·배포 topology와 설정 준비를 확인한다.
+
 ### [DONE] Firebase Phone Auth 증명과 프로필 저장 원자성 구현
 
 - 목적: 앱 JWT를 유지하며 Firebase 번호 인증 결과를 일회성 PostgreSQL 증명으로 교환하고 가입 완료/번호 변경에 적용한다.
