@@ -28,16 +28,16 @@ function replacePolicy(platform, fields) {
   };
 }
 
-test("소스 정본은 양 플랫폼 최소값 1이며 응답 변경이 정본을 바꾸지 않는다", () => {
+test("소스 정본은 양 플랫폼 최소값 2이며 응답 변경이 정본을 바꾸지 않는다", () => {
   assert.doesNotThrow(validateAppVersionPolicyConfiguration);
   assert.ok(Object.isFrozen(original_policies));
   for (const platform of ["IOS", "ANDROID"]) {
     assert.ok(Object.isFrozen(original_policies[platform]));
     const policy = getAppVersionPolicy(platform);
-    assert.equal(policy.minimum_compatibility_version, 1);
+    assert.equal(policy.minimum_compatibility_version, 2);
     assert.equal(policy.update_url, original_policies[platform].update_url);
     policy.minimum_compatibility_version = 999;
-    assert.equal(getAppVersionPolicy(platform).minimum_compatibility_version, 1);
+    assert.equal(getAppVersionPolicy(platform).minimum_compatibility_version, 2);
   }
 });
 
@@ -53,11 +53,11 @@ test("과거 env가 남아도 최소값·URL·안내 문구를 덮어쓰지 못�
 
 test("플랫폼별 소스 설정과 최소값 0의 URL 생략을 검증한다", () => {
   const ios_policy = createAppVersionPolicy("IOS", {
-    ...original_policies.IOS, minimum_compatibility_version: 2, message: "새 규격 앱으로 업데이트해 주세요.",
+    ...original_policies.IOS, minimum_compatibility_version: 3, message: "새 규격 앱으로 업데이트해 주세요.",
   });
-  assert.equal(ios_policy.minimum_compatibility_version, 2);
+  assert.equal(ios_policy.minimum_compatibility_version, 3);
   assert.equal(ios_policy.message, "새 규격 앱으로 업데이트해 주세요.");
-  assert.equal(getAppVersionPolicy("ANDROID").minimum_compatibility_version, 1);
+  assert.equal(getAppVersionPolicy("ANDROID").minimum_compatibility_version, 2);
   for (const platform of ["IOS", "ANDROID"]) {
     const policy = createAppVersionPolicy(platform, {
       ...original_policies[platform], minimum_compatibility_version: 0, update_url: null,

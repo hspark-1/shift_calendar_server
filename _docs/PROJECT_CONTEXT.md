@@ -119,7 +119,7 @@ Google 소스3d61f36과 기존 개인 일정1~5 변경을 포함한 origin/devel
 
 ## 앱 API 호환 정책 (2026-11-08)
 
-`GET /api/v1/app/version-policy?platform=IOS|ANDROID`를 로그인 없이 제공한다. 최소 호환 번호·스토어 URL·안내 문구는 `src/config/appVersionPolicy.ts`의 `app_version_policies`가 유일한 정본이며 양 플랫폼 현재 최소값은 1이다. env override는 지원하지 않는다. Router(query validation) → Controller(no-store/안전 오류) → Service(소스 설정 검증) 흐름이며 DB 변경은 없다. 값 0은 차단 비활성, 같은 호환 번호는 허용한다. 정책 변경은 소스 수정·검토 후 재실행 또는 재빌드·배포로 반영하고, 긴급 해제도 최소값 0의 정상 정책 endpoint를 유지한다. 신규 파일 역할·의존성·사용 예·롤백은 [APP_VERSION_POLICY.md](APP_VERSION_POLICY.md), 결정은 ADR-0041을 참조한다. 이 소스 전환의 실제 재배포는 수행하지 않았다.
+`GET /api/v1/app/version-policy?platform=IOS|ANDROID`를 로그인 없이 제공한다. 최소 호환 번호·스토어 URL·안내 문구는 `src/config/appVersionPolicy.ts`의 `app_version_policies`가 유일한 정본이며 양 플랫폼 현재 최소값은 2이다(2026-11-23 사용자 배포 요청). 호환1 앱은 업데이트가 필요하고 호환2 이상은 허용한다. env override는 지원하지 않는다. Router(query validation) → Controller(no-store/안전 오류) → Service(소스 설정 검증) 흐름이며 DB 변경은 없다. 값 0은 차단 비활성, 같은 호환 번호는 허용한다. 정책 변경은 소스 수정·검토 후 재실행 또는 재빌드·배포로 반영하고, 긴급 해제도 최소값 0의 정상 정책 endpoint를 유지한다. 신규 파일 역할·의존성·사용 예·롤백은 [APP_VERSION_POLICY.md](APP_VERSION_POLICY.md), 결정은 ADR-0041을 참조한다. 이번 최소값2 변경의 검증·실제 배포 상태는 WORKLOG의 2026-11-23 항목을 따른다.
 
 ## 1. 프로젝트 목적 & 사용자 시나리오
 

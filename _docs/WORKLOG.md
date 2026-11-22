@@ -2,6 +2,19 @@
 
 # 작업 일지
 
+## 2026-11-23
+
+### [IN_PROGRESS] 최소 앱 API 호환 버전 2 적용 및 서버 배포
+
+- 목적: 사용자 요청에 따라 서버가 허용하는 최소 API 호환 번호를 2로 올리고 Stage/운영에 배포한다.
+- 변경/영향: 소스 정본의 iOS·Android 최소값 1→2, 정책 문서·검증 기대값을 갱신한다. 호환 번호 1인 게이트 지원 앱은 업데이트 화면으로 전환되고 2 이상은 허용된다. DB migration/env 변경은 없다.
+- 파일: `src/config/appVersionPolicy.ts`, `test/appVersionPolicy.test.cjs`, `_docs/APP_VERSION_POLICY.md`, `_docs/PROJECT_CONTEXT.md`, `_docs/DECISIONS.md`, `_docs/WORKLOG.md`.
+- 테스트: 정책 회귀·TypeScript build·배포 병합본 전체 테스트·의존성 감사·자동 CI와 양 환경 공개 정책/health/ready를 확인한다.
+- 롤백: 최소값을 직전 허용값 1(긴급 해제는 0)로 낮춘 이미지를 재배포하고 정책 endpoint의 정상200을 유지한다. endpoint를 제거하지 않는다.
+- 다음: 최신 원격 상태·배포 workflow·정책 테스트를 확인한 뒤 소스 변경과 실제 main 병합을 수행한다. 실제 배포 식별자는 비공개 main에만 기록한다.
+- 사전 확인: 인접 Flutter Release API 호환2·앱1.1.0+9를 직접 확인했다. 한국 Apple lookup은2026-11-23 조회에서 스토어1.0/출시2026-11-19를 반환하여 호환2 앱 공개를 확인하지 못했다. 사용자에게 기존 호환1 차단 영향을 알리고 즉시 운영 적용/Stage만 적용/출시 후 적용 시점을 확인 중이다. 사용자 답변 전 운영 배포를 시작하지 않는다.
+- 진행: 양 플랫폼 소스 최소값2와 정책 회귀 기대값·관련 문서/ADR-0053을 반영했다. 최초 HTTP 회귀는 sandbox의 localhost listen EPERM으로 차단되어 권한 있는 실행으로 재검증한다. DB/운영 환경을 변경하지 않았다.
+
 ## 2026-11-21
 
 ### [DONE] 탈퇴 후 가입 사진 차단 회귀의 요청 fixture 갱신

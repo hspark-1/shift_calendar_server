@@ -6,12 +6,16 @@
 
 | 값 | 현재 값 | 변경 시점 |
 |---|---|---|
-| `AppConstants.api_compatibility_version` | `1` | 앱이 새로운 서버 호환 규격을 지원하도록 구현했을 때 코드와 함께 증가 |
-| 사용자에게 표시하는 앱 버전 | `1.0.0` | 스토어 새 버전 출시 |
-| iOS 빌드 번호 | `2` | 새 제출용 바이너리 생성 |
-| 서버 최소 호환 번호 | 소스 정본 `1` (IOS/ANDROID) | 소스 수정·검토 후 서버 재실행/재배포 |
+| `AppConstants.api_compatibility_version` | `2` | 앱이 새로운 서버 호환 규격을 지원하도록 구현했을 때 코드와 함께 증가 |
+| 사용자에게 표시하는 앱 버전 | `1.1.0` | 스토어 새 버전 출시 |
+| iOS 빌드 번호 | `9` (인접 Flutter 소스 기준) | 새 제출용 바이너리 생성 |
+| 서버 최소 호환 번호 | 소스 정본 `2` (IOS/ANDROID) | 소스 수정·검토 후 서버 재실행/재배포 |
 
 `앱 호환 번호 < 서버 최소 호환 번호`이면 필수 업데이트다. 같은 값은 허용한다. 서버값 `0`은 차단 비활성이다. 빌드 번호만 올려도 API 호환 번호가 자동으로 증가하지 않는다.
+
+## 2026-11-23 서버 최소 호환 번호 2 적용
+
+사용자 배포 요청으로 iOS·Android 최소값을 1→2로 변경한다. 인접 Flutter의 `AppConstants`에서 Release 호환 번호2·표시 버전1.1.0, pubspec에서 빌드9를 직접 확인했다. 이는 스토어 공개 완료의 증거와는 구분한다. **Behavior change**: 정책 게이트가 있는 호환1 앱은 업데이트 화면을 표시하고 호환2 이상은 허용한다. API 경로/DTO·스토어 URL·DB/env는 유지한다. 테스트·실제 배포와 스토어 제공 확인 결과는 WORKLOG의 이번 작업을 따른다. 아래 최초 배포/과거 최소값 설명은 당시 이력이며 현재 정책은 이 절과 소스 정본을 우선한다.
 
 ## 흐름과 상태 수명
 
@@ -42,7 +46,7 @@ CupertinoApp.builder → AppUpdateGate (Navigator 전체를 감쌈)
   "data": {
     "schema_version": 1,
     "platform": "IOS",
-    "minimum_compatibility_version": 1,
+    "minimum_compatibility_version": 2,
     "update_url": "https://apps.apple.com/kr/app/id6831957246",
     "message": "안정적인 서비스 이용을 위해 최신 앱으로 업데이트해 주세요."
   }
@@ -60,12 +64,12 @@ CupertinoApp.builder → AppUpdateGate (Navigator 전체를 감쌈)
 
 ```typescript
 IOS: {
-  minimum_compatibility_version: 1,
+  minimum_compatibility_version: 2,
   update_url: "https://apps.apple.com/kr/app/id6831957246",
   message: "안정적인 서비스 이용을 위해 최신 앱으로 업데이트해 주세요.",
 },
 ANDROID: {
-  minimum_compatibility_version: 1,
+  minimum_compatibility_version: 2,
   update_url: "https://play.google.com/store/apps/details?id=com.hspark.shiftmate",
   message: "안정적인 서비스 이용을 위해 최신 앱으로 업데이트해 주세요.",
 },
@@ -75,7 +79,7 @@ ANDROID: {
 - service는 `createAppVersionPolicy(platform, settings)`로 정수 0~2147483647, 해당 앱의 HTTPS store URL과 300자 이하 문구를 검증한다. 양수 최소값에는 URL이 필수이며 0일 때 null을 허용한다.
 - API 시작은 `validateAppVersionPolicyConfiguration()`으로 양 플랫폼을 검증한다. 오류는 `APP_VERSION_POLICY_CONFIGURATION_ERROR`와 `configuration_field`만 구조화 로그로 남기며 설정 원문을 노출하지 않는다.
 - `APP_UPDATE_*` env는 더 이상 읽지 않는다. 예전 파일에 값이 남아 있어도 소스 정책을 바꿀 수 없으며 `.env.example`에서도 키를 제거했다.
-- 소스 변경은 ts-node 로컬 서버 재시작 또는 새 빌드·이미지 배포로 반영한다. DB migration은 없다. 현재 코드의 최소값 1은 앱 내부 번호 1을 허용한다.
+- 소스 변경은 ts-node 로컬 서버 재시작 또는 새 빌드·이미지 배포로 반영한다. DB migration은 없다. 현재 코드의 최소값 2는 앱 내부 번호 1을 차단하고 2 이상을 허용한다.
 - **Behavior change**: 향후 이 코드를 배포하면 기존 배포값 0 대신 소스값 1과 Android Play URL이 제공된다. 이번 소스 전환은 실제 배포를 수행하지 않는다. Android 링크의 실제 스토어 제공 여부와 실기기 동작은 별도 확인 대상이다.
 
 ## 적용 순서·영향·롤백
